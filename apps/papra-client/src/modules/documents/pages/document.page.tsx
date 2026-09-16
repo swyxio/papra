@@ -8,6 +8,7 @@ import { A, useNavigate, useParams, useSearchParams } from '@solidjs/router';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/solid-query';
 import {
   createEffect,
+  createMemo,
   createSignal,
   For,
   Match,
@@ -327,9 +328,9 @@ export const DocumentPage: Component = () => {
   const [getTab, setTab] = createSignal<Tab>(getInitialTab());
   const [selectedAnchor, setSelectedAnchor] = createSignal<DocumentSelectionAnchor>();
   const [focusAnchor, setFocusAnchor] = createSignal<DocumentSelectionAnchor>();
+  const documentScope = createMemo(() => `${params.organizationId}/${params.documentId}`);
   createEffect(() => {
-    void params.organizationId;
-    void params.documentId;
+    void documentScope();
     setSelectedAnchor(undefined);
     setFocusAnchor(undefined);
   });
@@ -393,143 +394,197 @@ export const DocumentPage: Component = () => {
 
   return (
     <div class="p-6 flex gap-6 h-full flex-col md:flex-row max-w-7xl mx-auto">
-      <Suspense>
-        <div class="md:flex-1 md:min-w-0 md:border-r">
-          <Show when={documentQuery.data?.document}>
-            {(getDocument) => (
-              <div class="flex gap-4 md:pr-6">
-                <div class="flex-1 min-w-0">
+      <div class="md:flex-1 md:min-w-0 md:border-r">
+        <Show when={documentQuery.data?.document}>
+          {(getDocument) => (
+            <div class="flex gap-4 md:pr-6">
+              <div class="flex-1 min-w-0">
+                <Button
+                  variant="ghost"
+                  class="flex items-center gap-2 group bg-transparent! px-0 text-left h-auto max-w-full"
+                  onClick={() =>
+                    openRenameDialog({
+                      documentId: getDocument().id,
+                      organizationId: params.organizationId,
+                      documentName: getDocument().name,
+                    })
+                  }
+                >
+                  <h1
+                    class="text-xl font-semibold lh-tight min-w-0 break-all"
+                    title={getDocument().name}
+                  >
+                    {getDocument().name}
+                  </h1>
+
+                  <div class="i-tabler-pencil size-4 text-muted-foreground group-hover:text-foreground transition-colors flex-shrink-0" />
+                </Button>
+                <p class="text-sm text-muted-foreground mb-6">{getDocument().id}</p>
+
+                <div class="flex gap-2 mb-2">
                   <Button
-                    variant="ghost"
-                    class="flex items-center gap-2 group bg-transparent! px-0 text-left h-auto max-w-full"
+                    onClick={async () =>
+                      downloadDocument({
+                        organizationId: getDocument().organizationId,
+                        documentId: getDocument().id,
+                      })
+                    }
+                    variant="outline"
+                    size="sm"
+                  >
+                    <div class="i-tabler-download size-4 mr-2" />
+                    {t('documents.actions.download.title')}
+                  </Button>
+
+                  <Suspense
+                    fallback={
+                      <p class="text-xs text-muted-foreground my-3" role="status">
+                        Loading document controls…
+                      </p>
+                    }
+                  >
+                    <DocumentOpenWithDropdown
+                      document={getDocument()}
+                      organizationId={params.organizationId}
+                    />
+                  </Suspense>
+
+                  <Button
                     onClick={() =>
-                      openRenameDialog({
+                      openShareDialog({
                         documentId: getDocument().id,
                         organizationId: params.organizationId,
                         documentName: getDocument().name,
                       })
                     }
+                    variant="outline"
+                    size="sm"
                   >
-                    <h1
-                      class="text-xl font-semibold lh-tight min-w-0 break-all"
-                      title={getDocument().name}
-                    >
-                      {getDocument().name}
-                    </h1>
-
-                    <div class="i-tabler-pencil size-4 text-muted-foreground group-hover:text-foreground transition-colors flex-shrink-0" />
+                    <div class="i-tabler-share size-4 mr-2" />
+                    {t('document-share-links.share-action')}
                   </Button>
-                  <p class="text-sm text-muted-foreground mb-6">{getDocument().id}</p>
 
-                  <div class="flex gap-2 mb-2">
+                  {getDocument().isDeleted ? (
                     <Button
-                      onClick={async () =>
-                        downloadDocument({
-                          organizationId: getDocument().organizationId,
-                          documentId: getDocument().id,
-                        })
-                      }
-                      variant="outline"
+                      variant="destructive"
                       size="sm"
+                      onClick={async () => restore({ document: getDocument() })}
+                      isLoading={getIsRestoring()}
                     >
-                      <div class="i-tabler-download size-4 mr-2" />
-                      {t('documents.actions.download.title')}
+                      <div class="i-tabler-refresh size-4 mr-2" />
+                      {t('documents.actions.restore')}
                     </Button>
-
-                    <DocumentOpenWithDropdown
-                      document={getDocument()}
-                      organizationId={params.organizationId}
-                    />
-
-                    <Button
-                      onClick={() =>
-                        openShareDialog({
-                          documentId: getDocument().id,
-                          organizationId: params.organizationId,
-                          documentName: getDocument().name,
-                        })
-                      }
-                      variant="outline"
-                      size="sm"
-                    >
-                      <div class="i-tabler-share size-4 mr-2" />
-                      {t('document-share-links.share-action')}
+                  ) : (
+                    <Button variant="destructive" size="sm" onClick={deleteDoc}>
+                      <div class="i-tabler-trash size-4 mr-2" />
+                      {t('documents.actions.delete')}
                     </Button>
+                  )}
+                </div>
+                <Separator class="my-3" />
 
-                    {getDocument().isDeleted ? (
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={async () => restore({ document: getDocument() })}
-                        isLoading={getIsRestoring()}
-                      >
-                        <div class="i-tabler-refresh size-4 mr-2" />
-                        {t('documents.actions.restore')}
-                      </Button>
-                    ) : (
-                      <Button variant="destructive" size="sm" onClick={deleteDoc}>
-                        <div class="i-tabler-trash size-4 mr-2" />
-                        {t('documents.actions.delete')}
-                      </Button>
-                    )}
-                  </div>
-                  <Separator class="my-3" />
-
-                  <Show when={!getDocument().isDeleted}>
+                <Show when={!getDocument().isDeleted}>
+                  <Suspense
+                    fallback={
+                      <p class="text-xs text-muted-foreground my-3" role="status">
+                        Loading reviews…
+                      </p>
+                    }
+                  >
                     <DocumentReviews
                       organizationId={params.organizationId}
                       documentId={params.documentId}
                     />
-                  </Show>
+                  </Suspense>
+                </Show>
+                <Suspense
+                  fallback={
+                    <p class="text-xs text-muted-foreground my-3" role="status">
+                      Loading document controls…
+                    </p>
+                  }
+                >
                   <NativeDocumentAction
                     organizationId={params.organizationId}
                     documentId={params.documentId}
                   />
+                </Suspense>
+                <Suspense
+                  fallback={
+                    <p class="text-xs text-muted-foreground my-3" role="status">
+                      Loading document controls…
+                    </p>
+                  }
+                >
                   <DocumentSigning
                     organizationId={params.organizationId}
                     documentId={params.documentId}
                     mimeType={getDocument().mimeType}
                     isDeleted={!!getDocument().isDeleted}
                   />
+                </Suspense>
 
+                <Suspense
+                  fallback={
+                    <p class="text-xs text-muted-foreground my-3" role="status">
+                      Loading document controls…
+                    </p>
+                  }
+                >
                   <DocumentFolderPicker
                     documentId={params.documentId}
                     organizationId={params.organizationId}
                   />
+                </Suspense>
 
+                <Suspense
+                  fallback={
+                    <p class="text-xs text-muted-foreground my-3" role="status">
+                      Loading document controls…
+                    </p>
+                  }
+                >
                   <DocumentTagsList
                     documentId={params.documentId}
                     organizationId={params.organizationId}
                     tags={getDocument().tags}
                     asLink
                   />
+                </Suspense>
 
-                  {getDocument().isDeleted && (
-                    <Alert variant="destructive" class="mt-6">
-                      {t('documents.deleted.message', {
-                        days:
-                          getDaysBeforePermanentDeletion({
-                            document: getDocument(),
-                            deletedDocumentsRetentionDays:
-                              config.documents.deletedDocumentsRetentionDays,
-                          }) ?? 0,
-                      })}
-                    </Alert>
-                  )}
+                {getDocument().isDeleted && (
+                  <Alert variant="destructive" class="mt-6">
+                    {t('documents.deleted.message', {
+                      days:
+                        getDaysBeforePermanentDeletion({
+                          document: getDocument(),
+                          deletedDocumentsRetentionDays:
+                            config.documents.deletedDocumentsRetentionDays,
+                        }) ?? 0,
+                    })}
+                  </Alert>
+                )}
 
-                  <Separator class="my-3" />
+                <Separator class="my-3" />
 
-                  <Tabs value={getTab()} onChange={setTab} class="w-full">
-                    <TabsList class="w-full h-8">
-                      <TabsTrigger value="info">{t('documents.tabs.info')}</TabsTrigger>
-                      <TabsTrigger value="content">{t('documents.tabs.content')}</TabsTrigger>
-                      <TabsTrigger value="versions">Versions</TabsTrigger>
-                      <TabsTrigger value="comments">Comments</TabsTrigger>
-                      <TabsTrigger value="activity">{t('documents.tabs.activity')}</TabsTrigger>
-                      <TabsIndicator />
-                    </TabsList>
+                <Tabs value={getTab()} onChange={setTab} class="w-full">
+                  <TabsList class="w-full h-8">
+                    <TabsTrigger value="info">{t('documents.tabs.info')}</TabsTrigger>
+                    <TabsTrigger value="content">{t('documents.tabs.content')}</TabsTrigger>
+                    <TabsTrigger value="versions">Versions</TabsTrigger>
+                    <TabsTrigger value="comments">Comments</TabsTrigger>
+                    <TabsTrigger value="activity">{t('documents.tabs.activity')}</TabsTrigger>
+                    <TabsIndicator />
+                  </TabsList>
 
-                    <TabsContent value="info">
+                  <TabsContent value="info">
+                    <Suspense
+                      fallback={
+                        <p class="text-sm text-muted-foreground py-4" role="status">
+                          Loading this panel…
+                        </p>
+                      }
+                    >
                       <div class="grid grid-cols-[max-content_1fr]">
                         <KeyValues
                           data={[
@@ -615,16 +670,32 @@ export const DocumentPage: Component = () => {
                         organizationId={params.organizationId}
                         notes={getDocument().notes}
                       />
-                    </TabsContent>
+                    </Suspense>
+                  </TabsContent>
 
-                    <TabsContent value="content">
+                  <TabsContent value="content">
+                    <Suspense
+                      fallback={
+                        <p class="text-sm text-muted-foreground py-4" role="status">
+                          Loading this panel…
+                        </p>
+                      }
+                    >
                       <DocumentContentEditionPanel
                         documentId={getDocument().id}
                         organizationId={params.organizationId}
                         content={getDocument().content}
                       />
-                    </TabsContent>
-                    <TabsContent value="versions">
+                    </Suspense>
+                  </TabsContent>
+                  <TabsContent value="versions">
+                    <Suspense
+                      fallback={
+                        <p class="text-sm text-muted-foreground py-4" role="status">
+                          Loading this panel…
+                        </p>
+                      }
+                    >
                       <DriveDocumentCapabilities
                         organizationId={params.organizationId}
                         documentId={params.documentId}
@@ -632,8 +703,16 @@ export const DocumentPage: Component = () => {
                           void documentQuery.refetch();
                         }}
                       />
-                    </TabsContent>
-                    <TabsContent value="comments">
+                    </Suspense>
+                  </TabsContent>
+                  <TabsContent value="comments">
+                    <Suspense
+                      fallback={
+                        <p class="text-sm text-muted-foreground py-4" role="status">
+                          Loading this panel…
+                        </p>
+                      }
+                    >
                       <DocumentComments
                         currentVersionId={documentQuery.data?.document.currentVersionId}
                         selectionAnchor={selectedAnchor()}
@@ -642,9 +721,17 @@ export const DocumentPage: Component = () => {
                         documentId={params.documentId}
                         organizationId={params.organizationId}
                       />
-                    </TabsContent>
+                    </Suspense>
+                  </TabsContent>
 
-                    <TabsContent value="activity">
+                  <TabsContent value="activity">
+                    <Suspense
+                      fallback={
+                        <p class="text-sm text-muted-foreground py-4" role="status">
+                          Loading this panel…
+                        </p>
+                      }
+                    >
                       <Show when={activityQuery.data?.pages}>
                         {(getActivitiesPages) => (
                           <div class="flex flex-col">
@@ -675,15 +762,26 @@ export const DocumentPage: Component = () => {
                           </div>
                         )}
                       </Show>
-                    </TabsContent>
-                  </Tabs>
-                </div>
+                    </Suspense>
+                  </TabsContent>
+                </Tabs>
               </div>
-            )}
-          </Show>
-        </div>
+            </div>
+          )}
+        </Show>
+      </div>
 
-        <div class="flex-1 min-h-50vh">
+      <div class="flex-1 min-h-50vh">
+        <Suspense
+          fallback={
+            <div
+              class="min-h-50vh rounded-md border bg-muted p-6 text-sm text-muted-foreground"
+              role="status"
+            >
+              Loading document preview…
+            </div>
+          }
+        >
           <Show when={documentQuery.data?.document}>
             {(getDocument) => (
               <DocumentPreview
@@ -696,8 +794,8 @@ export const DocumentPage: Component = () => {
               />
             )}
           </Show>
-        </div>
-      </Suspense>
+        </Suspense>
+      </div>
     </div>
   );
 };

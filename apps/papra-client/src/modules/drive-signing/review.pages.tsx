@@ -8,6 +8,7 @@ import { queryClient } from '@/modules/shared/query/query-client';
 import { apiClient } from '@/modules/shared/http/api-client';
 import { NativeEditor } from './editor.pages';
 import { PdfFields } from './pdf-fields.component';
+
 const randomKey = () => crypto.randomUUID().replaceAll('-', '');
 const inputClass = 'block border rounded p-2 w-full bg-background';
 function text(n: JSONContent): string {
@@ -37,8 +38,21 @@ export function DocumentReviews(props: { organizationId: string; documentId: str
       `/api/organizations/${props.organizationId}/documents/${props.documentId}/reviews`,
     editorBase = () =>
       `/api/organizations/${props.organizationId}/documents/${props.documentId}/editor`;
-  const [data, { refetch }] = createResource(base, (path) => apiClient<ReviewData>({ path })),
-    [error, setError] = createSignal(''),
+  const [loadError, setLoadError] = createSignal('');
+  const [data, { refetch }] = createResource<ReviewData | undefined, string>(
+    base,
+    async (path, { value }) => {
+      try {
+        const result = await apiClient<ReviewData>({ path });
+        setLoadError('');
+        return result;
+      } catch (error) {
+        setLoadError(getHttpErrorMessage(error));
+        return value;
+      }
+    },
+  );
+  const [error, setError] = createSignal(''),
     [busy, setBusy] = createSignal(false),
     [url, setUrl] = createSignal('');
   const keys = new Map<string, string>();
@@ -111,7 +125,7 @@ export function DocumentReviews(props: { organizationId: string; documentId: str
     <section class="my-4 border-t pt-4">
       <div class="flex items-center justify-between gap-2">
         <h2 class="font-semibold">Review</h2>
-        <Show when={data()?.canShare}>
+        <Show when={data.latest?.canShare}>
           <Button size="sm" variant="outline" disabled={busy()} onClick={() => void share()}>
             Create review link
           </Button>
@@ -131,12 +145,12 @@ export function DocumentReviews(props: { organizationId: string; documentId: str
           </A>
         </div>
       </Show>
-      <Show when={error() || data.error}>
+      <Show when={error() || loadError()}>
         <p role="alert" class="text-sm text-red-600 mt-3">
-          {error() || 'Could not load reviews.'}
+          {error() || loadError()}
         </p>
       </Show>
-      <For each={data()?.reviews.filter((r) => r.status === 'open')}>
+      <For each={data.latest?.reviews.filter((r) => r.status === 'open')}>
         {(r) => (
           <div class="flex flex-wrap gap-3 items-center text-sm mt-3">
             <span>Open review</span>
@@ -158,7 +172,7 @@ export function DocumentReviews(props: { organizationId: string; documentId: str
           </div>
         )}
       </For>
-      <For each={data()?.proposals}>
+      <For each={data.latest?.proposals}>
         {(p) => (
           <article class="border rounded p-3 mt-3 text-sm">
             <div class="flex justify-between">
@@ -196,7 +210,7 @@ export function DocumentReviews(props: { organizationId: string; documentId: str
                 </details>
               </details>
             </Show>
-            <Show when={p.status === 'pending' && data()?.canResolve}>
+            <Show when={p.status === 'pending' && data.latest?.canResolve}>
               <div class="flex gap-2 mt-3">
                 <Button size="sm" disabled={busy()} onClick={() => void resolve(p, 'accepted')}>
                   {p.source ? 'Accept changes and save PDF' : 'Resolve comment'}
@@ -235,7 +249,7 @@ async function publicApi<T>(path: string, body?: unknown) {
 export function PublicReviewPage() {
   const params = useParams(),
     base = () => `/api/reviews/${params.token}`;
-  const [data] = createResource(base, (path) =>
+  const [data] = createResource(base, async (path) =>
     publicApi<{ name: string; source: JSONContent | null }>(path),
   );
   const [name, setName] = createSignal(''),
