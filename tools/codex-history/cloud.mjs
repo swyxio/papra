@@ -72,6 +72,7 @@ async function upload(file,mimeType,folderId,label=path.basename(file)){
  if(asset.complete)return asset;
  const current=await api('uploads/'+asset.id);
  if(current.session.status==='complete'){asset.complete=true;await save(statePath,state);return asset;}
+ if(current.session.status==='stored'){const result=await api('uploads/'+asset.id+'/complete',{});asset.complete=true;asset.documentId=result.document.id;await save(statePath,state);return asset;}
  const uploaded=new Set(current.parts.map(item=>item.partNumber));
  const handle=await fs.open(file,'r');
  try{
@@ -94,7 +95,7 @@ async function upload(file,mimeType,folderId,label=path.basename(file)){
 async function fileHash(file){const hash=crypto.createHash('sha256');const handle=await fs.open(file,'r');try{for await(const chunk of handle.createReadStream())hash.update(chunk);}finally{await handle.close();}return hash.digest('hex');}
 async function command(argv){await new Promise((resolve,reject)=>{const child=spawn(argv[0],argv.slice(1),{stdio:['ignore','pipe','pipe']});let error='';child.stderr.on('data',b=>error+=b.toString().slice(0,2000));child.on('close',code=>code===0?resolve():reject(new Error('Archive verification failed: '+error)));});}
 async function cloudHash(client,bucket,key,destination){
- const request=await client.sign(`https://${ACCOUNT}.r2.cloudflarestorage.com/${bucket}/${key.split('/').map(encodeURIComponent).join('/')}`,{method:'GET'});
+ const request=await client.sign(`https://${ACCOUNT}.r2.cloudflarestorage.com/${bucket}/${key.split('/').map(encodeURIComponent).join('/')}`,{method:'GET',headers:{'Accept-Encoding':'identity'}});
  const response=await fetch(request,{signal:AbortSignal.timeout(600000)});
  if(response.status===404)return null;if(!response.ok)throw new Error('R2 read failed '+response.status);
  const hash=crypto.createHash('sha256');let bytes=0;let file;
@@ -142,11 +143,36 @@ if(mode==='revoke'){
   const client=new AwsClient({accessKeyId:secrets.R2_ACCESS_KEY_ID,secretAccessKey:secrets.R2_SECRET_ACCESS_KEY,service:'s3',region:'auto'});
   const receiptPath=path.join(stage,'verification-receipt.json');let receipt;try{receipt=await read(receiptPath);}catch(error){if(error.code!=='ENOENT')throw error;receipt={organization_id:ORG,folder_id:auth.folderId,archives:{},assets:{}};}
   const records=await read(path.join(stage,'archives.json'));
-  for(const record of records){if(receipt.archives[record.name])continue;let asset;for(;;){state=await read(statePath);asset=state.assets[record.name];if(asset?.complete)break;await sleep(10000);}receipt.archives[record.name]=await verify(asset,record,client);await save(receiptPath,receipt);console.log(JSON.stringify({verified_archives:Object.keys(receipt.archives).length,total:records.length}));}
+  let nextArchive=0;
+  await Promise.all(Array.from({length:3},async()=>{for(;;){const index=nextArchive++;if(index>=records.length)return;const record=records[index];if(receipt.archives[record.name])continue;let asset;for(;;){state=await read(statePath);asset=state.assets[record.name];if(asset?.complete)break;await sleep(10000);}receipt.archives[record.name]=await verify(asset,record,client);await save(receiptPath,receipt);console.log(JSON.stringify({verified_archives:Object.keys(receipt.archives).length,total:records.length}));}}));
   for(const name of ['task-metadata.json','selection.json','archives.json']){if(receipt.assets[name])continue;for(;;){state=await read(statePath);if(state.assets[name]?.complete)break;await sleep(10000);}receipt.assets[name]=await verify(state.assets[name],null,client);await save(receiptPath,receipt);}
   receipt.metadata_verified=true;receipt.all_uploads_verified=records.reduce((total,record)=>total+record.files.length,0)===selection.files.length&&Object.keys(receipt.archives).length===records.length;await save(receiptPath,receipt);
   // Receipt upload is performed by finish after concurrent primary transfers stop.
   console.log(JSON.stringify({all_uploads_verified:receipt.all_uploads_verified}));
+ }else if(mode==='copy-missing-backups'){
+  const secrets=await read(path.join(config,'worker-secrets.json'));
+  const client=new AwsClient({accessKeyId:secrets.R2_ACCESS_KEY_ID,secretAccessKey:secrets.R2_SECRET_ACCESS_KEY,service:'s3',region:'auto'});
+  const records=await read(path.join(stage,'archives.json'));
+  const names=[...records.map(record=>record.name),'task-metadata.json','selection.json','archives.json'];
+  let next=0;const copied=[];
+  await Promise.all(Array.from({length:4},async()=>{for(;;){const index=next++;if(index>=names.length)return;const asset=state.assets[names[index]];if(!asset?.complete)throw new Error('Primary is not complete');
+   const [version]=await d1('SELECT v.storage_key,v.size,v.document_id FROM versions v JOIN documents d ON d.id=v.document_id WHERE v.id=? AND d.organization_id=?',[asset.versionId,ORG]);
+   if(!version||version.document_id!==asset.documentId||version.size!==asset.bytes)throw new Error('Backup target identity mismatch');
+   const key=`originals/${asset.versionId}/original`,url=`https://${ACCOUNT}.r2.cloudflarestorage.com/papra-drive-backups/${key}`;
+   const head=await client.fetch(url,{method:'HEAD',headers:{'Accept-Encoding':'identity'}});if(head.ok){if(head.headers.get('content-length')===null){const existing=await cloudHash(client,'papra-drive-backups',key);if(!existing||existing.bytes!==asset.bytes||existing.sha256!==asset.sha256)throw new Error('Existing backup content mismatch');}else if(Number(head.headers.get('content-length'))!==asset.bytes)throw new Error(`Existing backup size mismatch for ${asset.label}: expected ${asset.bytes}, stored ${head.headers.get('content-length')}`);continue;}if(head.status!==404)throw new Error('Backup HEAD failed '+head.status);
+   const sourceUrl=`https://${ACCOUNT}.r2.cloudflarestorage.com/papra-drive/${version.storage_key}`;
+   const source=await client.fetch(sourceUrl,{method:'HEAD',headers:{'Accept-Encoding':'identity'}});if(source.ok&&source.headers.get('content-length')===null){const actual=await cloudHash(client,'papra-drive',version.storage_key);if(!actual||actual.bytes!==asset.bytes||actual.sha256!==asset.sha256)throw new Error('Copy source content mismatch');}if(!source.ok||(source.headers.get('content-length')!==null&&Number(source.headers.get('content-length'))!==asset.bytes))throw new Error('Copy source missing or changed');
+   const response=await client.fetch(url,{method:'PUT',headers:{'x-amz-copy-source':`/papra-drive/${version.storage_key}`,'x-amz-copy-source-if-match':source.headers.get('etag')},signal:AbortSignal.timeout(120000)});
+   const xml=await response.text();if(!response.ok||xml.includes('<Error>')||!xml.includes('<ETag>'))throw new Error('Backup copy failed '+response.status);
+   copied.push({name:asset.label,versionId:asset.versionId,sourceKey:version.storage_key,backupKey:key,bytes:asset.bytes,providerAcceptedAt:new Date().toISOString(),independentlyVerified:false});
+   console.log(JSON.stringify({backup_copies_accepted:copied.length,name:asset.label}));
+  }}));
+  await save(path.join(stage,'backup-copy-receipt.json'),copied);
+ }else if(mode==='dispatch-pending-archives'){
+  const archiveFolder=state.folders['Lossless archives'];if(!archiveFolder)throw new Error('Archive folder missing');
+  const jobs=await d1("SELECT j.id,j.generation FROM jobs j JOIN versions v ON v.id=j.version_id JOIN documents d ON d.id=v.document_id WHERE d.organization_id=? AND d.home_folder_id=? AND j.status='pending' AND j.kind IN ('backup','hash','backup-hash') AND j.updated_at<? LIMIT 100",[ORG,archiveFolder,Date.now()-180000]);
+  if(jobs.length){const admin=await read(path.join(config,'cloudflare-auth-session.json'));const response=await fetch(`https://api.cloudflare.com/client/v4/accounts/${ACCOUNT}/queues/3cfb0cf1537d4c63baf3888d8ff1eaf9/messages/batch`,{method:'POST',headers:{Authorization:`Bearer ${admin.token}`,'Content-Type':'application/json'},body:JSON.stringify({messages:jobs.map(job=>({content_type:'json',body:{jobId:job.id,generation:job.generation}}))})});const result=await response.json();if(!response.ok||!result.success)throw new Error('Queue publication failed '+response.status);console.log(JSON.stringify({redispatched_pending_archive_jobs:jobs.length,queue_metrics:result.result?.metadata?.metrics}));}
+  else console.log(JSON.stringify({redispatched_pending_archive_jobs:0}));
  }else if(mode==='status'){
   const rows=await d1('SELECT j.kind,j.status,j.error,count(*) AS count FROM jobs j JOIN versions v ON v.id=j.version_id JOIN documents d ON d.id=v.document_id WHERE d.organization_id=? AND d.home_folder_id IN (SELECT id FROM folders WHERE parent_id=? OR id=?) GROUP BY j.kind,j.status,j.error ORDER BY j.kind,j.status',[ORG,auth.folderId,auth.folderId]);
   console.log(JSON.stringify({jobs:rows}));
@@ -162,7 +188,7 @@ if(mode==='revoke'){
   const records=await read(path.join(stage,'search-documents.json'));
   const destinations={main:await folder('Main task conversations'),subagent:await folder('Subagent conversations'),unindexed:await folder('Unindexed conversations')};
   let next=0,done=0;
-  await Promise.all(Array.from({length:4},async()=>{for(;;){const i=next++;if(i>=records.length)return;const record=records[i];await upload(record.path,'text/markdown',destinations[record.kind],record.name);done++;if(done%25===0||done===records.length)console.log(JSON.stringify({searchable_documents_uploaded:done,total:records.length}));}}));
+  await Promise.all(Array.from({length:12},async()=>{for(;;){const i=next++;if(i>=records.length)return;const record=records[i];await upload(record.path,'text/markdown',destinations[record.kind],record.name);done++;if(done%25===0||done===records.length)console.log(JSON.stringify({searchable_documents_uploaded:done,total:records.length}));}}));
   await save(path.join(stage,'transcript-upload-complete.json'),{documents:records.length,completedAt:new Date().toISOString()});
  }else throw new Error('Unknown command');
 }
