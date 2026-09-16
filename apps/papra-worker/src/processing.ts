@@ -65,7 +65,7 @@ async function statuses(env: Env, user: Identity, org: string, ids: string[]) {
   const access = await permittedDocumentPredicateSQL(env, user, org);
   const docs = await all<ProcessingDocument>(
     env,
-    `SELECT d.id,d.content,v.id version_id,v.sha256,(SELECT count(*) FROM chunks c WHERE c.version_id=v.id) chunks FROM documents d JOIN versions v ON v.id=d.current_version_id WHERE d.organization_id=? AND d.is_deleted=0 AND (${access.sql}) AND d.id IN (${ids.map(() => '?').join(',')})`,
+    `SELECT d.id,d.content,v.id version_id,v.sha256,(SELECT count(*) FROM chunks c WHERE c.document_id=d.id AND c.version_id=v.id) chunks FROM documents d JOIN versions v ON v.id=d.current_version_id WHERE d.organization_id=? AND d.is_deleted=0 AND (${access.sql}) AND d.id IN (${ids.map(() => '?').join(',')})`,
     org,
     ...access.bindings,
     ...ids,
