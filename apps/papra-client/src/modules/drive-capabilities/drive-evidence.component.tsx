@@ -1,7 +1,12 @@
 import type { DriveSource } from './drive-capabilities.services';
 import { createResource, createSignal, For, Show } from 'solid-js';
 import { Button } from '../ui/components/button';
-import { askDocuments, semanticSearch, sourceHref } from './drive-capabilities.services';
+import {
+  askDocuments,
+  semanticSearch,
+  sourceHref,
+  versionDownloadHref,
+} from './drive-capabilities.services';
 
 export const driveFieldClass = 'w-full rounded-md border border-input bg-background p-2 text-sm';
 export function DriveError(props: { error: unknown }) {
@@ -27,6 +32,12 @@ function Sources(props: { organizationId: string; sources: DriveSource[] }) {
             >
               {source.citation ? `[${source.citation}] ` : ''}
               {source.name}
+            </a>
+            <a
+              class="block text-xs text-primary underline"
+              href={versionDownloadHref(props.organizationId, source.documentId, source.versionId)}
+            >
+              Download cited version
             </a>
             <p class="mt-1 whitespace-pre-wrap break-words text-muted-foreground">{source.text}</p>
           </li>

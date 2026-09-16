@@ -268,7 +268,7 @@ const ActivityItem: Component<{ activity: DocumentActivity }> = (props) => {
   );
 };
 
-const tabs = ['info', 'content', 'comments', 'activity'] as const;
+const tabs = ['info', 'content', 'versions', 'comments', 'activity'] as const;
 type Tab = (typeof tabs)[number];
 
 const DocumentOpenWithDropdown: Component<{ document: Document; organizationId: string }> = (
@@ -491,6 +491,7 @@ export const DocumentPage: Component = () => {
                     <TabsList class="w-full h-8">
                       <TabsTrigger value="info">{t('documents.tabs.info')}</TabsTrigger>
                       <TabsTrigger value="content">{t('documents.tabs.content')}</TabsTrigger>
+                      <TabsTrigger value="versions">Versions</TabsTrigger>
                       <TabsTrigger value="comments">Comments</TabsTrigger>
                       <TabsTrigger value="activity">{t('documents.tabs.activity')}</TabsTrigger>
                       <TabsIndicator />
@@ -591,7 +592,7 @@ export const DocumentPage: Component = () => {
                         content={getDocument().content}
                       />
                     </TabsContent>
-                    <TabsContent value="comments">
+                    <TabsContent value="versions">
                       <DriveDocumentCapabilities
                         organizationId={params.organizationId}
                         documentId={params.documentId}
@@ -599,6 +600,8 @@ export const DocumentPage: Component = () => {
                           void documentQuery.refetch();
                         }}
                       />
+                    </TabsContent>
+                    <TabsContent value="comments">
                       <DocumentComments
                         documentId={params.documentId}
                         organizationId={params.organizationId}

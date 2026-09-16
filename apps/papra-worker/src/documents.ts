@@ -279,7 +279,17 @@ export function registerDocumentRoutes(app: App) {
       'SELECT id,original_name,size,sha256,created_by,created_at,mime_type,processing_status,processing_error FROM versions WHERE document_id=? ORDER BY created_at DESC,id DESC',
       d.id,
     );
-    return c.json({ versions: versions.map(camel), currentVersionId: d.current_version_id });
+    let canWrite = true;
+    try {
+      await ensureDocumentAccess(c.env, c.get('identity'), d.id, 'write');
+    } catch {
+      canWrite = false;
+    }
+    return c.json({
+      versions: versions.map(camel),
+      currentVersionId: d.current_version_id,
+      canWrite,
+    });
   });
   app.get(`${base}/:doc/export`, async (c) => {
     const d = await document(c.env, c.get('identity'), c.req.param('org'), c.req.param('doc'));

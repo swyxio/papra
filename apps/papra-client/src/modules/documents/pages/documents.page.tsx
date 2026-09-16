@@ -267,7 +267,14 @@ export const DocumentsPage: Component = () => {
     <div class="p-6 mt-4 pb-32">
       <DriveFolders organizationId={params.organizationId} />
       <DriveExport organizationId={params.organizationId} />
-      <DriveSpaceCapabilities organizationId={params.organizationId} />
+      <details class="my-4">
+        <summary class="cursor-pointer text-sm font-medium">
+          Semantic search, document answers and automation
+        </summary>
+        <div class="mt-4">
+          <DriveSpaceCapabilities organizationId={params.organizationId} />
+        </div>
+      </details>
       <Suspense>
         {documentsQuery.data?.documents?.length === 0 && debouncedSearchQuery().length === 0 ? (
           <>

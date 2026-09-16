@@ -42,7 +42,7 @@ export const versionDownloadHref = (
 ) =>
   `${buildTimeConfig.baseApiUrl}${documentBase(organizationId, documentId)}/versions/${encodeURIComponent(versionId)}/download`;
 export const fetchVersions = async (organizationId: string, documentId: string) =>
-  apiClient<{ versions: DriveVersion[]; currentVersionId: string }>({
+  apiClient<{ versions: DriveVersion[]; currentVersionId: string; canWrite: boolean }>({
     path: `${documentBase(organizationId, documentId)}/versions`,
   });
 export const restoreVersion = async (

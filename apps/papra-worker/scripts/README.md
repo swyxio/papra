@@ -16,7 +16,7 @@ node scripts/drive-benchmark.ts --live --production-ready \
   --cdp=http://127.0.0.1:PORT
 ```
 
-Default sizes are 1 GiB, 6.25 GiB, and 12.25 GiB. `--sizes-gib=0.125` selects a bounded first smoke. The harness checks the Chrome account before creating one uniquely named disposable folder in its personal space. It neither closes Chrome nor changes membership. Cookies, credentials, signed URLs and personal email are never included in receipts.
+Default sizes are 1 GiB, 6.25 GiB, and 12.25 GiB. `--sizes-gib=0.25` selects a bounded first smoke. The harness checks the Chrome account before creating one uniquely named disposable folder in its personal space. It neither closes Chrome nor changes membership. Cookies, credentials, signed URLs and personal email are never included in receipts.
 
 At least three successful R2 ETag responses trigger interruption. The harness confirms stored parts through the live API, preserves browser localStorage, and emits paths to `checkpoint.request.json` and `checkpoint.ready.json`. Root redeploys with a new Worker `VERSION`, then writes the ready file as `{"version":"NEW_VERSION"}`. The harness checks the new live version and unchanged D1 session/provider parts before reloading and reselecting the same file. It rejects any network resend of a provider-confirmed part; in-flight canceled parts may restart. Every size requests its own checkpoint.
 

@@ -55,26 +55,28 @@ export function DriveDocumentCapabilities(props: {
           Upload a replacement to keep the same file and its history. Restore a previous version to
           make it current.
         </p>
-        <form
-          class="space-y-3"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void changeVersion();
-          }}
-        >
-          <label class="block text-sm font-medium">
-            Replacement file
-            <input
-              class="mt-2 block w-full text-sm"
-              type="file"
-              disabled={busy()}
-              onChange={(event) => setFile(event.currentTarget.files?.[0])}
-            />
-          </label>
-          <Button type="submit" isLoading={busy()} disabled={!file()}>
-            Upload replacement
-          </Button>
-        </form>
+        <Show when={history()?.canWrite}>
+          <form
+            class="space-y-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void changeVersion();
+            }}
+          >
+            <label class="block text-sm font-medium">
+              Replacement file
+              <input
+                class="mt-2 block w-full text-sm"
+                type="file"
+                disabled={busy()}
+                onChange={(event) => setFile(event.currentTarget.files?.[0])}
+              />
+            </label>
+            <Button type="submit" isLoading={busy()} disabled={!file()}>
+              Upload replacement
+            </Button>
+          </form>
+        </Show>
         <Show when={progress()}>
           {(value) => (
             <div class="text-sm" role="status">
@@ -132,7 +134,7 @@ export function DriveDocumentCapabilities(props: {
                       >
                         Download original
                       </a>
-                      <Show when={version.id !== value().currentVersionId}>
+                      <Show when={value().canWrite && version.id !== value().currentVersionId}>
                         <Button
                           size="sm"
                           variant="outline"
