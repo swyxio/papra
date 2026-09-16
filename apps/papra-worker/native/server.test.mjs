@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { validateJob, server, hashObject } from './server.mjs';
+import { validateJob, server, hashObject, toolDiagnostic } from './server.mjs';
 
 const host = 'https://2d017c943ff16e4c52783635ef05e535.r2.cloudflarestorage.com/papra-drive/';
 const signed = (key) => host + key + '?X-Amz-Signature=test';
@@ -76,4 +76,20 @@ test('native network diagnostics expose errno only, excluding signed URLs and ex
   assert.deepEqual(logs, [
     JSON.stringify({ error: 'object_fetch_failed', causeCode: 'unable_to_verify_leaf_signature' }),
   ]);
+});
+
+test('media tool diagnostics return fixed categories without echoing private stderr', () => {
+  assert.equal(
+    toolDiagnostic('https://private/SECRET?token=SECRET HTTP error 403 Forbidden'),
+    'http_forbidden',
+  );
+  assert.equal(
+    toolDiagnostic('Certificate verification failed for SECRET'),
+    'tls_certificate_failed',
+  );
+  assert.equal(
+    toolDiagnostic('Error in the pull function https://private/SECRET'),
+    'tls_pull_failed',
+  );
+  assert.equal(toolDiagnostic('Private file content SECRET'), 'tool_failed');
 });

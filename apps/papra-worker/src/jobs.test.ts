@@ -250,3 +250,79 @@ test('native capacity waits preserve attempt budget and release the exact job co
     lease_token: null,
   });
 });
+
+test('vision jobs use Gemma multimodal messages and publish its chat completion caption', async () => {
+  const { env, DB } = await fixture();
+  const bytes = new Uint8Array([1, 2, 3]);
+  const sha256 = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (x) =>
+    x.toString(16).padStart(2, '0'),
+  ).join('');
+  const assetKey = 'derived/v/g0/preview.jpg';
+  const cache = new Map<string, string>();
+  const manifest = {
+    versionId: 'v',
+    generation: 0,
+    result: {
+      text: 'OCR label',
+      chunks: [],
+      warnings: [],
+      outputs: [{ kind: 'preview', key: assetKey, byteSize: bytes.length, sha256 }],
+    },
+  };
+  const ai = vi.fn(async () => ({
+    choices: [{ message: { content: 'A synthetic diagram with readable labels.' } }],
+  }));
+  Object.assign(env, {
+    FILES: {
+      head: async () => null,
+      get: async (key: string) =>
+        key === assetKey
+          ? { size: bytes.length, arrayBuffer: async () => bytes.buffer }
+          : key === 'derived/v/native-g0.json'
+            ? { size: 500, json: async () => manifest }
+            : cache.has(key)
+              ? { size: 500, json: async () => JSON.parse(cache.get(key)!) }
+              : null,
+      put: async (key: string, value: string) => {
+        cache.set(key, value);
+      },
+    },
+    BACKUPS: { put: vi.fn(async () => {}) },
+    AI: { run: ai },
+  });
+  await DB.batch([
+    DB.prepare(
+      "INSERT INTO jobs(id,version_id,kind,status,generation,created_at,updated_at) VALUES('p','v','process','done',0,1,1)",
+    ),
+    DB.prepare(
+      "INSERT INTO jobs(id,version_id,kind,status,generation,created_at,updated_at) VALUES('vision','v','vision:0:0','pending',0,1,1)",
+    ),
+  ]);
+  await consumeJobs(batch({ jobId: 'vision', generation: 0 }), env);
+  expect(ai).toHaveBeenCalledWith(
+    '@cf/google/gemma-4-26b-a4b-it',
+    expect.objectContaining({
+      messages: [
+        {
+          role: 'user',
+          content: [
+            expect.objectContaining({ type: 'text' }),
+            { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,AQID' } },
+          ],
+        },
+      ],
+      max_completion_tokens: 256,
+      chat_template_kwargs: { enable_thinking: false },
+    }),
+    expect.anything(),
+  );
+  expect(await DB.prepare("SELECT status FROM jobs WHERE id='vision'").first()).toEqual({
+    status: 'done',
+  });
+  expect(JSON.parse(cache.get('derived/v/vision-0-0.json')!).text).toBe(
+    'A synthetic diagram with readable labels.',
+  );
+  expect(await DB.prepare("SELECT content FROM documents WHERE id='d'").first()).toEqual({
+    content: 'Manual corrected content',
+  });
+});

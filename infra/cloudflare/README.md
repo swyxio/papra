@@ -9,7 +9,7 @@ Drive is a maintained AGPL Papra fork pinned to stable `@papra/app@26.6.2` (`cf0
 - Private R2 `papra-drive`: originals and bounded derivatives. Private `papra-drive-backups`: independent original copies, native receipts, consistent metadata snapshots. Public bucket access is disabled.
 - Queues: durable native extraction, transcription, vision, indexing, original checksums and backup copying. D1 job generations and leases fence retries; hourly outbox repair resends pending work.
 - Cloudflare Containers: Linux ffmpeg, Poppler and Tesseract. Containers receive expiring signed R2 capabilities; permanent credentials remain in Worker secrets. Native processing never calls AI providers.
-- Workers AI: Whisper Turbo audio, Llama 3.2 vision, BGE 768-dimensional embeddings, Llama 3.3 cited answers. Vectorize namespaces are home-folder IDs; permission and current-version checks run before snippet/model context access.
+- Workers AI: Whisper Turbo audio, Gemma 4 vision, BGE 768-dimensional embeddings, Llama 3.3 cited answers. Vectorize namespaces are home-folder IDs; permission and current-version checks run before snippet/model context access.
 - Workflows: one daily consistent D1 metadata capture followed by durable paged export to R2 and clone cleanup.
 
 ## Access and document behavior

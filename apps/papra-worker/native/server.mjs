@@ -115,6 +115,37 @@ export function validateJob(job) {
   if (new Set(keys).size !== keys.length) throw new ProcessingError('duplicate_output_target', 400);
   return { ...job, source: { ...job.source, url: authorizedUrl(job.source.url) }, outputs, limits };
 }
+export function toolDiagnostic(stderr) {
+  const http = stderr.match(/HTTP error (\d{3})/i)?.[1];
+  if (http)
+    return (
+      {
+        '400': 'http_bad_request',
+        '403': 'http_forbidden',
+        '404': 'http_not_found',
+        '416': 'http_range_invalid',
+        '429': 'http_rate_limited',
+        '500': 'http_server_error',
+        '502': 'http_bad_gateway',
+        '503': 'http_unavailable',
+      }[http] ?? 'http_error'
+    );
+  if (/certificate.*(?:failed|invalid)|unable to verify|peer certificate/i.test(stderr))
+    return 'tls_certificate_failed';
+  if (/error in the pull function/i.test(stderr)) return 'tls_pull_failed';
+  if (/error in the push function/i.test(stderr)) return 'tls_push_failed';
+  if (/handshake.*failed|TLS.*(?:failed|error)/i.test(stderr)) return 'tls_handshake_failed';
+  if (/connection refused/i.test(stderr)) return 'connection_refused';
+  if (/connection reset|socket.*(?:closed|error)/i.test(stderr)) return 'socket_closed';
+  if (/invalid data found when processing input/i.test(stderr)) return 'invalid_media_data';
+  if (/end of file/i.test(stderr)) return 'media_end_of_file';
+  return 'tool_failed';
+}
+function httpsOptions(source) {
+  return source.startsWith('https://')
+    ? ['-tls_verify', '1', '-ca_file', '/etc/ssl/certs/ca-certificates.crt']
+    : [];
+}
 async function command(program, args, signal, maxOutput = MAX_TEXT_BYTES) {
   return new Promise((resolve, reject) => {
     const child = spawn(program, args, { signal, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -129,8 +160,12 @@ async function command(program, args, signal, maxOutput = MAX_TEXT_BYTES) {
         child.kill('SIGKILL');
       }
     });
-    // Tool diagnostics can contain signed URLs and file contents; never log or return them.
-    child.stderr.resume();
+    // Retain a small in-memory diagnostic only; return fixed categories, never tool text or URLs.
+    let diagnostic = '';
+    child.stderr.on('data', (data) => {
+      if (diagnostic.length < 8192)
+        diagnostic += data.toString('utf8').slice(0, 8192 - diagnostic.length);
+    });
     child.on('error', () =>
       reject(
         new ProcessingError(
@@ -141,14 +176,15 @@ async function command(program, args, signal, maxOutput = MAX_TEXT_BYTES) {
     );
     child.on('close', (code) => {
       if (tooLarge) reject(new ProcessingError('extracted_text_too_large'));
-      else if (code !== 0)
+      else if (code !== 0) {
+        const issue = toolDiagnostic(diagnostic);
         reject(
           new ProcessingError(
-            signal.aborted ? 'processing_timeout' : 'native_processing_failed',
-            signal.aborted ? 504 : 422,
+            signal.aborted ? 'processing_timeout' : `native_${program}_${issue}`,
+            signal.aborted ? 504 : /^(tls|http|socket|connection)_/.test(issue) ? 502 : 422,
           ),
         );
-      else resolve(Buffer.concat(parts).toString('utf8'));
+      } else resolve(Buffer.concat(parts).toString('utf8'));
     });
   });
 }
@@ -213,6 +249,7 @@ async function thumbnail(source, destination, signal, seek = 0) {
       '1',
       '-ss',
       String(seek),
+      ...httpsOptions(source),
       '-i',
       source,
       '-frames:v',
@@ -312,7 +349,16 @@ export async function processJob(rawJob) {
       const info = JSON.parse(
         await command(
           'ffprobe',
-          ['-v', 'error', '-show_format', '-show_streams', '-of', 'json', source],
+          [
+            '-v',
+            'error',
+            '-show_format',
+            '-show_streams',
+            '-of',
+            'json',
+            ...httpsOptions(source),
+            source,
+          ],
           signal,
         ),
       );
@@ -370,6 +416,7 @@ export async function processJob(rawJob) {
               '1',
               '-ss',
               String(start),
+              ...httpsOptions(source),
               '-i',
               source,
               '-t',
