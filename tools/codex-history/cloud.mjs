@@ -46,6 +46,10 @@ async function api(route,body,method=body===undefined?'GET':'POST'){
  for(let attempt=0;;attempt++){
   try{
    const response=await fetch(`https://drive.swyx.io/api/organizations/${ORG}/${route}`,{method,headers:{Authorization:`Bearer ${auth.token}`,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(120000)});
+   if(response.status===401&&attempt<3){
+    const rows=await d1('SELECT token_hash,folder_id,expires_at,revoked_at FROM service_tokens WHERE id=? AND user_id=? AND organization_id=?',[auth.credentialId,USER,ORG]);
+    if(rows.length===1&&rows[0].token_hash===sha(auth.token)&&rows[0].folder_id===auth.folderId&&!rows[0].revoked_at&&rows[0].expires_at>Date.now()){await sleep(1000*2**attempt);continue;}
+   }
    if(!response.ok){if((response.status>=500||response.status===429)&&attempt<5){await sleep(1000*2**attempt);continue;}throw new Error(`Drive ${route} failed ${response.status}: ${(await response.text()).slice(0,300)}`);}
    return response.status===204?{}:await response.json();
   }catch(error){if(attempt>=5||error.message.startsWith('Drive '))throw error;await sleep(1000*2**attempt);}

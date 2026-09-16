@@ -1,4 +1,5 @@
 import type { App, Env, Identity } from './types';
+import { HTTPException } from 'hono/http-exception';
 import { all, first, run, id, error, camel } from './db';
 import { isApprovedEmail, OWNER_EMAIL } from './auth';
 import { canWriteFolder, ensureOrganizationMember } from './collaboration';
@@ -38,8 +39,9 @@ export async function serviceIdentity(request: Request, env: Env): Promise<Ident
   // Recheck the creator's current folder permission before applying the narrower token scope.
   try {
     await canWriteFolder(env, identity, row.folder_id);
-  } catch {
-    return null;
+  } catch (error) {
+    if (error instanceof HTTPException) return null;
+    throw error;
   }
   identity.serviceScope = {
     organizationId: row.organization_id,
