@@ -1,15 +1,45 @@
 # Executed verification
 
-Deployment and large-file browser benchmarks remain pending. No Railway application was deployed.
+Evidence recorded on 2026-09-16. Deployment, authentication, deployed native/AI processing, keyword/semantic/cited search, metadata recovery and complete small-original backups are confirmed. The 1 GiB live upload and deployment/reload resume passed; larger transfers remain in progress, and Chrome blocked the 1 GiB download. No Railway application was deployed.
 
-Completed implementation checks:
+## Production source and authentication
 
-- Worker TypeScript check and production client build pass.
-- 36 Worker tests pass against local Miniflare D1: Google admission/callback/session/revocation; share permissions/password/expiry/creator revocation; folder ACL/shortcuts/threaded mentions/inbox; multipart byte validation/lost completion repair; immutable versions; semantic namespace and current-version isolation.
-- Client typecheck and upload reload/reselect simulation pass. Capability UI browser checks cover replacement, restore, semantic/cited links, scoped credentials and mobile layout.
-- Native Linux/amd64 Docker canary uses real private R2 for image OCR, embedded-text PDF, scanned PDF and ranged video/audio extraction. Derivative outputs are independently downloaded and byte/hash checked. This is not a large-file or deployed-Container benchmark.
-- Google shared-client callback and private R2/CORS grants have provider readback receipts stored outside the repository.
-- Consistent D1 snapshot/live-edit/retry canary restores all captured table counts into a fresh D1 database, including 1,041 tag rows. Independent R2 multipart original backup canary compares both streamed hashes and downloaded backup bytes. These are canaries, not deployed Workflow proof.
-- Tools website PR590 has three focused browser checks and is held until Drive is live.
+- `https://drive.swyx.io/api/health` returned HTTP 200 with `version: 26.6.2-swyx.9`, `sourceSha: 59986fb6`, and `platform: cloudflare`. This identifies the deployed Worker release; it does not establish native or AI job success.
+- Fresh Google OAuth succeeded in the owner's ordinary Google Chrome session. Same-origin profile readback confirmed the exact verified owner identity, its private personal space, and all three team memberships. A 168-byte synthetic file was uploaded through the actual file chooser and then listed and opened with extracted preview content.
+- Basic original downloads pass on release `.5`: the ordinary Chrome download event produced the complete 168-byte owner fixture with matching SHA-256 `e3cd18070278eb67b060752c9dada1e0a6df806641bdfa721ab4a3cd85224808`, without browser request overrides. Independent live original download of the 12,431-byte scanned PDF also matched its source byte for byte. These are small-file download proofs; large-file streaming and range measurements remain pending.
+- Google callback configuration and private R2/CORS grants have provider readback receipts. Credentials, cookies, signed URLs and private production metadata are retained outside the repository.
 
-Live hostname, deployed native Container/AI pipeline, metadata restore, independent original backup recovery, and the 1 GiB / 6.25 GiB / 12.25 GiB real browser transfer benchmarks require separate executed receipts before completion.
+## Implementation checks
+
+- Worker TypeScript check, client TypeScript check and production client build pass.
+- 49 Worker tests pass against local Miniflare D1. Coverage includes Google admission/callback/session/revocation; share permissions/password/expiry/creator revocation; folder ancestry ACLs, scoped credentials, shortcuts, threaded comments, mentions and inbox revocation; multipart byte validation and lost-completion repair; immutable versions and permanent purge; job leases/generations; backup snapshots; and semantic namespace/current-version isolation.
+- Client upload reload/reselect simulation passes. Capability UI browser checks cover replacement, restore, semantic/cited links, scoped credentials and mobile layout. These checks are distinct from a measured live R2 transfer.
+- A Linux/amd64 Docker canary used real private R2 for image OCR, embedded-text PDF, scanned PDF and ranged video/audio extraction. Derivative outputs were independently downloaded and byte/hash checked. This establishes the local native canary, not success of the deployed Container pipeline.
+
+## Executed production recovery and provider readback
+
+- The actual production Cloudflare Workflow instance `metadata-2026-09-16` completed in approximately three seconds. Its atomic D1 clone captured 24 tables and 22 rows at `1789558143029`; all pages and the complete format-2 manifest were written to private R2, and the temporary capture clone was removed.
+- That production snapshot was restored into a fresh **remote Cloudflare D1** database. All 24 table counts and canonical row SHA-256 hashes matched; foreign-key checks found no violations, and rebuilt FTS content matched. Only the disposable restore database was deleted. The production database and its binding were unchanged. This verifies metadata restoration, without claiming a running recovery deployment with restored original objects.
+- Three live synthetic original backups were independently read over complete private S3 HTTPS object streams. Incremental SHA-256 and exact byte counts matched for the 12,047-byte image, 12,431-byte scanned PDF and 77,768-byte speech/video fixture. This is complete-object proof for those fixtures, not a large-object backup benchmark.
+- Cloudflare provider readback confirmed native Container image `sha256:688eac7f5f75cdc80242d6d652b99dc1a07c20f8b161fae082666b40897d3aff` completed its rollout at 100%, two of two instances. Earlier canaries exposed CA validation, Worker redirect policy and final-video-frame errors; the released fixes keep certificate verification enabled and Container networking restricted to the approved R2 hostname.
+- The actual deployed native/AI canary passed: image and scanned PDF completed on source `804dd833`/image `56b683…`; video completed on source `67747719`/image `688eac…`. All 13 video Whisper/Gemma child jobs completed. Independent complete readback verified the SHA-256 and byte counts of 19 derivative outputs, actual model tags, private enrichment backup equality and original/backup integrity. D1 reservations recorded eight audio seconds and 20 vision calls for these synthetic canaries.
+- Ordinary authenticated Chrome keyword search found the extracted image/PDF phrase. Semantic search and cited document answers returned the correct current versions for the scan and spoken-video fixtures, including timestamped transcript content. These are executed production provider and browser proofs, separate from local simulations.
+
+Private executed receipts include `remote-production-metadata-restore-verification.json`, `native-provider-rollout-verification-v8.json` and the three `live-backup-ver_*.json` files under `~/.config/papra-drive/`. Earlier local snapshot and backup canaries remain separate evidence.
+
+## Live transfer evidence and remaining checks
+
+- The benchmark uses the already authenticated owner's ordinary Chrome interface and actual file chooser. No extra service credential was created. Synthetic binaries contain sparse zeros with deterministic 64 KiB markers; throughput is not representative media processing performance.
+- The 256 MiB upload completed after reload/reselect across two Worker deployments. R2 retained the confirmed part ETags and session/version IDs. Its ordinary Chrome download and independent complete private-backup stream matched all 268,435,456 source bytes and SHA-256 `3b0825740b66a219b572aaa84516f43169e64d37ca5906d52484f4c09f27ca8e`. Event capture was incomplete, so this smoke does not establish zero retransmission.
+- The 1 GiB upload completed with its permanent document/version IDs preserved. Nine completed 32 MiB parts retained identical R2 ETags across source `804dd833`→`67747719` deployment. Complete temporary XHR measurement recorded only unfinished parts 10–32 during resume, no resend of retained parts 1–9, no instrumentation errors and no truncation. The 771,751,936 resumed bytes were acknowledged over 236.112 seconds (3.269 MB/s); canceled partial wire bytes are unknown. Actual server SHA-256 matches source `5c8c6e5cdf503d6fb7a3ed174a4a9c6b4deadbdb5b259798be83cb2070c9cd57`. Independent complete private-backup streaming verified all 1,073,741,824 bytes against the same source SHA-256.
+- Chrome's 1 GiB Download action produced `ERR_BLOCKED_BY_CLIENT`; no file was created. The browser block was not overridden, and user handoff was requested. Complete Chrome download/range evidence is unavailable for this fixture.
+- The 6.25 GiB upload is running through the same shipped uploader. The 12.25 GiB fixture is prepared but not yet transferred. Exact final bytes, complete SHA agreement, deployment interruption/resume and private-backup proofs remain required.
+- Read-only OS monitoring measures summed RSS for the original Chrome process tree. Other tabs share this browser, so measurements cannot attribute RSS to the benchmark renderer or establish isolated uploader memory usage. They are not unique physical memory or JS-heap measurements.
+
+Temporary XHR observation retains only part numbers, Blob sizes, times, progress, statuses and ETags; request arguments, credentials, signed URLs and uploaded content are neither changed nor retained in those measurements. Hooks are removed after each completed transfer or ordinary reload. Only this run's synthetic documents may be cleaned up after verification.
+
+## Site and fallback cleanup
+
+The Drive card is published at `https://swyx.io/tools`, preserving Cap and Sign. Website PR #590 merged as `203317e2931ce0b697070b58154ae5038a42ead7`, with successful exact-tree build and 100% provider deployment. Ordinary Chrome clicked Drive through to the live hostname; `/tools/drive` redirects there.
+
+No Railway application was deployed. Deletion of the unused prepared Railway project was accepted; provider `deletedAt` is `2026-09-18T11:51:36.062Z`, so its delayed removal is not yet complete. The prepared Railway CNAME and obsolete local variables were removed. Its inert ownership TXT remains pending cleanup; serving traffic uses Cloudflare.
