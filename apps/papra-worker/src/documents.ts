@@ -280,9 +280,31 @@ export function registerDocumentRoutes(app: App) {
   app.get(`${base}/:doc/preview`, async (c) => {
     const d = await document(c.env, c.get('identity'), c.req.param('org'), c.req.param('doc'));
     if (d.is_deleted) throw error(404, 'Document is in trash');
+    const visual = /^(image|video)\//.test(d.mime_type) || d.mime_type === 'application/pdf';
+    const status = d.preview_key
+      ? 'ready'
+      : !visual || d.processing_status === 'ready'
+        ? 'unavailable'
+        : d.processing_status === 'failed'
+          ? 'failed'
+          : d.processing_status;
+    const hashJob = await first<{ status: string }>(
+      c.env,
+      "SELECT status FROM jobs WHERE version_id=? AND kind='hash'",
+      d.current_version_id,
+    );
     return c.json({
       url: d.preview_key ? await s3(c.env).getPresignedUrl('GET', d.preview_key, 300) : null,
-      status: d.processing_status,
+      status,
+      reason:
+        status === 'unavailable' || status === 'failed'
+          ? d.processing_error || 'No visual preview is available for this file.'
+          : null,
+      integrityStatus: d.original_sha256_hash
+        ? 'verified'
+        : hashJob?.status === 'failed'
+          ? 'failed'
+          : 'verifying',
       sha256: d.original_sha256_hash,
       originalSize: d.original_size,
     });

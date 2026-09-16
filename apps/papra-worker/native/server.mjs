@@ -238,6 +238,7 @@ async function upload(file, output, kind, contentType, signal, timeline = {}) {
   };
 }
 async function thumbnail(source, destination, signal, seek = 0) {
+  await rm(destination, { force: true });
   await command(
     'ffmpeg',
     [
@@ -263,6 +264,12 @@ async function thumbnail(source, destination, signal, seek = 0) {
     ],
     signal,
   );
+  // FFmpeg can successfully seek past the final decoded frame without creating an image.
+  const image = await stat(destination).catch((error) => {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  });
+  if (!image?.size) throw new ProcessingError('native_frame_unavailable');
 }
 async function ocr(image, signal) {
   return (await command('tesseract', [image, 'stdout', '-l', 'eng'], signal)).trim();
@@ -378,10 +385,26 @@ export async function processJob(rawJob) {
       }
       if (hasVideo) {
         const count = Math.min(job.limits.maxFrames, job.outputs.videoFrames.length);
+        const video = info.streams.find((stream) => stream.codec_type === 'video');
+        const [rateNumerator, rateDenominator] = String(video.avg_frame_rate)
+          .split('/')
+          .map(Number);
+        const rate = rateNumerator / rateDenominator;
+        const videoDuration = Number(video.duration);
+        const lastFrame =
+          Number.isFinite(rate) && rate > 0 && videoDuration > 0
+            ? Math.max(0, Math.min(duration, videoDuration) - 1 / rate)
+            : duration;
         for (let index = 0; index < count; index++) {
-          const time = (duration * index) / count;
+          const time = Math.min((duration * index) / count, lastFrame);
           const frame = join(dir, 'frame.jpg');
-          await thumbnail(source, frame, signal, time);
+          try {
+            await thumbnail(source, frame, signal, time);
+          } catch (error) {
+            if (error.code !== 'native_frame_unavailable') throw error;
+            result.warnings.push(`video_frame_${index}_unavailable`);
+            continue;
+          }
           const text = await ocr(frame, signal);
           result.chunks.push(
             ...textChunks(text, {

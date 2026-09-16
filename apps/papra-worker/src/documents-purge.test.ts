@@ -14,7 +14,7 @@ afterEach(async () => {
   for (const mf of instances.splice(0)) await mf.dispose();
 });
 
-test('raw HTML has attachment and sandbox headers while retaining the original fetch bytes', async () => {
+test('raw HTML retains sandboxed download bytes and reports preview and integrity independently', async () => {
   const mf = new Miniflare({
     modules: true,
     script: 'export default {fetch(){return new Response("ok")}}',
@@ -64,6 +64,35 @@ test('raw HTML has attachment and sandbox headers while retaining the original f
   expect(response.headers.get('Content-Security-Policy')).toBe("sandbox; default-src 'none'");
   expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
   expect(await response.text()).toBe(body);
+  const preview = async () => app.request('/api/organizations/o/documents/d/preview', {}, env);
+  expect(await (await preview()).json()).toMatchObject({
+    url: null,
+    status: 'unavailable',
+    integrityStatus: 'verifying',
+    reason: 'No visual preview is available for this file.',
+  });
+  await DB.prepare("UPDATE versions SET sha256=?, processing_status='ready' WHERE id='v'")
+    .bind('a'.repeat(64))
+    .run();
+  expect(await (await preview()).json()).toMatchObject({
+    status: 'unavailable',
+    integrityStatus: 'verified',
+    sha256: 'a'.repeat(64),
+  });
+  await DB.batch([
+    DB.prepare("UPDATE documents SET mime_type='image/png' WHERE id='d'"),
+    DB.prepare(
+      "UPDATE versions SET mime_type='image/png',sha256=NULL,processing_status='pending' WHERE id='v'",
+    ),
+    DB.prepare(
+      "INSERT INTO jobs(id,version_id,kind,status,created_at,updated_at) VALUES('hash','v','hash','failed',1,1)",
+    ),
+  ]);
+  expect(await (await preview()).json()).toMatchObject({
+    status: 'pending',
+    integrityStatus: 'failed',
+    reason: null,
+  });
 });
 
 test('failed purge cancels processing before storage deletion and resumes without the retention delay', async () => {
