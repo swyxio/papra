@@ -3,6 +3,7 @@ import {diffWords} from 'diff';
 import {A,useParams} from '@solidjs/router';
 import {createResource,createSignal,For,onCleanup,Show} from 'solid-js';
 import {Button} from '@/modules/ui/components/button';
+import {queryClient} from '@/modules/shared/query/query-client';
 import {apiClient} from '@/modules/shared/http/api-client';
 import {NativeEditor} from './editor.pages';
 import {PdfFields} from './pdf-fields.component';
@@ -25,6 +26,7 @@ export function DocumentReviews(props:{organizationId:string;documentId:string})
    await apiClient({path:editorBase(),method:'POST',body:{key,token,versionId:p.version_id,source:p.source,proposalId:p.id}});
   }else await apiClient({path:`${base()}/proposals/${p.id}/resolve`,method:'POST',body:{status}});
   await refetch();
+  if(status==='accepted'&&p.source)await queryClient.invalidateQueries({queryKey:['organizations',props.organizationId,'documents',props.documentId]});
   }catch(e){setError((e as Error).message);}finally{if(lease)await apiClient({path:editorBase()+'/release',method:'POST',body:{token}}).catch(()=>{});setBusy(false);}
  }
  async function close(id:string){try{await apiClient({path:`${base()}/${id}/revoke`,method:'POST'});await refetch();}catch(e){setError((e as Error).message);}}

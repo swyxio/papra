@@ -1,0 +1,9 @@
+{
+  "$schema":"../../apps/papra-worker/node_modules/wrangler/config-schema.json",
+  "name":"papra-sign-redirect",
+  "main":"sign-redirect.ts",
+  "account_id":"2d017c943ff16e4c52783635ef05e535",
+  "compatibility_date":"2026-07-21",
+  "workers_dev":false,
+  "routes":[{"pattern":"sign.swyx.io","custom_domain":true,"zone_id":"d77d2d434f43a557362812f1ad4bffaa"}]
+}

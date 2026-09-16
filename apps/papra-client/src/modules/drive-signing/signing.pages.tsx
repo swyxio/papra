@@ -8,6 +8,9 @@ import type { SigningField } from './pdf-fields.component';
 type SigningRequest={id:string;name:string;status:string;versionId:string;createdAt:number;error?:string;recipients:{id:string;name:string;email:string;signedAt:number|null;url?:string}[];mail:{recipient_id:string;kind:string;status:string;error?:string}[]};
 const inputClass='w-full rounded-md border bg-background px-3 py-2 text-sm';
 const message=(e:unknown)=>e instanceof Error?e.message:'Request failed';
+export function PublicSigningHomePage(){
+  return <main class="max-w-2xl mx-auto p-6 md:py-16"><p class="text-sm text-muted-foreground">swyx Drive</p><h1 class="text-3xl font-semibold my-5">Documents and signing in one place</h1><p class="mb-5">Upload a PDF or create a document from an invoice or agreement template. Open the document and choose Request signatures to place fields and send signing links.</p><p class="text-sm text-muted-foreground mb-6">Review proposed changes, save the PDF, and send it. Signed copies and their signing records stay with the document’s version history.</p><Button as={A} href="/">Open Drive</Button><p class="text-xs text-muted-foreground mt-5">Sender accounts use verified Google sign-in for AI Engineer, Latent Space, and Smol colleagues.</p></main>;
+}
 export function DocumentSigning(props:{organizationId:string;documentId:string;mimeType:string;isDeleted:boolean}){
   const base=()=>`/api/organizations/${props.organizationId}/documents/${props.documentId}/signing`;
   const [data,{refetch}]=createResource(base,path=>apiClient<{canSend:boolean;requests:SigningRequest[]}>({path}));

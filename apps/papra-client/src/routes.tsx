@@ -4,7 +4,7 @@ import type { RouteDefinition } from '@solidjs/router';
 import { Navigate, useParams } from '@solidjs/router';
 import { useQuery } from '@tanstack/solid-query';
 import { Match, Show, Switch } from 'solid-js';
-import { PublicSigningPage, SigningSetupPage } from './modules/drive-signing/signing.pages';
+import { PublicSigningHomePage, PublicSigningPage, SigningSetupPage } from './modules/drive-signing/signing.pages';
 import { authPagesPaths } from './modules/auth/auth.constants';
 import { PublicOnlyPage } from './modules/auth/middleware/protected-page.middleware';
 import { LoginPage } from './modules/auth/pages/login.page';
@@ -206,6 +206,10 @@ export const routes: RouteDefinition[] = [
   {
     path: '/sign/:token',
     component: PublicSigningPage,
+  },
+  {
+    path: '/sign',
+    component: PublicSigningHomePage,
   },
   {
     path: '/review/:token',
