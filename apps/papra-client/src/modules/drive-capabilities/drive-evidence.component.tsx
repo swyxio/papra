@@ -1,8 +1,9 @@
 import type { DriveSource } from './drive-capabilities.services';
-import { createResource, createSignal, For, Show } from 'solid-js';
+import { createResource, createSignal, For, Show, onCleanup } from 'solid-js';
 import { Button } from '../ui/components/button';
 import {
   askDocuments,
+  fetchDocumentSearchStatus,
   semanticSearch,
   sourceHref,
   versionDownloadHref,
@@ -48,6 +49,18 @@ function Sources(props: { organizationId: string; sources: DriveSource[] }) {
 }
 export function DriveEvidence(props: { organizationId: string; documentId?: string }) {
   const [question, setQuestion] = createSignal('');
+  const [textStatus, { refetch: refetchTextStatus }] = createResource(
+    () =>
+      props.documentId
+        ? { organizationId: props.organizationId, documentId: props.documentId }
+        : undefined,
+    async (scope) => fetchDocumentSearchStatus(scope.organizationId, scope.documentId),
+  );
+  const currentTextStatus = () => (textStatus.error ? undefined : textStatus());
+  const timer = setInterval(() => {
+    if (currentTextStatus()?.status === 'processing') void refetchTextStatus();
+  }, 5000);
+  onCleanup(() => clearInterval(timer));
   const [submitted, setSubmitted] = createSignal<{
     organizationId: string;
     documentId?: string;
@@ -84,8 +97,21 @@ export function DriveEvidence(props: { organizationId: string; documentId?: stri
         {props.documentId ? 'Ask this document' : 'Search and ask your files'}
       </h2>
       <p class="text-sm text-muted-foreground">
-        Answers use indexed text from files you can access. Open the sources to verify the answer.
+        Answers quote readable text from files you can access. Open the sources to verify the
+        answer.
       </p>
+      <Show when={props.documentId && currentTextStatus()}>
+        <p class="text-sm text-muted-foreground" role="status" aria-live="polite">
+          {currentTextStatus()?.status === 'processing'
+            ? 'Extracting document text… This updates automatically. You can keep reading the file.'
+            : currentTextStatus()?.status === 'failed'
+              ? 'Text extraction failed. Try uploading this file again.'
+              : currentTextStatus()?.status === 'empty'
+                ? 'No readable text was extracted from this file.'
+                : 'Document text is ready for questions.'}
+        </p>
+      </Show>
+      <DriveError error={textStatus.error} />
       <form
         class="space-y-3"
         onSubmit={(event) => {
@@ -107,7 +133,11 @@ export function DriveEvidence(props: { organizationId: string; documentId?: stri
         </label>
         <div class="flex flex-wrap gap-2">
           <Show when={!props.documentId}>
-            <Button type="submit" isLoading={result.loading} disabled={!question().trim()}>
+            <Button
+              type="submit"
+              isLoading={result.loading}
+              disabled={!question().trim() || result.loading}
+            >
               Search
             </Button>
           </Show>
@@ -115,13 +145,18 @@ export function DriveEvidence(props: { organizationId: string; documentId?: stri
             type={props.documentId ? 'submit' : 'button'}
             variant={props.documentId ? 'default' : 'outline'}
             isLoading={result.loading}
-            disabled={!question().trim()}
+            disabled={!question().trim() || result.loading}
             onClick={() => !props.documentId && submit('answer')}
           >
             Ask for an answer
           </Button>
         </div>
       </form>
+      <Show when={sameScope() && result.loading}>
+        <p role="status" class="text-sm text-muted-foreground">
+          Finding evidence in your files…
+        </p>
+      </Show>
       <DriveError error={sameScope() ? result.error : undefined} />
       <Show when={sameScope() && !result.loading && !result.error && result()}>
         {(value) => (
@@ -132,9 +167,12 @@ export function DriveEvidence(props: { organizationId: string; documentId?: stri
             <Show
               when={value().sources.length}
               fallback={
-                <p class="text-sm text-muted-foreground">
-                  No accessible indexed text matched. Text extraction may still be processing.
-                </p>
+                <Show when={!value().answer}>
+                  <p class="text-sm text-muted-foreground">
+                    No relevant sources to show. Try words that appear in the document or ask a more
+                    specific question.
+                  </p>
+                </Show>
               }
             >
               <h3 class="font-medium">Sources</h3>

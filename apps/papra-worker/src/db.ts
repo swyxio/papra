@@ -69,7 +69,22 @@ export async function formatDocument(env: Env, row: Record<string, any>) {
       ...camel(p),
       key: p.id,
       displayOrder: 0,
-      value: p.value === null ? null : JSON.parse(p.value),
+      value: (() => {
+        const raw = p.value === null ? null : JSON.parse(p.value);
+        if (p.type !== 'select' && p.type !== 'multi_select') return raw;
+        const options: { id: string; name: string }[] = JSON.parse(p.options || '[]');
+        const enrich = (value: unknown) => {
+          const optionId =
+            typeof value === 'string' ? value : (value as { optionId?: string } | null)?.optionId;
+          const option = options.find((o) => o.id === optionId);
+          return optionId ? { optionId, name: option?.name || optionId } : null;
+        };
+        return p.type === 'multi_select'
+          ? Array.isArray(raw)
+            ? raw.map(enrich).filter(Boolean)
+            : []
+          : enrich(raw);
+      })(),
     })),
     fileEncryptionAlgorithm: null,
     fileEncryptionKekVersion: null,

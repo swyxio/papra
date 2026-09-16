@@ -10,47 +10,491 @@ import { Buffer } from 'node:buffer';
 import { build } from 'esbuild';
 import { PDF } from '@libpdf/core';
 import type { AppEnv, Env, Identity } from './types';
-import { registerSigningRoutes, processSigning, recipientToken } from './signing';
-import { validateFields, signingPdf } from './signing-pdf';
+import { registerSigningRoutes, processSigning } from './signing';
+import { validateFields, signingPdf, formatSigningDate, signingTimeZone } from './signing-pdf';
 
-vi.mock('./jobs',()=>({enqueueVersion:vi.fn(async()=>{})}));
-const instances:Miniflare[]=[],directories:string[]=[];
-afterEach(async()=>{vi.unstubAllGlobals();for(const m of instances.splice(0))await m.dispose();for(const d of directories.splice(0))await rm(d,{recursive:true,force:true});});
-const field={type:'signature',recipient:0,page:1,x:.1,y:.7,width:.3,height:.07};
-async function fixture(){
-  const m=new Miniflare({modules:true,script:'export default {fetch(){return new Response("OK")}}',compatibilityDate:'2026-07-21',d1Databases:['DB'],r2Buckets:['FILES','BACKUPS']});instances.push(m);
-  const DB=await m.getD1Database('DB');await DB.exec(await readFile(new NodeURL('../schema.sql',import.meta.url),'utf8'));
-  const env={DB,FILES:await m.getR2Bucket('FILES'),BACKUPS:await m.getR2Bucket('BACKUPS'),JOBS:{send:vi.fn(async()=>{})},AUTH_SECRET:'test-signing-secret'.repeat(4),AUTH_LIMITER:{limit:async()=>({success:true})},APP_URL:'https://drive.example',SIGNING_P12:'configured',SIGNING_PASSPHRASE:'configured',RESEND_API_KEY:'test-only',SIGNING_FROM:'TEST ONLY <test@example.com>'} as unknown as Env;
-  for(const [u,role] of [['admin','admin'],['writer','member'],['other','owner']]){
-    await DB.prepare('INSERT INTO users(id,google_sub,email,email_verified,name,created_at,updated_at) VALUES (?,?,?,1,?,1,1)').bind(u,`google-${u}`,`${u}@ai.engineer`,u).run();
-    if(u==='admin')await DB.prepare('INSERT INTO organizations(id,name,created_at,updated_at) VALUES (?,?,1,1)').bind('team','team').run();
-    if(u==='other')await DB.prepare('INSERT INTO organizations(id,name,created_at,updated_at) VALUES (?,?,1,1)').bind('other','other').run();
-    await DB.prepare('INSERT INTO organization_members(id,organization_id,user_id,role,created_at,updated_at) VALUES (?,?,?,?,1,1)').bind(u,u==='other'?'other':'team',u,role).run();
-  }
-  await DB.prepare('INSERT INTO folders(id,organization_id,name,is_home,is_restricted,created_by,created_at,updated_at) VALUES (?,?,?,1,0,?,1,1)').bind('fld_home_team','team','Home','admin').run();
-  const pdf=PDF.create();pdf.addPage().drawText('TEST ONLY - Not an agreement',{x:45,y:720,size:16});const bytes=await pdf.save();await env.FILES.put('original.pdf',bytes);
-  await DB.prepare('INSERT INTO documents(id,organization_id,created_by,name,mime_type,current_version_id,home_folder_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,1)').bind('document','team','admin','TEST ONLY.pdf','application/pdf','original','fld_home_team',1).run();
-  await DB.prepare('INSERT INTO versions(id,document_id,storage_key,original_name,mime_type,size,created_by,created_at) VALUES (?,?,?,?,?,?,?,1)').bind('original','document','original.pdf','TEST ONLY.pdf','application/pdf',bytes.length,'admin').run();
-  const app=new Hono<AppEnv>();app.use('*',async(c,next)=>{const user=c.req.header('X-Test-User')||'admin';c.set('identity',{userId:user,name:user,email:`${user}@ai.engineer`,isOwner:false,organizations:[{id:user==='other'?'other':'team',name:'Team',role:user==='writer'?'member':'admin'}],session:{id:'test',expiresAt:new Date()}} as Identity);await next();});registerSigningRoutes(app);
-  const base='/api/organizations/team/documents/document/signing';
-  async function request(path=base,body?:unknown,user='admin'){return app.request(`https://drive.example${path}`,body?{method:'POST',headers:{'Content-Type':'application/json','X-Test-User':user},body:JSON.stringify(body)}:{headers:{'X-Test-User':user}},env);}
-  const payload={idempotencyKey:'test-send-key',versionId:'original',recipients:[{name:'Test Signer',email:'test@example.com'}],fields:[field]};
-  return {env,DB,request,base,payload,bytes};
-}
-async function certificate(){const dir=await mkdtemp(join(tmpdir(),'papra-signing-test-'));directories.push(dir);execFileSync('openssl',['req','-x509','-newkey','rsa:2048','-nodes','-keyout',join(dir,'key.pem'),'-out',join(dir,'cert.pem'),'-days','1','-subj','/CN=Papra TEST ONLY'],{stdio:['ignore','pipe','pipe']});execFileSync('openssl',['pkcs12','-export','-out',join(dir,'test.p12'),'-inkey',join(dir,'key.pem'),'-in',join(dir,'cert.pem'),'-passout','pass:test-only'],{stdio:['ignore','pipe','pipe']});return {dir,p12:await readFile(join(dir,'test.p12'))};}
-describe('native signing authorization and lifecycle',()=>{
-  test('setup checks the pinned PDF before composing and rejects malformed recipient addresses clearly',async()=>{const f=await fixture();expect(await (await f.request(`${f.base}/source/original?check=true`)).json()).toEqual({ok:true});expect((await f.request(`${f.base}/source/original?check=true`,undefined,'writer')).status).toBe(403);expect((await f.request(`${f.base}/source/original?check=true`,undefined,'other')).status).toBe(403);const invalid=await f.request(f.base,{...f.payload,recipients:[{name:'Shawn',email:'wang'}]});expect(invalid.status).toBe(400);expect(await invalid.text()).toContain('valid email');expect((await f.DB.prepare('SELECT count(*) n FROM signing_requests').first())?.n).toBe(0);});
-  test('repeating a send after a lost response creates one request and one invitation',async()=>{const f=await fixture();const a=await (await f.request(f.base,f.payload)).json() as any;const b=await (await f.request(f.base,f.payload)).json() as any;expect(a.request.id).toBe(b.request.id);expect((await f.DB.prepare('SELECT count(*) n FROM signing_requests').first())?.n).toBe(1);expect((await f.DB.prepare('SELECT count(*) n FROM signing_mail').first())?.n).toBe(1);});
-  test('writers and another team cannot initiate signing; stale revisions cannot be sent',async()=>{const f=await fixture();expect((await f.request(f.base,f.payload,'writer')).status).toBe(403);expect((await f.request(f.base,f.payload,'other')).status).toBe(403);expect((await f.request(f.base,{...f.payload,versionId:'stale'})).status).toBe(409);});
-  test('every recipient needs an assigned signature; invalid geometry and duplicate emails fail',async()=>{const f=await fixture();expect((await f.request(f.base,{...f.payload,fields:[{...field,x:.99}]})).status).toBe(400);expect((await f.request(f.base,{...f.payload,recipients:[...f.payload.recipients,...f.payload.recipients]})).status).toBe(400);expect(()=>validateFields([field],2,1)).toThrow('Every recipient');});
-  test('bearer links scope to a recipient; consent is required; accepted signing is idempotent',async()=>{const f=await fixture();const created=await f.request(f.base,f.payload);expect(created.status).toBe(201);const {request:r}=await created.json() as any;const token=new URL(r.recipients[0].url).pathname.split('/').pop();expect((await f.request(`/api/signing/${token}bad`)).status).toBe(404);expect((await f.request(`/api/signing/${token}`)).status).toBe(200);expect((await f.request(`/api/signing/${token}/sign`,{name:'Test',signature:'Test'})).status).toBe(400);expect((await f.request(`/api/signing/${token}/sign`,{name:'Test',signature:'Test',consent:true})).status).toBe(200);const first=await f.DB.prepare('SELECT * FROM signing_recipients WHERE request_id=?').bind(r.id).first();expect((await f.request(`/api/signing/${token}/sign`,{name:'Changed',signature:'Changed',consent:true})).status).toBe(200);const again=await f.DB.prepare('SELECT * FROM signing_recipients WHERE request_id=?').bind(r.id).first();expect(again?.signature).toBe('Test');expect(again?.signed_at).toBe(first?.signed_at);});
-  test('cancellation and removal of sender authority revoke links',async()=>{const f=await fixture();const {request:r}=await (await f.request(f.base,f.payload)).json() as any;const token=new URL(r.recipients[0].url).pathname.split('/').pop();await f.DB.prepare("UPDATE organization_members SET role='member' WHERE user_id='admin'").run();expect((await f.request(`/api/signing/${token}`)).status).toBe(410);await f.DB.prepare("UPDATE organization_members SET role='admin' WHERE user_id='admin'").run();expect((await f.request(`${f.base}/${r.id}/cancel`,{})).status).toBe(200);expect((await f.request(`/api/signing/${token}/sign`,{name:'Test',signature:'Test',consent:true})).status).toBe(410);});
-  test('seals the entire PDF and signing record, archives an immutable version and independent backup',async()=>{const f=await fixture();const cert=await certificate();f.env.SIGNING_P12=Buffer.from(cert.p12).toString('base64');f.env.SIGNING_PASSPHRASE='test-only';vi.stubGlobal('fetch',vi.fn(async()=>Response.json({id:'synthetic-provider-receipt'})));const {request:r}=await (await f.request(f.base,f.payload)).json() as any;const token=new URL(r.recipients[0].url).pathname.split('/').pop();await f.request(`/api/signing/${token}/sign`,{name:'Test Signer',signature:'Test Signer',consent:true});await processSigning(f.env,r.id);const stored=await f.DB.prepare('SELECT * FROM signing_requests WHERE id=?').bind(r.id).first<any>();expect(stored.status).toBe('completed');expect((await f.DB.prepare('SELECT current_version_id FROM documents WHERE id=?').bind('document').first())?.current_version_id).toBe(stored.signed_version_id);const signed=Buffer.from(await (await f.env.FILES.get(stored.signed_key))!.arrayBuffer());expect(Buffer.from(await (await f.env.BACKUPS.get(stored.signed_key))!.arrayBuffer()).equals(signed)).toBe(true);expect(await f.env.FILES.head('original.pdf')).not.toBeNull();const loaded=await PDF.load(signed);expect(loaded.getPages().length).toBe(2);expect(loaded.getForm()?.getSignatureFields().length).toBe(1);await expect(signingPdf(signed)).rejects.toThrow('already contains');const check=await f.request(`${f.base}/source/${stored.signed_version_id}?check=true`);expect(check.status).toBe(400);expect(await check.text()).toContain('already contains a digital signature');expect((await f.request(`${f.base}/source/original?check=true`)).status).toBe(200);
-    const raw=signed.toString('latin1'),range=raw.match(/\/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\]/)!;expect(range).not.toBeNull();const [start,len,second,last]=range.slice(1).map(Number);expect(start).toBe(0);expect(second+last).toBe(signed.length);const data=Buffer.concat([signed.subarray(0,len),signed.subarray(second,second+last)]);const contents=raw.slice(len,second).match(/<([a-fA-F0-9]+)>/)![1];const der=Buffer.from(contents,'hex');await writeFile(join(cert.dir,'data.bin'),data);await writeFile(join(cert.dir,'signature.der'),der);execFileSync('openssl',['cms','-verify','-binary','-inform','DER','-in',join(cert.dir,'signature.der'),'-content',join(cert.dir,'data.bin'),'-noverify','-out',join(cert.dir,'verified.bin')],{stdio:['ignore','pipe','pipe']});
-    const before=stored.signed_key;await processSigning(f.env,r.id);expect((await f.DB.prepare('SELECT signed_key FROM signing_requests WHERE id=?').bind(r.id).first())?.signed_key).toBe(before);
-  });
-  test('sealing never overwrites a newer uploaded revision',async()=>{const f=await fixture();const cert=await certificate();f.env.SIGNING_P12=Buffer.from(cert.p12).toString('base64');f.env.SIGNING_PASSPHRASE='test-only';vi.stubGlobal('fetch',vi.fn(async()=>Response.json({id:'synthetic'})));const {request:r}=await (await f.request(f.base,f.payload)).json() as any;const token=new URL(r.recipients[0].url).pathname.split('/').pop();await f.request(`/api/signing/${token}/sign`,{name:'Test',signature:'Test',consent:true});await f.env.FILES.put('newer.pdf',f.bytes);await f.DB.prepare("INSERT INTO versions(id,document_id,storage_key,original_name,mime_type,size,created_by,created_at) VALUES ('newer-revision','document','newer.pdf','Newer.pdf','application/pdf',?,'admin',2)").bind(f.bytes.length).run();await f.DB.prepare("UPDATE documents SET current_version_id='newer-revision' WHERE id='document'").run();await processSigning(f.env,r.id);expect((await f.DB.prepare("SELECT current_version_id FROM documents WHERE id='document'").first())?.current_version_id).toBe('newer-revision');expect((await f.DB.prepare('SELECT status FROM signing_requests WHERE id=?').bind(r.id).first())?.status).toBe('completed');});
+vi.mock('./jobs', () => ({ enqueueVersion: vi.fn(async () => {}) }));
+const instances: Miniflare[] = [],
+  directories: string[] = [];
+afterEach(async () => {
+  vi.unstubAllGlobals();
+  for (const m of instances.splice(0)) await m.dispose();
+  for (const d of directories.splice(0)) await rm(d, { recursive: true, force: true });
 });
-test('PDF sealing runs inside the actual Workers runtime with Web Crypto',async()=>{
-  const cert=await certificate();const result=await build({stdin:{contents:`import {sealSigningPdf} from './src/signing-pdf';import {PDF} from '@libpdf/core';export default {async fetch(req,env){const p=PDF.create();p.addPage().drawText('TEST ONLY',{x:40,y:700,size:16});const signed=await sealSigningPdf(await p.save(),[{id:'f',recipient:0,type:'signature',page:1,x:.1,y:.7,width:.3,height:.07}],[{name:'Test',email:'test@example.com',signedAt:1,signature:'Test',values:{},address:'test'}],{requestId:'test',name:'TEST ONLY',sourceSha256:'test',createdAt:1},Uint8Array.from(atob(env.P12),x=>x.charCodeAt(0)),'test-only');return new Response(signed)}}`,resolveDir:new URL('..',import.meta.url).pathname,sourcefile:'test-worker.ts'},bundle:true,write:false,format:'esm',platform:'browser',external:['node:*','@google-cloud/*']});const m=new Miniflare({modules:true,script:result.outputFiles[0].text,compatibilityDate:'2026-07-21',compatibilityFlags:['nodejs_compat'],bindings:{P12:Buffer.from(cert.p12).toString('base64')}});instances.push(m);const response=await m.dispatchFetch('https://worker.test');expect(response.status).toBe(200);const pdf=await PDF.load(new Uint8Array(await response.arrayBuffer()));expect(pdf.getForm()?.getSignatureFields().length).toBe(1);expect(pdf.getPages().length).toBe(2);
+const field = {
+  type: 'signature',
+  recipient: 0,
+  page: 1,
+  x: 0.1,
+  y: 0.7,
+  width: 0.3,
+  height: 0.07,
+};
+async function fixture() {
+  const m = new Miniflare({
+    modules: true,
+    script: 'export default {fetch(){return new Response("OK")}}',
+    compatibilityDate: '2026-07-21',
+    d1Databases: ['DB'],
+    r2Buckets: ['FILES', 'BACKUPS'],
+  });
+  instances.push(m);
+  const DB = await m.getD1Database('DB');
+  await DB.exec(await readFile(new NodeURL('../schema.sql', import.meta.url), 'utf8'));
+  const env = {
+    DB,
+    FILES: await m.getR2Bucket('FILES'),
+    BACKUPS: await m.getR2Bucket('BACKUPS'),
+    JOBS: { send: vi.fn(async () => {}) },
+    AUTH_SECRET: 'test-signing-secret'.repeat(4),
+    AUTH_LIMITER: { limit: async () => ({ success: true }) },
+    APP_URL: 'https://drive.example',
+    SIGNING_P12: 'configured',
+    SIGNING_PASSPHRASE: 'configured',
+    RESEND_API_KEY: 'test-only',
+    SIGNING_FROM: 'TEST ONLY <test@example.com>',
+  } as unknown as Env;
+  for (const [u, role] of [
+    ['admin', 'admin'],
+    ['writer', 'member'],
+    ['other', 'owner'],
+  ]) {
+    await DB.prepare(
+      'INSERT INTO users(id,google_sub,email,email_verified,name,created_at,updated_at) VALUES (?,?,?,1,?,1,1)',
+    )
+      .bind(u, `google-${u}`, `${u}@ai.engineer`, u)
+      .run();
+    if (u === 'admin')
+      await DB.prepare('INSERT INTO organizations(id,name,created_at,updated_at) VALUES (?,?,1,1)')
+        .bind('team', 'team')
+        .run();
+    if (u === 'other')
+      await DB.prepare('INSERT INTO organizations(id,name,created_at,updated_at) VALUES (?,?,1,1)')
+        .bind('other', 'other')
+        .run();
+    await DB.prepare(
+      'INSERT INTO organization_members(id,organization_id,user_id,role,created_at,updated_at) VALUES (?,?,?,?,1,1)',
+    )
+      .bind(u, u === 'other' ? 'other' : 'team', u, role)
+      .run();
+  }
+  await DB.prepare(
+    'INSERT INTO folders(id,organization_id,name,is_home,is_restricted,created_by,created_at,updated_at) VALUES (?,?,?,1,0,?,1,1)',
+  )
+    .bind('fld_home_team', 'team', 'Home', 'admin')
+    .run();
+  const pdf = PDF.create();
+  pdf.addPage().drawText('TEST ONLY - Not an agreement', { x: 45, y: 720, size: 16 });
+  const bytes = await pdf.save();
+  await env.FILES.put('original.pdf', bytes);
+  await DB.prepare(
+    'INSERT INTO documents(id,organization_id,created_by,name,mime_type,current_version_id,home_folder_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,1)',
+  )
+    .bind(
+      'document',
+      'team',
+      'admin',
+      'TEST ONLY.pdf',
+      'application/pdf',
+      'original',
+      'fld_home_team',
+      1,
+    )
+    .run();
+  await DB.prepare(
+    'INSERT INTO versions(id,document_id,storage_key,original_name,mime_type,size,created_by,created_at) VALUES (?,?,?,?,?,?,?,1)',
+  )
+    .bind(
+      'original',
+      'document',
+      'original.pdf',
+      'TEST ONLY.pdf',
+      'application/pdf',
+      bytes.length,
+      'admin',
+    )
+    .run();
+  const app = new Hono<AppEnv>();
+  app.use('*', async (c, next) => {
+    const user = c.req.header('X-Test-User') || 'admin';
+    c.set('identity', {
+      userId: user,
+      name: user,
+      email: `${user}@ai.engineer`,
+      isOwner: false,
+      organizations: [
+        {
+          id: user === 'other' ? 'other' : 'team',
+          name: 'Team',
+          role: user === 'writer' ? 'member' : 'admin',
+        },
+      ],
+      session: { id: 'test', expiresAt: new Date() },
+    } as Identity);
+    await next();
+  });
+  registerSigningRoutes(app);
+  const base = '/api/organizations/team/documents/document/signing';
+  async function request(path = base, body?: unknown, user = 'admin') {
+    return app.request(
+      `https://drive.example${path}`,
+      body
+        ? {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Test-User': user },
+            body: JSON.stringify(body),
+          }
+        : { headers: { 'X-Test-User': user } },
+      env,
+    );
+  }
+  const payload = {
+    idempotencyKey: 'test-send-key',
+    versionId: 'original',
+    recipients: [{ name: 'Test Signer', email: 'test@example.com' }],
+    fields: [field],
+  };
+  return { env, DB, request, base, payload, bytes };
+}
+async function certificate() {
+  const dir = await mkdtemp(join(tmpdir(), 'papra-signing-test-'));
+  directories.push(dir);
+  execFileSync(
+    'openssl',
+    [
+      'req',
+      '-x509',
+      '-newkey',
+      'rsa:2048',
+      '-nodes',
+      '-keyout',
+      join(dir, 'key.pem'),
+      '-out',
+      join(dir, 'cert.pem'),
+      '-days',
+      '1',
+      '-subj',
+      '/CN=Papra TEST ONLY',
+    ],
+    { stdio: ['ignore', 'pipe', 'pipe'] },
+  );
+  execFileSync(
+    'openssl',
+    [
+      'pkcs12',
+      '-export',
+      '-out',
+      join(dir, 'test.p12'),
+      '-inkey',
+      join(dir, 'key.pem'),
+      '-in',
+      join(dir, 'cert.pem'),
+      '-passout',
+      'pass:test-only',
+    ],
+    { stdio: ['ignore', 'pipe', 'pipe'] },
+  );
+  return { dir, p12: await readFile(join(dir, 'test.p12')) };
+}
+test('signed date uses the persisted signer timezone, including midnight and daylight savings', () => {
+  const timestamp = Date.parse('2026-09-17T01:30:00Z');
+  expect(formatSigningDate(timestamp, 'America/Los_Angeles')).toBe('2026-09-16');
+  expect(formatSigningDate(timestamp, 'Asia/Singapore')).toBe('2026-09-17');
+  expect(signingTimeZone(undefined)).toBe('UTC');
+  expect(() => signingTimeZone('Mars/Phobos')).toThrow('valid signing time zone');
+});
+describe('native signing authorization and lifecycle', () => {
+  test('date signed is generated from server time and caller timezone, not supplied field values', async () => {
+    const f = await fixture();
+    const { request: r } = (await (
+      await f.request(f.base, { ...f.payload, fields: [field, { ...field, type: 'date', y: 0.5 }] })
+    ).json()) as any;
+    const token = new URL(r.recipients[0].url).pathname.split('/').pop();
+    expect(
+      (
+        await f.request(`/api/signing/${token}/sign`, {
+          name: 'Test',
+          signature: 'Test',
+          consent: true,
+          timeZone: 'not/a/zone',
+        })
+      ).status,
+    ).toBe(400);
+    const before = Date.now();
+    expect(
+      (
+        await f.request(`/api/signing/${token}/sign`, {
+          name: 'Test',
+          signature: 'Test',
+          consent: true,
+          timeZone: 'America/Los_Angeles',
+          values: { field_1: '1900-01-01', _signingTimeZone: 'UTC' },
+        })
+      ).status,
+    ).toBe(200);
+    const recipient = await f.DB.prepare('SELECT * FROM signing_recipients WHERE request_id=?')
+      .bind(r.id)
+      .first<any>();
+    expect(recipient.signed_at).toBeGreaterThanOrEqual(before);
+    expect(JSON.parse(recipient.values_json)).toEqual({ _signingTimeZone: 'America/Los_Angeles' });
+    const publicRequest = (await (await f.request(`/api/signing/${token}`)).json()) as any;
+    expect(publicRequest.recipient.timeZone).toBe('America/Los_Angeles');
+    expect(publicRequest.recipient.signedAt).toBe(recipient.signed_at);
+  });
+  test('setup checks the pinned PDF before composing and rejects malformed recipient addresses clearly', async () => {
+    const f = await fixture();
+    expect(await (await f.request(`${f.base}/source/original?check=true`)).json()).toEqual({
+      ok: true,
+    });
+    expect(
+      (await f.request(`${f.base}/source/original?check=true`, undefined, 'writer')).status,
+    ).toBe(403);
+    expect(
+      (await f.request(`${f.base}/source/original?check=true`, undefined, 'other')).status,
+    ).toBe(403);
+    const invalid = await f.request(f.base, {
+      ...f.payload,
+      recipients: [{ name: 'Shawn', email: 'wang' }],
+    });
+    expect(invalid.status).toBe(400);
+    expect(await invalid.text()).toContain('valid email');
+    expect((await f.DB.prepare('SELECT count(*) n FROM signing_requests').first())?.n).toBe(0);
+  });
+  test('repeating a send after a lost response creates one request and one invitation', async () => {
+    const f = await fixture();
+    const a = (await (await f.request(f.base, f.payload)).json()) as any;
+    const b = (await (await f.request(f.base, f.payload)).json()) as any;
+    expect(a.request.id).toBe(b.request.id);
+    expect((await f.DB.prepare('SELECT count(*) n FROM signing_requests').first())?.n).toBe(1);
+    expect((await f.DB.prepare('SELECT count(*) n FROM signing_mail').first())?.n).toBe(1);
+  });
+  test('writers and another team cannot initiate signing; stale revisions cannot be sent', async () => {
+    const f = await fixture();
+    expect((await f.request(f.base, f.payload, 'writer')).status).toBe(403);
+    expect((await f.request(f.base, f.payload, 'other')).status).toBe(403);
+    expect((await f.request(f.base, { ...f.payload, versionId: 'stale' })).status).toBe(409);
+  });
+  test('every recipient needs an assigned signature; invalid geometry and duplicate emails fail', async () => {
+    const f = await fixture();
+    expect(
+      (await f.request(f.base, { ...f.payload, fields: [{ ...field, x: 0.99 }] })).status,
+    ).toBe(400);
+    expect(
+      (
+        await f.request(f.base, {
+          ...f.payload,
+          recipients: [...f.payload.recipients, ...f.payload.recipients],
+        })
+      ).status,
+    ).toBe(400);
+    expect(() => validateFields([field], 2, 1)).toThrow('Every recipient');
+  });
+  test('bearer links scope to a recipient; consent is required; accepted signing is idempotent', async () => {
+    const f = await fixture();
+    const created = await f.request(f.base, f.payload);
+    expect(created.status).toBe(201);
+    const { request: r } = (await created.json()) as any;
+    const token = new URL(r.recipients[0].url).pathname.split('/').pop();
+    expect((await f.request(`/api/signing/${token}bad`)).status).toBe(404);
+    expect((await f.request(`/api/signing/${token}`)).status).toBe(200);
+    expect(
+      (await f.request(`/api/signing/${token}/sign`, { name: 'Test', signature: 'Test' })).status,
+    ).toBe(400);
+    expect(
+      (
+        await f.request(`/api/signing/${token}/sign`, {
+          name: 'Test',
+          signature: 'Test',
+          consent: true,
+        })
+      ).status,
+    ).toBe(200);
+    const first = await f.DB.prepare('SELECT * FROM signing_recipients WHERE request_id=?')
+      .bind(r.id)
+      .first();
+    expect(
+      (
+        await f.request(`/api/signing/${token}/sign`, {
+          name: 'Changed',
+          signature: 'Changed',
+          consent: true,
+        })
+      ).status,
+    ).toBe(200);
+    const again = await f.DB.prepare('SELECT * FROM signing_recipients WHERE request_id=?')
+      .bind(r.id)
+      .first();
+    expect(again?.signature).toBe('Test');
+    expect(again?.signed_at).toBe(first?.signed_at);
+  });
+  test('cancellation and removal of sender authority revoke links', async () => {
+    const f = await fixture();
+    const { request: r } = (await (await f.request(f.base, f.payload)).json()) as any;
+    const token = new URL(r.recipients[0].url).pathname.split('/').pop();
+    await f.DB.prepare("UPDATE organization_members SET role='member' WHERE user_id='admin'").run();
+    expect((await f.request(`/api/signing/${token}`)).status).toBe(410);
+    await f.DB.prepare("UPDATE organization_members SET role='admin' WHERE user_id='admin'").run();
+    expect((await f.request(`${f.base}/${r.id}/cancel`, {})).status).toBe(200);
+    expect(
+      (
+        await f.request(`/api/signing/${token}/sign`, {
+          name: 'Test',
+          signature: 'Test',
+          consent: true,
+        })
+      ).status,
+    ).toBe(410);
+  });
+  test('seals the entire PDF and signing record, archives an immutable version and independent backup', async () => {
+    const f = await fixture();
+    const cert = await certificate();
+    f.env.SIGNING_P12 = Buffer.from(cert.p12).toString('base64');
+    f.env.SIGNING_PASSPHRASE = 'test-only';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ id: 'synthetic-provider-receipt' })),
+    );
+    const { request: r } = (await (
+      await f.request(f.base, { ...f.payload, fields: [field, { ...field, type: 'date', y: 0.5 }] })
+    ).json()) as any;
+    const token = new URL(r.recipients[0].url).pathname.split('/').pop();
+    await f.request(`/api/signing/${token}/sign`, {
+      name: 'Test Signer',
+      signature: 'Test Signer',
+      consent: true,
+      timeZone: 'America/Los_Angeles',
+    });
+    await processSigning(f.env, r.id);
+    const stored = await f.DB.prepare('SELECT * FROM signing_requests WHERE id=?')
+      .bind(r.id)
+      .first<any>();
+    expect(stored.status).toBe('completed');
+    expect(
+      (
+        await f.DB.prepare('SELECT current_version_id FROM documents WHERE id=?')
+          .bind('document')
+          .first()
+      )?.current_version_id,
+    ).toBe(stored.signed_version_id);
+    const signed = Buffer.from(await (await f.env.FILES.get(stored.signed_key))!.arrayBuffer());
+    expect(
+      Buffer.from(await (await f.env.BACKUPS.get(stored.signed_key))!.arrayBuffer()).equals(signed),
+    ).toBe(true);
+    expect(await f.env.FILES.head('original.pdf')).not.toBeNull();
+    const loaded = await PDF.load(signed);
+    const recipient = await f.DB.prepare(
+      'SELECT signed_at FROM signing_recipients WHERE request_id=?',
+    )
+      .bind(r.id)
+      .first<any>();
+    expect(loaded.getPages()[0].extractText().text).toContain(
+      formatSigningDate(recipient.signed_at, 'America/Los_Angeles'),
+    );
+    expect(loaded.getPages()[1].extractText().text).toContain('America/Los_Angeles');
+    expect(loaded.getPages().length).toBe(2);
+    expect(loaded.getForm()?.getSignatureFields().length).toBe(1);
+    await expect(signingPdf(signed)).rejects.toThrow('already contains');
+    const check = await f.request(`${f.base}/source/${stored.signed_version_id}?check=true`);
+    expect(check.status).toBe(400);
+    expect(await check.text()).toContain('already contains a digital signature');
+    expect((await f.request(`${f.base}/source/original?check=true`)).status).toBe(200);
+    const raw = signed.toString('latin1'),
+      range = raw.match(/\/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\]/)!;
+    expect(range).not.toBeNull();
+    const [start, len, second, last] = range.slice(1).map(Number);
+    expect(start).toBe(0);
+    expect(second + last).toBe(signed.length);
+    const data = Buffer.concat([signed.subarray(0, len), signed.subarray(second, second + last)]);
+    const contents = raw.slice(len, second).match(/<([a-fA-F0-9]+)>/)![1];
+    const der = Buffer.from(contents, 'hex');
+    await writeFile(join(cert.dir, 'data.bin'), data);
+    await writeFile(join(cert.dir, 'signature.der'), der);
+    execFileSync(
+      'openssl',
+      [
+        'cms',
+        '-verify',
+        '-binary',
+        '-inform',
+        'DER',
+        '-in',
+        join(cert.dir, 'signature.der'),
+        '-content',
+        join(cert.dir, 'data.bin'),
+        '-noverify',
+        '-out',
+        join(cert.dir, 'verified.bin'),
+      ],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    const before = stored.signed_key;
+    await processSigning(f.env, r.id);
+    expect(
+      (await f.DB.prepare('SELECT signed_key FROM signing_requests WHERE id=?').bind(r.id).first())
+        ?.signed_key,
+    ).toBe(before);
+  });
+  test('sealing never overwrites a newer uploaded revision', async () => {
+    const f = await fixture();
+    const cert = await certificate();
+    f.env.SIGNING_P12 = Buffer.from(cert.p12).toString('base64');
+    f.env.SIGNING_PASSPHRASE = 'test-only';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ id: 'synthetic' })),
+    );
+    const { request: r } = (await (await f.request(f.base, f.payload)).json()) as any;
+    const token = new URL(r.recipients[0].url).pathname.split('/').pop();
+    await f.request(`/api/signing/${token}/sign`, {
+      name: 'Test',
+      signature: 'Test',
+      consent: true,
+    });
+    await f.env.FILES.put('newer.pdf', f.bytes);
+    await f.DB.prepare(
+      "INSERT INTO versions(id,document_id,storage_key,original_name,mime_type,size,created_by,created_at) VALUES ('newer-revision','document','newer.pdf','Newer.pdf','application/pdf',?,'admin',2)",
+    )
+      .bind(f.bytes.length)
+      .run();
+    await f.DB.prepare(
+      "UPDATE documents SET current_version_id='newer-revision' WHERE id='document'",
+    ).run();
+    await processSigning(f.env, r.id);
+    expect(
+      (await f.DB.prepare("SELECT current_version_id FROM documents WHERE id='document'").first())
+        ?.current_version_id,
+    ).toBe('newer-revision');
+    expect(
+      (await f.DB.prepare('SELECT status FROM signing_requests WHERE id=?').bind(r.id).first())
+        ?.status,
+    ).toBe('completed');
+  });
+});
+test('PDF sealing runs inside the actual Workers runtime with Web Crypto', async () => {
+  const cert = await certificate();
+  const result = await build({
+    stdin: {
+      contents: `import {sealSigningPdf} from './src/signing-pdf';import {PDF} from '@libpdf/core';export default {async fetch(req,env){const p=PDF.create();p.addPage().drawText('TEST ONLY',{x:40,y:700,size:16});const signed=await sealSigningPdf(await p.save(),[{id:'f',recipient:0,type:'signature',page:1,x:.1,y:.7,width:.3,height:.07}],[{name:'Test',email:'test@example.com',signedAt:1,signature:'Test',values:{},address:'test'}],{requestId:'test',name:'TEST ONLY',sourceSha256:'test',createdAt:1},Uint8Array.from(atob(env.P12),x=>x.charCodeAt(0)),'test-only');return new Response(signed)}}`,
+      resolveDir: new URL('..', import.meta.url).pathname,
+      sourcefile: 'test-worker.ts',
+    },
+    bundle: true,
+    write: false,
+    format: 'esm',
+    platform: 'browser',
+    external: ['node:*', '@google-cloud/*'],
+  });
+  const m = new Miniflare({
+    modules: true,
+    script: result.outputFiles[0].text,
+    compatibilityDate: '2026-07-21',
+    compatibilityFlags: ['nodejs_compat'],
+    bindings: { P12: Buffer.from(cert.p12).toString('base64') },
+  });
+  instances.push(m);
+  const response = await m.dispatchFetch('https://worker.test');
+  expect(response.status).toBe(200);
+  const pdf = await PDF.load(new Uint8Array(await response.arrayBuffer()));
+  expect(pdf.getForm()?.getSignatureFields().length).toBe(1);
+  expect(pdf.getPages().length).toBe(2);
 });

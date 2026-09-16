@@ -1,13 +1,15 @@
 import type { Component, ParentComponent } from 'solid-js';
 import { useQuery } from '@tanstack/solid-query';
 import { createContext, createEffect, createSignal, on, Show, useContext } from 'solid-js';
-import { Dialog, DialogContent } from '@/modules/ui/components/dialog';
+import { getHttpErrorMessage } from '@/modules/shared/http/http-errors';
+import { Button } from '@/modules/ui/components/button';
+import { Dialog, DialogTitle, DialogContent } from '@/modules/ui/components/dialog';
 import { fetchDocumentShareLinks } from '../document-share-links.services';
 import { ShareDocumentDialogCreateView } from './share-document-dialog-create-view.component';
 import { ShareDocumentDialogCreatedView } from './share-document-dialog-created-view.component';
 import { ShareDocumentDialogListView } from './share-document-dialog-list-view.component';
 
-type DialogView = 'loading' | 'list' | 'create' | 'created';
+type DialogView = 'error' | 'loading' | 'list' | 'create' | 'created';
 
 export const ShareDocumentDialog: Component<{
   open: boolean;
@@ -53,10 +55,13 @@ export const ShareDocumentDialog: Component<{
   // Once the links have loaded, decide the initial view: the list when links exist, otherwise the create form.
   createEffect(() => {
     if (props.open && getView() === 'loading' && shareLinksQuery.isSuccess) {
-      setView(hasExistingLinks() ? 'list' : 'create');
+      setView(hasExistingLinks() || !shareLinksQuery.data?.canManage ? 'list' : 'create');
     }
   });
 
+  createEffect(() => {
+    if (props.open && getView() === 'loading' && shareLinksQuery.isError) setView('error');
+  });
   const goToCreate = () => {
     setView('create');
   };
@@ -74,6 +79,20 @@ export const ShareDocumentDialog: Component<{
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent class="sm:max-w-[540px]">
+        <Show when={getView() === 'error'}>
+          <DialogTitle>Could not load sharing links</DialogTitle>
+          <p role="alert" class="text-sm text-destructive">
+            {getHttpErrorMessage(shareLinksQuery.error)}
+          </p>
+          <Button
+            onClick={() => {
+              setView('loading');
+              void shareLinksQuery.refetch();
+            }}
+          >
+            Try again
+          </Button>
+        </Show>
         <Show when={getView() === 'loading'}>
           <div class="flex items-center justify-center py-10">
             <div class="i-tabler-loader-2 size-6 animate-spin text-muted-foreground" />
@@ -85,6 +104,7 @@ export const ShareDocumentDialog: Component<{
             shareLinks={shareLinksQuery.data?.shareLinks ?? []}
             documentName={props.document.name}
             onCreateNew={goToCreate}
+            canManage={!!shareLinksQuery.data?.canManage}
           />
         </Show>
 

@@ -79,6 +79,33 @@ export function registerUploadRoutes(app: App) {
     }
     const folder = await canWriteFolder(c.env, user, folderId);
     if (folder.organization_id !== org) throw error(403, 'Folder access denied');
+    if (!replacement) {
+      const existing = await first(
+        c.env,
+        'SELECT id,name FROM documents WHERE organization_id=? AND home_folder_id=? AND is_deleted=0 AND lower(name)=lower(?) LIMIT 1',
+        org,
+        folderId,
+        b.fileName.trim(),
+      );
+      if (existing) {
+        let canReplace = true;
+        try {
+          await ensureDocumentAccess(c.env, user, existing.id, 'write');
+        } catch {
+          canReplace = false;
+        }
+        return c.json(
+          {
+            message:
+              'A file with this name already exists in this folder. Replace it or choose a different name.',
+            code: 'duplicate_file_name',
+            existingDocument: { id: existing.id, name: existing.name },
+            canReplace,
+          },
+          409,
+        );
+      }
+    }
     const documentId = b.documentId || id('doc'),
       versionId = id('ver'),
       uploadId = id('upl'),
@@ -93,8 +120,8 @@ export function registerUploadRoutes(app: App) {
     if (b.size === 0)
       await c.env.FILES.put(key, new Uint8Array(), { httpMetadata: { contentType: mimeType } });
     try {
-      await c.env.DB.prepare(
-        'INSERT INTO uploads(id,user_id,organization_id,document_id,version_id,storage_key,upload_id,file_name,mime_type,size,fingerprint,part_size,status,folder_id,replacement,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      const reservation = await c.env.DB.prepare(
+        "INSERT INTO uploads(id,user_id,organization_id,document_id,version_id,storage_key,upload_id,file_name,mime_type,size,fingerprint,part_size,status,folder_id,replacement,created_at) SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE ?=1 OR NOT EXISTS(SELECT 1 FROM uploads WHERE organization_id=? AND folder_id=? AND lower(file_name)=lower(?) AND replacement=0 AND status='uploading') AND NOT EXISTS(SELECT 1 FROM documents WHERE organization_id=? AND home_folder_id=? AND is_deleted=0 AND lower(name)=lower(?))",
       )
         .bind(
           uploadId,
@@ -104,7 +131,7 @@ export function registerUploadRoutes(app: App) {
           versionId,
           key,
           providerId,
-          b.fileName,
+          b.fileName.trim(),
           mimeType,
           b.size,
           b.fingerprint,
@@ -113,10 +140,23 @@ export function registerUploadRoutes(app: App) {
           folderId,
           replacement ? 1 : 0,
           Date.now(),
+          replacement ? 1 : 0,
+          org,
+          folderId,
+          b.fileName.trim(),
+          org,
+          folderId,
+          b.fileName.trim(),
         )
         .run();
+      if (!reservation.meta.changes)
+        throw error(
+          409,
+          'Another upload with this name is in progress. Wait for it to finish or choose a different filename.',
+        );
     } catch (e) {
       if (providerId !== 'empty') await s3(c.env).abortMultipartUpload(key, providerId);
+      else await c.env.FILES.delete(key);
       throw e;
     }
     return c.json(
@@ -230,6 +270,18 @@ export function registerUploadRoutes(app: App) {
       c.env.DB.prepare(
         "UPDATE documents SET current_version_id=?,mime_type=?,content='',updated_at=? WHERE id=? AND EXISTS(SELECT 1 FROM uploads WHERE id=? AND status='uploading')",
       ).bind(u.version_id, u.mime_type, now, u.document_id, u.id),
+    );
+    stmts.push(
+      c.env.DB.prepare(
+        "INSERT OR IGNORE INTO document_activity(id,document_id,user_id,event,created_at) SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM uploads WHERE id=? AND status='uploading')",
+      ).bind(
+        `act_${u.version_id}`,
+        u.document_id,
+        user.userId,
+        u.replacement ? 'replaced' : 'uploaded',
+        now,
+        u.id,
+      ),
     );
     stmts.push(c.env.DB.prepare("UPDATE uploads SET status='complete' WHERE id=?").bind(u.id));
     await c.env.DB.batch(stmts);

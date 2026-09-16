@@ -3,7 +3,7 @@ import Calendar from '@corvu/calendar';
 import { useMutation } from '@tanstack/solid-query';
 import { createSignal, For, Show } from 'solid-js';
 import { useI18n } from '@/modules/i18n/i18n.provider';
-import { useI18nApiErrors } from '@/modules/shared/http/composables/i18n-api-errors';
+import { getHttpErrorMessage } from '@/modules/shared/http/http-errors';
 import { Button } from '@/modules/ui/components/button';
 import { CalendarGrid } from '@/modules/ui/components/calendar';
 import { CalendarMonthYearHeader } from '@/modules/ui/components/calendar-month-year-header';
@@ -36,7 +36,7 @@ export const ShareDocumentDialogCreateView: Component<{
 }> = (props) => {
   const { t, formatDate } = useI18n();
   const { copyShareLink } = useCopyShareLink();
-  const { getErrorMessage } = useI18nApiErrors();
+  const [error, setError] = createSignal('');
 
   const [getIsPasswordEnabled, setIsPasswordEnabled] = createSignal(false);
   const [getPassword, setPassword] = createSignal('');
@@ -95,9 +95,10 @@ export const ShareDocumentDialogCreateView: Component<{
       props.onCreated({ url: shareLink.url });
     },
     onError: (error) => {
+      setError(getHttpErrorMessage(error));
       createToast({
         type: 'error',
-        message: getErrorMessage({ error, defaultMessage: t('document-share-links.create.error') }),
+        message: getHttpErrorMessage(error),
       });
     },
   }));
@@ -219,6 +220,11 @@ export const ShareDocumentDialogCreateView: Component<{
         </div>
       </div>
 
+      <Show when={error()}>
+        <p role="alert" class="text-sm text-destructive">
+          {error()}
+        </p>
+      </Show>
       <DialogFooter>
         <div class="flex gap-2 justify-end flex-col-reverse sm:flex-row">
           <Button variant="secondary" onClick={props.onCancel} disabled={createMutation.isPending}>

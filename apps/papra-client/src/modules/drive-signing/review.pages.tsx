@@ -1,43 +1,363 @@
 import { getHttpErrorMessage } from '@/modules/shared/http/http-errors';
-import type {JSONContent} from '@tiptap/core';
-import {diffWords} from 'diff';
-import {A,useParams} from '@solidjs/router';
-import {createResource,createSignal,For,onCleanup,Show} from 'solid-js';
-import {Button} from '@/modules/ui/components/button';
-import {queryClient} from '@/modules/shared/query/query-client';
-import {apiClient} from '@/modules/shared/http/api-client';
-import {NativeEditor} from './editor.pages';
-import {PdfFields} from './pdf-fields.component';
-const randomKey=()=>crypto.randomUUID().replaceAll('-','');
-const inputClass='block border rounded p-2 w-full bg-background';
-function text(n:JSONContent):string{return n.type==='text'?n.text||'':(n.content||[]).map(text).join(['paragraph','heading'].includes(n.type||'')?'':'\n');}
-type Proposal={id:string;review_id:string;version_id:string;name:string;comment:string;status:string;source:JSONContent|null;originalSource:JSONContent|null};
-type ReviewData={canShare:boolean;canResolve:boolean;versionId:string;reviews:{id:string;status:string;url?:string}[];proposals:Proposal[]};
-export function DocumentReviews(props:{organizationId:string;documentId:string}){
- const base=()=>`/api/organizations/${props.organizationId}/documents/${props.documentId}/reviews`,editorBase=()=>`/api/organizations/${props.organizationId}/documents/${props.documentId}/editor`;
- const [data,{refetch}]=createResource(base,path=>apiClient<ReviewData>({path})),[error,setError]=createSignal(''),[busy,setBusy]=createSignal(false),[url,setUrl]=createSignal('');
- const keys=new Map<string,string>();const timer=setInterval(()=>void refetch(),15000);onCleanup(()=>clearInterval(timer));
- async function share(){setBusy(true);setError('');try{const r=await apiClient<{url:string}>({path:base(),method:'POST'});setUrl(r.url);void refetch();}catch(e){setError(getHttpErrorMessage(e));}finally{setBusy(false);}}
- async function resolve(p:Proposal,status:'accepted'|'rejected'){
-  setBusy(true);setError('');const token=randomKey();let lease=false;
-  try{if(status==='accepted'&&p.source){
-   const editor=await apiClient<{versionId:string}>({path:editorBase()});if(editor.versionId!==p.version_id)throw Error('This proposal targets an older revision. Dismiss it or copy its changes into the current document.');
-   await apiClient({path:editorBase()+'/lock',method:'POST',body:{token}});lease=true;
-   const key=keys.get(p.id)||randomKey();keys.set(p.id,key);
-   await apiClient({path:editorBase(),method:'POST',body:{key,token,versionId:p.version_id,source:p.source,proposalId:p.id}});
-  }else await apiClient({path:`${base()}/proposals/${p.id}/resolve`,method:'POST',body:{status}});
-  await refetch();
-  if(status==='accepted'&&p.source)await queryClient.invalidateQueries({queryKey:['organizations',props.organizationId,'documents',props.documentId]});
-  }catch(e){setError(getHttpErrorMessage(e));}finally{if(lease)await apiClient({path:editorBase()+'/release',method:'POST',body:{token}}).catch(()=>{});setBusy(false);}
- }
- async function close(id:string){try{await apiClient({path:`${base()}/${id}/revoke`,method:'POST'});await refetch();}catch(e){setError(getHttpErrorMessage(e));}}
- return <section class="my-4 border-t pt-4"><div class="flex items-center justify-between gap-2"><h2 class="font-semibold">Review</h2><Show when={data()?.canShare}><Button size="sm" variant="outline" disabled={busy()} onClick={()=>void share()}>Create review link</Button></Show></div><p class="text-xs text-muted-foreground mt-2">Review links open this PDF revision. Anyone with a link can leave feedback; native documents also support proposed edits. Resolve feedback before sending for signature.</p><Show when={url()}><div class="border rounded p-3 flex flex-wrap items-center gap-3 mt-3"><Button size="sm" onClick={()=>void navigator.clipboard.writeText(url())}>Copy review link</Button><A class="underline text-sm" href={url()}>Open review link</A></div></Show><Show when={error()||data.error}><p role="alert" class="text-sm text-red-600 mt-3">{error()||'Could not load reviews.'}</p></Show><For each={data()?.reviews.filter(r=>r.status==='open')}>{r=><div class="flex flex-wrap gap-3 items-center text-sm mt-3"><span>Open review</span><Show when={r.url}><Button variant="outline" size="sm" onClick={()=>void navigator.clipboard.writeText(r.url!)}>Copy link</Button><A class="underline" href={r.url!}>Open</A><button class="underline text-muted-foreground" onClick={()=>void close(r.id)}>Close link</button></Show></div>}</For><For each={data()?.proposals}>{p=><article class="border rounded p-3 mt-3 text-sm"><div class="flex justify-between"><strong>{p.name}</strong><span>{p.status==='accepted'&&!p.source?'resolved':p.status}</span></div><p class="whitespace-pre-wrap mt-2">{p.comment}</p><Show when={p.source}><details class="mt-3"><summary class="cursor-pointer font-medium">Compare proposed revision</summary><p class="text-xs text-muted-foreground my-2">Text differences are highlighted. Check the full proposal for formatting and table changes.</p><div class="border rounded p-3 whitespace-pre-wrap"><For each={diffWords(text(p.originalSource!),text(p.source!))}>{part=><span class={part.added?'bg-green-100 text-green-900':part.removed?'bg-red-100 text-red-900 line-through':''}>{part.value}</span>}</For></div><details class="mt-3"><summary class="cursor-pointer mb-2">Full proposed document</summary><NativeEditor source={p.source!} editable={false} onChange={()=>{}}/></details></details></Show><Show when={p.status==='pending'&&data()?.canResolve}><div class="flex gap-2 mt-3"><Button size="sm" disabled={busy()} onClick={()=>void resolve(p,'accepted')}>{p.source?'Accept changes and save PDF':'Resolve comment'}</Button><Button size="sm" variant="outline" disabled={busy()} onClick={()=>void resolve(p,'rejected')}>{p.source?'Reject changes':'Dismiss comment'}</Button></div></Show></article>}</For></section>;
+import type { JSONContent } from '@tiptap/core';
+import { diffWords } from 'diff';
+import { A, useParams } from '@solidjs/router';
+import { createResource, createSignal, For, onCleanup, Show } from 'solid-js';
+import { Button } from '@/modules/ui/components/button';
+import { queryClient } from '@/modules/shared/query/query-client';
+import { apiClient } from '@/modules/shared/http/api-client';
+import { NativeEditor } from './editor.pages';
+import { PdfFields } from './pdf-fields.component';
+const randomKey = () => crypto.randomUUID().replaceAll('-', '');
+const inputClass = 'block border rounded p-2 w-full bg-background';
+function text(n: JSONContent): string {
+  return n.type === 'text'
+    ? n.text || ''
+    : (n.content || []).map(text).join(['paragraph', 'heading'].includes(n.type || '') ? '' : '\n');
 }
-async function publicApi<T>(path:string,body?:unknown){const r=await fetch(path,body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{});const b=await r.json();if(!r.ok)throw Error(b.message||'Review unavailable');return b as T;}
-export function PublicReviewPage(){
- const params=useParams(),base=()=>`/api/reviews/${params.token}`;const [data]=createResource(base,path=>publicApi<{name:string;source:JSONContent|null}>(path));
- const [name,setName]=createSignal(''),[comment,setComment]=createSignal(''),[suggest,setSuggest]=createSignal(false),[source,setSource]=createSignal<JSONContent>(),[busy,setBusy]=createSignal(false),[sent,setSent]=createSignal(false),[error,setError]=createSignal('');let key=randomKey();
- let pending:unknown;
- async function submit(){setBusy(true);setError('');try{pending ||= {key,name:name(),comment:comment(),source:suggest()?(source()||data()?.source):undefined};await publicApi(base()+'/proposals',pending);key=randomKey();pending=undefined;setSent(true);}catch(e){setError(getHttpErrorMessage(e));}finally{setBusy(false);}}
- return <main class="max-w-6xl mx-auto p-4 md:p-8"><p class="text-sm text-muted-foreground">swyx Drive · Document review</p><Show when={data.error}><h1 class="text-xl font-semibold mt-6">Review link unavailable</h1><p role="alert" class="mt-3">{getHttpErrorMessage(data.error)}</p></Show><Show when={data()}>{r=><><h1 class="text-2xl font-semibold my-4">{r().name}</h1><Show when={!sent()} fallback={<div class="border rounded p-6"><h2 class="font-semibold">Feedback submitted</h2><p class="text-sm mt-2">The document owner will review your comments and proposed changes.</p></div>}><div class="grid md:grid-cols-[minmax(0,1fr)_280px] gap-6"><div><Show when={suggest()&&r().source} fallback={<PdfFields url={base()+'/file'} fields={[]} onReady={()=>{}}/>}><NativeEditor source={source()||r().source!} editable={!busy()} onChange={setSource}/></Show></div><aside class="space-y-4"><label class="block text-sm">Your name<input class={inputClass} value={name()} maxLength={100} disabled={busy()} onInput={e=>setName(e.currentTarget.value)}/></label><label class="block text-sm">Feedback<textarea class={inputClass+' min-h-32'} value={comment()} maxLength={5000} disabled={busy()} onInput={e=>setComment(e.currentTarget.value)}/></label><Show when={r().source}><label class="flex gap-2 text-sm"><input type="checkbox" checked={suggest()} disabled={busy()} onChange={e=>setSuggest(e.currentTarget.checked)}/>Suggest edits</label></Show><p class="text-xs text-muted-foreground">Your name identifies this feedback; it is not independently verified. Proposed edits are saved separately for the owner to accept or reject.</p><Button disabled={busy()||!name().trim()||(!comment().trim()&&!suggest())} class="w-full" onClick={()=>void submit()}>{busy()?'Submitting…':'Submit feedback'}</Button><Show when={error()}><p role="alert" class="text-sm text-red-600">{error()}</p></Show></aside></div></Show></>}</Show></main>;
+type Proposal = {
+  id: string;
+  review_id: string;
+  version_id: string;
+  name: string;
+  comment: string;
+  status: string;
+  source: JSONContent | null;
+  originalSource: JSONContent | null;
+};
+type ReviewData = {
+  canShare: boolean;
+  canResolve: boolean;
+  versionId: string;
+  reviews: { id: string; status: string; url?: string }[];
+  proposals: Proposal[];
+};
+export function DocumentReviews(props: { organizationId: string; documentId: string }) {
+  const base = () =>
+      `/api/organizations/${props.organizationId}/documents/${props.documentId}/reviews`,
+    editorBase = () =>
+      `/api/organizations/${props.organizationId}/documents/${props.documentId}/editor`;
+  const [data, { refetch }] = createResource(base, (path) => apiClient<ReviewData>({ path })),
+    [error, setError] = createSignal(''),
+    [busy, setBusy] = createSignal(false),
+    [url, setUrl] = createSignal('');
+  const keys = new Map<string, string>();
+  const timer = setInterval(() => void refetch(), 15000);
+  onCleanup(() => clearInterval(timer));
+  async function share() {
+    setBusy(true);
+    setError('');
+    try {
+      const r = await apiClient<{ url: string }>({ path: base(), method: 'POST' });
+      setUrl(r.url);
+      void refetch();
+    } catch (e) {
+      setError(getHttpErrorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function resolve(p: Proposal, status: 'accepted' | 'rejected') {
+    setBusy(true);
+    setError('');
+    const token = randomKey();
+    let lease = false;
+    try {
+      if (status === 'accepted' && p.source) {
+        const editor = await apiClient<{ versionId: string }>({ path: editorBase() });
+        if (editor.versionId !== p.version_id)
+          throw Error(
+            'This proposal targets an older revision. Dismiss it or copy its changes into the current document.',
+          );
+        await apiClient({ path: editorBase() + '/lock', method: 'POST', body: { token } });
+        lease = true;
+        const key = keys.get(p.id) || randomKey();
+        keys.set(p.id, key);
+        await apiClient({
+          path: editorBase(),
+          method: 'POST',
+          body: { key, token, versionId: p.version_id, source: p.source, proposalId: p.id },
+        });
+      } else
+        await apiClient({
+          path: `${base()}/proposals/${p.id}/resolve`,
+          method: 'POST',
+          body: { status },
+        });
+      await refetch();
+      if (status === 'accepted' && p.source)
+        await queryClient.invalidateQueries({
+          queryKey: ['organizations', props.organizationId, 'documents', props.documentId],
+        });
+    } catch (e) {
+      setError(getHttpErrorMessage(e));
+    } finally {
+      if (lease)
+        await apiClient({ path: editorBase() + '/release', method: 'POST', body: { token } }).catch(
+          () => {},
+        );
+      setBusy(false);
+    }
+  }
+  async function close(id: string) {
+    try {
+      await apiClient({ path: `${base()}/${id}/revoke`, method: 'POST' });
+      await refetch();
+    } catch (e) {
+      setError(getHttpErrorMessage(e));
+    }
+  }
+  return (
+    <section class="my-4 border-t pt-4">
+      <div class="flex items-center justify-between gap-2">
+        <h2 class="font-semibold">Review</h2>
+        <Show when={data()?.canShare}>
+          <Button size="sm" variant="outline" disabled={busy()} onClick={() => void share()}>
+            Create review link
+          </Button>
+        </Show>
+      </div>
+      <p class="text-xs text-muted-foreground mt-2">
+        Review links open this PDF revision. Anyone with a link can leave feedback; native documents
+        also support proposed edits. Resolve feedback before sending for signature.
+      </p>
+      <Show when={url()}>
+        <div class="border rounded p-3 flex flex-wrap items-center gap-3 mt-3">
+          <Button size="sm" onClick={() => void navigator.clipboard.writeText(url())}>
+            Copy review link
+          </Button>
+          <A class="underline text-sm" href={url()}>
+            Open review link
+          </A>
+        </div>
+      </Show>
+      <Show when={error() || data.error}>
+        <p role="alert" class="text-sm text-red-600 mt-3">
+          {error() || 'Could not load reviews.'}
+        </p>
+      </Show>
+      <For each={data()?.reviews.filter((r) => r.status === 'open')}>
+        {(r) => (
+          <div class="flex flex-wrap gap-3 items-center text-sm mt-3">
+            <span>Open review</span>
+            <Show when={r.url}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void navigator.clipboard.writeText(r.url!)}
+              >
+                Copy link
+              </Button>
+              <A class="underline" href={r.url!}>
+                Open
+              </A>
+              <button class="underline text-muted-foreground" onClick={() => void close(r.id)}>
+                Close link
+              </button>
+            </Show>
+          </div>
+        )}
+      </For>
+      <For each={data()?.proposals}>
+        {(p) => (
+          <article class="border rounded p-3 mt-3 text-sm">
+            <div class="flex justify-between">
+              <strong>{p.name}</strong>
+              <span>{p.status === 'accepted' && !p.source ? 'resolved' : p.status}</span>
+            </div>
+            <p class="whitespace-pre-wrap mt-2">{p.comment}</p>
+            <Show when={p.source}>
+              <details class="mt-3">
+                <summary class="cursor-pointer font-medium">Compare proposed revision</summary>
+                <p class="text-xs text-muted-foreground my-2">
+                  Text differences are highlighted. Check the full proposal for formatting and table
+                  changes.
+                </p>
+                <div class="border rounded p-3 whitespace-pre-wrap">
+                  <For each={diffWords(text(p.originalSource!), text(p.source!))}>
+                    {(part) => (
+                      <span
+                        class={
+                          part.added
+                            ? 'bg-green-100 text-green-900'
+                            : part.removed
+                              ? 'bg-red-100 text-red-900 line-through'
+                              : ''
+                        }
+                      >
+                        {part.value}
+                      </span>
+                    )}
+                  </For>
+                </div>
+                <details class="mt-3">
+                  <summary class="cursor-pointer mb-2">Full proposed document</summary>
+                  <NativeEditor source={p.source!} editable={false} onChange={() => {}} />
+                </details>
+              </details>
+            </Show>
+            <Show when={p.status === 'pending' && data()?.canResolve}>
+              <div class="flex gap-2 mt-3">
+                <Button size="sm" disabled={busy()} onClick={() => void resolve(p, 'accepted')}>
+                  {p.source ? 'Accept changes and save PDF' : 'Resolve comment'}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy()}
+                  onClick={() => void resolve(p, 'rejected')}
+                >
+                  {p.source ? 'Reject changes' : 'Dismiss comment'}
+                </Button>
+              </div>
+            </Show>
+          </article>
+        )}
+      </For>
+    </section>
+  );
+}
+async function publicApi<T>(path: string, body?: unknown) {
+  const r = await fetch(
+    path,
+    body
+      ? {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }
+      : {},
+  );
+  const b = await r.json();
+  if (!r.ok) throw Error(b.message || 'Review unavailable');
+  return b as T;
+}
+export function PublicReviewPage() {
+  const params = useParams(),
+    base = () => `/api/reviews/${params.token}`;
+  const [data] = createResource(base, (path) =>
+    publicApi<{ name: string; source: JSONContent | null }>(path),
+  );
+  const [name, setName] = createSignal(''),
+    [comment, setComment] = createSignal(''),
+    [suggest, setSuggest] = createSignal(false),
+    [source, setSource] = createSignal<JSONContent>(),
+    [busy, setBusy] = createSignal(false),
+    [sent, setSent] = createSignal(false),
+    [error, setError] = createSignal('');
+  let key = randomKey();
+  let pending: unknown;
+  async function submit() {
+    setBusy(true);
+    setError('');
+    try {
+      pending ||= {
+        key,
+        name: name(),
+        comment: comment(),
+        source: suggest() ? source() || data()?.source : undefined,
+      };
+      await publicApi(base() + '/proposals', pending);
+      key = randomKey();
+      pending = undefined;
+      setSent(true);
+    } catch (e) {
+      setError(getHttpErrorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <main class="max-w-6xl mx-auto p-4 md:p-8">
+      <p class="text-sm text-muted-foreground">swyx Drive · Document review</p>
+      <Show when={data.error}>
+        <h1 class="text-xl font-semibold mt-6">Review link unavailable</h1>
+        <p role="alert" class="mt-3">
+          {getHttpErrorMessage(data.error)}
+        </p>
+      </Show>
+      <Show when={data()}>
+        {(r) => (
+          <>
+            <h1 class="text-2xl font-semibold my-4">{r().name}</h1>
+            <Show
+              when={!sent()}
+              fallback={
+                <div class="border rounded p-6">
+                  <h2 class="font-semibold">Feedback submitted</h2>
+                  <p class="text-sm mt-2">
+                    The document owner will review your comments and proposed changes.
+                  </p>
+                </div>
+              }
+            >
+              <div class="grid md:grid-cols-[minmax(0,1fr)_280px] gap-6">
+                <div>
+                  <Show
+                    when={suggest() && r().source}
+                    fallback={<PdfFields url={base() + '/file'} fields={[]} onReady={() => {}} />}
+                  >
+                    <NativeEditor
+                      source={source() || r().source!}
+                      editable={!busy()}
+                      onChange={setSource}
+                    />
+                  </Show>
+                </div>
+                <aside class="space-y-4">
+                  <label class="block text-sm">
+                    Your name
+                    <input
+                      class={inputClass}
+                      value={name()}
+                      maxLength={100}
+                      disabled={busy()}
+                      onInput={(e) => setName(e.currentTarget.value)}
+                    />
+                  </label>
+                  <label class="block text-sm">
+                    Feedback
+                    <textarea
+                      class={inputClass + ' min-h-32'}
+                      value={comment()}
+                      maxLength={5000}
+                      disabled={busy()}
+                      onInput={(e) => setComment(e.currentTarget.value)}
+                    />
+                  </label>
+                  <Show when={r().source}>
+                    <label class="flex gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={suggest()}
+                        disabled={busy()}
+                        onChange={(e) => setSuggest(e.currentTarget.checked)}
+                      />
+                      Suggest edits
+                    </label>
+                  </Show>
+                  <p class="text-xs text-muted-foreground">
+                    Your name identifies this feedback; it is not independently verified. Proposed
+                    edits are saved separately for the owner to accept or reject.
+                  </p>
+                  <Button
+                    disabled={busy() || !name().trim() || (!comment().trim() && !suggest())}
+                    class="w-full"
+                    onClick={() => void submit()}
+                  >
+                    {busy() ? 'Submitting…' : 'Submit feedback'}
+                  </Button>
+                  <Show when={error()}>
+                    <p role="alert" class="text-sm text-red-600">
+                      {error()}
+                    </p>
+                  </Show>
+                </aside>
+              </div>
+            </Show>
+          </>
+        )}
+      </Show>
+    </main>
+  );
 }

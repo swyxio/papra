@@ -1,3 +1,4 @@
+import type { DocumentSelectionAnchor } from '../documents/components/document-preview.component';
 import type { Component } from 'solid-js';
 import type { DriveComment } from './drive-collaboration.services';
 import { createSignal, For, Show } from 'solid-js';
@@ -7,9 +8,14 @@ import { Button } from '../ui/components/button';
 import { createToast } from '../ui/components/sonner';
 import { documentDriveBase } from './drive-collaboration.services';
 
-export const DocumentComments: Component<{ organizationId: string; documentId: string }> = (
-  props,
-) => {
+export const DocumentComments: Component<{
+  organizationId: string;
+  documentId: string;
+  currentVersionId?: string;
+  selectionAnchor?: DocumentSelectionAnchor;
+  onClearSelection?: () => void;
+  onActivateAnchor?: (anchor: DocumentSelectionAnchor) => void;
+}> = (props) => {
   const client = useQueryClient();
   const [body, setBody] = createSignal('');
   const [replyTo, setReplyTo] = createSignal<string | null>(null);
@@ -62,9 +68,15 @@ export const DocumentComments: Component<{ organizationId: string; documentId: s
         path: editing() ? `${base()}/${editing()}` : base(),
         body: editing()
           ? { body: body(), mentionUserIds: mentioned() }
-          : { body: body(), parentId: replyTo(), mentionUserIds: mentioned() },
+          : {
+              body: body(),
+              parentId: replyTo(),
+              mentionUserIds: mentioned(),
+              anchor: replyTo() ? undefined : props.selectionAnchor,
+            },
       }),
     onSuccess: () => {
+      props.onClearSelection?.();
       setBody('');
       setReplyTo(null);
       setEditing(null);
@@ -108,6 +120,33 @@ export const DocumentComments: Component<{ organizationId: string; documentId: s
         {item.comment.authorName ?? (item.comment.authorId ? 'Member' : 'Former member')} ·{' '}
         {new Date(item.comment.createdAt).toLocaleString()}
       </div>
+      <Show when={!item.comment.deletedAt && !item.reply && item.comment.anchor}>
+        {(anchor) => (
+          <div class="border-l-2 border-primary pl-3 mb-3 text-sm">
+            <blockquote class="whitespace-pre-wrap">“{anchor().quote}”</blockquote>
+            <Show when={anchor().page}>
+              <p class="text-xs text-muted-foreground">Page {anchor().page}</p>
+            </Show>
+            <Show
+              when={anchor().versionId === props.currentVersionId}
+              fallback={
+                <a
+                  class="text-primary underline text-xs"
+                  href={`${documentDriveBase(props.organizationId, props.documentId)}/versions/${anchor().versionId}/download`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Open original version
+                </a>
+              }
+            >
+              <Button size="sm" variant="ghost" onClick={() => props.onActivateAnchor?.(anchor())}>
+                View passage
+              </Button>
+            </Show>
+          </div>
+        )}
+      </Show>
       <p class="whitespace-pre-wrap break-words text-sm">
         {item.comment.deletedAt ? 'Comment deleted' : item.comment.body}
       </p>
@@ -216,6 +255,22 @@ export const DocumentComments: Component<{ organizationId: string; documentId: s
               </Button>
             </p>
           </Show>
+          <Show when={!replyTo() && !editing() && props.selectionAnchor}>
+            {(anchor) => (
+              <div class="rounded-md border bg-muted/40 p-3 mb-3 text-sm">
+                <p class="font-medium">
+                  Comment on selected text{anchor().page ? ` · Page ${anchor().page}` : ''}
+                </p>
+                <blockquote class="mt-1 whitespace-pre-wrap">“{anchor().quote}”</blockquote>
+                <Button variant="ghost" size="sm" onClick={() => props.onClearSelection?.()}>
+                  Remove selection
+                </Button>
+              </div>
+            )}
+          </Show>
+          <p class="text-xs text-muted-foreground mb-2">
+            Select text in the document to comment on a passage.
+          </p>
           <label for="drive-comment" class="text-sm font-medium">
             {replyTo() ? 'Your reply' : editing() ? 'Your edit' : 'Add a comment'}
           </label>

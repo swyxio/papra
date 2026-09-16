@@ -19,11 +19,33 @@ export function keywordPredicate(query: string) {
     ) {
       const column = e.type === 'filter' ? `${e.field}: ` : '';
       bindings.push(`${column}"${e.value.replaceAll('"', '""')}"*`);
-      return 'd.id IN (SELECT document_id FROM documents_fts WHERE documents_fts MATCH ?)';
+      const fullText =
+        'd.id IN (SELECT document_id FROM documents_fts WHERE documents_fts MATCH ?)';
+      if (e.type === 'filter') return fullText;
+      const escaped = e.value
+        .replaceAll('\\', '\\\\')
+        .replaceAll('%', '\\%')
+        .replaceAll('_', '\\_');
+      bindings.push(`%${escaped}%`, `%${escaped}%`);
+      return `(${fullText} OR EXISTS(SELECT 1 FROM document_custom_properties dp JOIN custom_properties p ON p.id=dp.property_id JOIN json_each(dp.value) pv WHERE dp.document_id=d.id AND p.organization_id=d.organization_id AND (CAST(CASE WHEN p.type='boolean' THEN CASE pv.value WHEN 1 THEN 'true' WHEN 0 THEN 'false' ELSE '' END ELSE pv.value END AS TEXT) LIKE ? ESCAPE '\\' OR EXISTS(SELECT 1 FROM json_each(coalesce(p.options,'[]')) opt WHERE json_extract(opt.value,'$.id')=pv.value AND json_extract(opt.value,'$.name') LIKE ? ESCAPE '\\'))))`;
     }
     if (e.type === 'filter') {
       if (!['=', '>', '>=', '<', '<='].includes(e.operator))
         throw error(400, 'Unsupported search operator');
+      if (e.field.startsWith('property.')) {
+        const property = e.field.slice('property.'.length);
+        if (!property || !e.value) throw error(400, 'Choose a property and value');
+        bindings.push(property, property);
+        if (e.operator !== '=') {
+          const value = Number(e.value);
+          if (!Number.isFinite(value))
+            throw error(400, 'Use a numeric value for property comparisons');
+          bindings.push(value);
+          return `EXISTS(SELECT 1 FROM document_custom_properties dp JOIN custom_properties p ON p.id=dp.property_id WHERE dp.document_id=d.id AND p.organization_id=d.organization_id AND (p.id=? OR lower(p.name)=lower(?)) AND p.type='number' AND CAST(json_extract(dp.value,'$') AS REAL)${e.operator}?)`;
+        }
+        bindings.push(e.value, e.value);
+        return `EXISTS(SELECT 1 FROM document_custom_properties dp JOIN custom_properties p ON p.id=dp.property_id JOIN json_each(dp.value) pv WHERE dp.document_id=d.id AND p.organization_id=d.organization_id AND (p.id=? OR lower(p.name)=lower(?)) AND (lower(CASE WHEN p.type='boolean' THEN CASE pv.value WHEN 1 THEN 'true' WHEN 0 THEN 'false' ELSE '' END ELSE CAST(pv.value AS TEXT) END)=lower(?) OR EXISTS(SELECT 1 FROM json_each(coalesce(p.options,'[]')) opt WHERE json_extract(opt.value,'$.id')=pv.value AND lower(json_extract(opt.value,'$.name'))=lower(?))))`;
+      }
       if (e.field === 'tag') {
         bindings.push(e.value, e.value);
         return 'EXISTS(SELECT 1 FROM documents_tags dt JOIN tags t ON t.id=dt.tag_id WHERE dt.document_id=d.id AND (t.id=? OR lower(t.name)=lower(?)))';

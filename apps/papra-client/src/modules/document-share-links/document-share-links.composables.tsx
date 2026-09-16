@@ -18,8 +18,10 @@ export function useCopyShareLink() {
       try {
         await navigator.clipboard.writeText(url);
         createToast({ type: 'success', message: t('document-share-links.copied') });
+        return true;
       } catch {
         createToast({ type: 'error', message: t('document-share-links.copy-error') });
+        return false;
       }
     },
   };
