@@ -178,6 +178,33 @@ async function backupManifest(env: Env, j: Job, v: Version, m: Manifest) {
     { httpMetadata: { contentType: 'application/json' } },
   );
 }
+async function callNative<T>(env: Env, j: Job, path: string, payload: unknown): Promise<T> {
+  const container = getContainer(env.PROCESSOR, `${j.id}-${j.generation}`);
+  try {
+    const response = await container.fetch(
+      new Request(`http://processor${path}`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(13 * 60_000),
+      }),
+    );
+    if (response.status === 503 || response.status === 429)
+      throw new JobError('native_capacity_pending');
+    if (!response.ok) {
+      const value = await response.json<{ error?: string }>().catch(() => ({ error: undefined }));
+      throw new JobError(
+        typeof value.error === 'string' && /^[a-z_]{1,80}$/.test(value.error)
+          ? value.error
+          : `native_http_${response.status}`,
+        response.status >= 400 && response.status < 500,
+      );
+    }
+    return await response.json<T>();
+  } finally {
+    await container.destroy().catch(() => {});
+  }
+}
 async function processVersion(env: Env, j: Job, v: Version) {
   let m = await readManifest(env, v.id, j.generation);
   if (!m) {
@@ -239,24 +266,7 @@ async function processVersion(env: Env, j: Job, v: Version) {
           maxFrames: 12,
         },
       };
-      const response = await getContainer(env.PROCESSOR, `${j.id}-${j.generation}`).fetch(
-        new Request('http://processor/process', {
-          method: 'POST',
-          body: JSON.stringify(payload),
-          headers: { 'Content-Type': 'application/json' },
-          signal: AbortSignal.timeout(13 * 60_000),
-        }),
-      );
-      if (!response.ok) {
-        const value = await response.json<{ error?: string }>().catch(() => ({ error: undefined }));
-        throw new JobError(
-          typeof value.error === 'string' && /^[a-z_]{1,80}$/.test(value.error)
-            ? value.error
-            : 'native_processing_failed',
-          response.status >= 400 && response.status < 500 && response.status !== 429,
-        );
-      }
-      result = await response.json<NativeResult>();
+      result = await callNative<NativeResult>(env, j, '/process', payload);
       const allowed = new Set(
         Object.values(outputs)
           .flat()
@@ -627,16 +637,12 @@ async function hashVersion(env: Env, j: Job, v: Version) {
       byteSize: v.size,
     },
   };
-  const response = await getContainer(env.PROCESSOR, `${j.id}-${j.generation}`).fetch(
-    new Request('http://processor/hash', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-      headers: { 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(13 * 60_000),
-    }),
+  const value = await callNative<{ sha256: string; byteSize: number; jobId: string }>(
+    env,
+    j,
+    '/hash',
+    payload,
   );
-  if (!response.ok) throw new JobError('original_hash_failed', response.status === 422);
-  const value = await response.json<{ sha256: string; byteSize: number; jobId: string }>();
   if (value.jobId !== j.id || value.byteSize !== v.size || !/^[a-f0-9]{64}$/.test(value.sha256))
     throw new JobError('original_hash_receipt_invalid', true);
   if (!(await owned(env, j))) return;
@@ -676,20 +682,16 @@ async function verifyBackup(env: Env, j: Job, v: Version) {
     if (hash?.status === 'failed') throw new JobError('original_hash_unavailable', true);
     throw new JobError('original_hash_pending');
   }
-  const key = backupKey(v),
-    response = await getContainer(env.PROCESSOR, `${j.id}-${j.generation}`).fetch(
-      new Request('http://processor/hash', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jobId: j.id,
-          source: { url: await backupS3(env).getPresignedUrl('GET', key, 1800), byteSize: v.size },
-        }),
-        signal: AbortSignal.timeout(13 * 60_000),
-      }),
-    );
-  if (!response.ok) throw new JobError('backup_hash_failed');
-  const receipt = await response.json<{ jobId: string; sha256: string; byteSize: number }>();
+  const key = backupKey(v);
+  const receipt = await callNative<{ jobId: string; sha256: string; byteSize: number }>(
+    env,
+    j,
+    '/hash',
+    {
+      jobId: j.id,
+      source: { url: await backupS3(env).getPresignedUrl('GET', key, 1800), byteSize: v.size },
+    },
+  );
   if (receipt.jobId !== j.id || receipt.sha256 !== v.sha256 || receipt.byteSize !== v.size)
     throw new JobError('backup_checksum_mismatch', true);
   if (!(await owned(env, j))) return;
@@ -881,7 +883,9 @@ export async function consumeJobs(batch: MessageBatch, env: Env) {
         message.ack();
         continue;
       }
-      const waiting = error instanceof JobError && error.code === 'original_hash_pending',
+      const waiting =
+          error instanceof JobError &&
+          ['original_hash_pending', 'native_capacity_pending'].includes(error.code),
         terminal = !waiting && ((error instanceof JobError && error.permanent) || j.attempts >= 3),
         code = error instanceof JobError ? error.code : 'provider_processing_failed';
       await run(
@@ -904,7 +908,14 @@ export async function consumeJobs(batch: MessageBatch, env: Env) {
       if (terminal) {
         if (j.kind !== 'index') await settled(env, j.version_id);
         message.ack();
-      } else message.retry({ delaySeconds: waiting ? 900 : Math.min(900, 30 * 2 ** j.attempts) });
+      } else
+        message.retry({
+          delaySeconds: waiting
+            ? code === 'native_capacity_pending'
+              ? 90
+              : 900
+            : Math.min(900, 30 * 2 ** j.attempts),
+        });
     }
   }
 }

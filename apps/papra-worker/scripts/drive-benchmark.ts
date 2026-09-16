@@ -33,12 +33,14 @@ const MIB = 1024 ** 2,
   STRIDE = 32 * MIB;
 const args = process.argv.slice(2),
   option = (name: string) => args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
+const keepFolder = args.includes('--keep-folder');
 const live = args.includes('--live'),
   prepare = args.includes('--prepare');
 if (!live && !prepare) throw new Error('Choose --prepare or --live');
 if (Number(process.versions.node.split('.')[0]) < 26) throw new Error('Node26 required');
 const origin = option('origin') || 'https://drive.swyx.io';
 if (new URL(origin).protocol !== 'https:') throw new Error('Live origin must use HTTPS');
+const credentialFile = option('service-credential-file');
 const org = option('organization-id'),
   expectedEmail = option('expected-email');
 const sizes = (option('sizes-gib') || '1,6.25,12.25')
@@ -82,6 +84,7 @@ const memoryTimer = setInterval(
 const safeError = (error: unknown) =>
   (error instanceof Error ? error.message : String(error))
     .replace(/https?:\/\/\S+/g, '[redacted URL]')
+    .replace(/drv_[a-f0-9]{64}/g, '[redacted credential]')
     .slice(0, 1000);
 const seconds = (started: number) => (performance.now() - started) / 1000;
 function assert(value: unknown, message: string): asserts value {
@@ -227,6 +230,77 @@ try {
     legalComments: 'none',
   });
   const script = bundle.outputFiles[0]!.text;
+  let serviceCredential: any;
+  if (live && credentialFile) {
+    const file = await stat(credentialFile);
+    assert(
+      file.isFile() &&
+        file.size <= 16384 &&
+        (file.mode & 0o077) === 0 &&
+        file.uid === process.getuid!(),
+      'Credential file must be private, owned, and <=16KiB',
+    );
+    serviceCredential = JSON.parse(await readFile(credentialFile, 'utf8'));
+    assert(
+      serviceCredential.origin === origin &&
+        serviceCredential.organizationId === org &&
+        serviceCredential.email === expectedEmail &&
+        serviceCredential.emailVerified === true &&
+        serviceCredential.personalOwnerId === serviceCredential.userId,
+      'Credential must belong to the exact verified personal-space owner',
+    );
+    assert(
+      /^drv_[a-f0-9]{64}$/.test(serviceCredential.token) &&
+        typeof serviceCredential.folderId === 'string' &&
+        typeof serviceCredential.credentialId === 'string',
+      'Invalid scoped credential',
+    );
+    assert(
+      Array.isArray(serviceCredential.permissions) &&
+        serviceCredential.permissions.length === 2 &&
+        serviceCredential.permissions.includes('read') &&
+        serviceCredential.permissions.includes('write'),
+      'Credential must allow only read and write',
+    );
+    const remaining = Date.parse(serviceCredential.expiresAt) - Date.now();
+    assert(
+      remaining > 0 && remaining <= 3 * 3600000,
+      'Credential must have an explicit expiry within three hours',
+    );
+  }
+  const requestApi = {
+    get: async (url: string) => {
+      assert(
+        new URL(url).origin === origin && new URL(url).pathname.startsWith('/api/'),
+        'API credential must never leave app origin',
+      );
+      return context!.request.get(url, {
+        headers: serviceCredential ? { Authorization: `Bearer ${serviceCredential.token}` } : {},
+        maxRedirects: 0,
+      });
+    },
+    post: async (url: string, options: { data: unknown }) => {
+      assert(
+        new URL(url).origin === origin && new URL(url).pathname.startsWith('/api/'),
+        'API credential must never leave app origin',
+      );
+      return context!.request.post(url, {
+        ...options,
+        headers: serviceCredential ? { Authorization: `Bearer ${serviceCredential.token}` } : {},
+        maxRedirects: 0,
+      });
+    },
+    delete: async (url: string) => {
+      assert(
+        new URL(url).origin === origin && new URL(url).pathname.startsWith('/api/'),
+        'API credential must never leave app origin',
+      );
+      return context!.request.delete(url, {
+        headers: serviceCredential ? { Authorization: `Bearer ${serviceCredential.token}` } : {},
+        maxRedirects: 0,
+      });
+    },
+  };
   if (prepare) {
     const sourcePath = join(directory, 'prepare.bin');
     receipt.offlineSource = await createSource(sourcePath, 8 * MIB);
@@ -241,32 +315,64 @@ try {
     context = browser.contexts()[0];
     assert(context, 'Existing Chrome context unavailable');
     receipt.browserVersion = browser.version();
-    const userResponse = await context.request.get(`${origin}/api/users/me`);
-    assert(userResponse.ok(), 'Chrome session not authenticated');
-    const { user } = await userResponse.json();
-    assert(
-      user.email === expectedEmail && user.emailVerified,
-      'Chrome account does not match expected verified identity',
-    );
-    const orgResponse = await context.request.get(`${origin}/api/organizations/${org}`);
-    assert(orgResponse.ok(), 'Selected personal organization inaccessible');
-    const { organization } = await orgResponse.json();
-    assert(
-      organization.personalOwnerId === user.id,
-      'Benchmark must target verified user personal space',
-    );
-    receipt.authenticationProof = {
-      liveAuthenticatedChrome: true,
-      verifiedAccountMatched: true,
-      organizationId: org,
-      personalOwnerMatched: true,
-    };
-    const folderResponse = await context.request.post(
-      `${origin}/api/organizations/${org}/folders`,
-      { data: { name: `Disposable benchmark ${runId}` } },
-    );
-    assert(folderResponse.ok(), 'Could not create isolated personal benchmark folder');
-    folderId = (await folderResponse.json()).folder.id;
+    if (serviceCredential) {
+      folderId = serviceCredential.folderId;
+      const foldersResponse = await requestApi.get(`${origin}/api/organizations/${org}/folders`);
+      assert(foldersResponse.ok(), 'Scoped service credential is not authorized');
+      const folders = (await foldersResponse.json()).folders;
+      assert(
+        folders.length === 1 &&
+          folders[0].id === folderId &&
+          folders[0].canWrite &&
+          !folders[0].isHome &&
+          folders[0].createdBy === serviceCredential.userId,
+        'Credential must reveal only its isolated owner-created benchmark folder',
+      );
+      const initial = await requestApi.get(
+        `${origin}/api/organizations/${org}/folders/${folderId}/documents`,
+      );
+      assert(
+        initial.ok() && (await initial.json()).documents.length === 0,
+        'Disposable benchmark folder must initially be empty',
+      );
+      receipt.authenticationProof = {
+        scopedServiceCredential: true,
+        googleCookieSessionUsed: false,
+        previouslyVerifiedGoogleOwner: true,
+        userId: serviceCredential.userId,
+        organizationId: org,
+        folderId,
+        credentialId: serviceCredential.credentialId,
+        expiresAt: serviceCredential.expiresAt,
+        permissions: ['read', 'write'],
+      };
+    } else {
+      const userResponse = await requestApi.get(`${origin}/api/users/me`);
+      assert(userResponse.ok(), 'Chrome session not authenticated');
+      const { user } = await userResponse.json();
+      assert(
+        user.email === expectedEmail && user.emailVerified,
+        'Chrome account does not match expected verified identity',
+      );
+      const orgResponse = await requestApi.get(`${origin}/api/organizations/${org}`);
+      assert(orgResponse.ok(), 'Selected personal organization inaccessible');
+      const { organization } = await orgResponse.json();
+      assert(
+        organization.personalOwnerId === user.id,
+        'Benchmark must target verified user personal space',
+      );
+      receipt.authenticationProof = {
+        liveAuthenticatedChrome: true,
+        verifiedAccountMatched: true,
+        organizationId: org,
+        personalOwnerMatched: true,
+      };
+      const folderResponse = await requestApi.post(`${origin}/api/organizations/${org}/folders`, {
+        data: { name: `Disposable benchmark ${runId}` },
+      });
+      assert(folderResponse.ok(), 'Could not create isolated personal benchmark folder');
+      folderId = (await folderResponse.json()).folder.id;
+    }
     receipt.disposableFolderId = folderId;
     page = await context.newPage();
     await page.route(`${origin}/bench/entry.js`, async (route) =>
@@ -278,11 +384,21 @@ try {
         body: `<!doctype html><meta charset="utf-8"><title>Disposable Drive benchmark</title><body data-organization-id="${org}" data-folder-id="${folderId}"><p>Disposable synthetic transfer benchmark</p><input id="file" type="file"><output id="progress" style="display:block;margin-top:1rem">Ready</output><script type="module" src="/bench/entry.js"></script>`,
       }),
     );
-    await page.route(`${origin}/api/organizations/${org}/uploads/**`, async (route) => {
-      if (paused && route.request().method() === 'POST')
+    await page.route(`${origin}/api/**`, async (route) => {
+      const request = route.request(),
+        headers = request.headers();
+      if (serviceCredential) {
+        delete headers.cookie;
+        headers.authorization = `Bearer ${serviceCredential.token}`;
+      }
+      if (
+        paused &&
+        request.method() === 'POST' &&
+        new URL(request.url()).pathname.includes('/uploads/')
+      )
         await new Promise<void>((resolve) => releasePending.push(resolve));
       try {
-        await route.continue();
+        await route.continue({ headers });
       } catch {}
     });
     receipt.providerProof =
@@ -294,7 +410,7 @@ try {
       receipt.transfers.push(transfer);
       await persist();
       process.stdout.write(JSON.stringify({ phase: 'uploading', sizeGiB: size / GIB }) + '\n');
-      const initialHealth = await (await context.request.get(`${origin}/api/health`)).json();
+      const initialHealth = await (await requestApi.get(`${origin}/api/health`)).json();
       let phase: 'initial' | 'resume' = 'initial',
         confirmed = 0,
         armed = true,
@@ -379,7 +495,7 @@ try {
         30000,
       );
       const sessionPath = `${origin}/api/organizations/${org}/uploads/${sessionId}`,
-        providerResponse = await context.request.get(sessionPath);
+        providerResponse = await requestApi.get(sessionPath);
       assert(providerResponse.ok(), 'Interrupted upload status missing');
       const provider = await providerResponse.json();
       assert(
@@ -407,6 +523,8 @@ try {
           sizeBytes: size,
           sessionId,
           documentId: provider.session.documentId,
+          versionId: provider.session.versionId,
+          sourceSha256: source.sha256,
           previousVersion: initialHealth.version,
           sourceSha: initialHealth.sourceSha,
           providerConfirmedParts: [...skipped],
@@ -437,12 +555,12 @@ try {
         typeof checkpoint.version === 'string' && checkpoint.version !== initialHealth.version,
         'Root checkpoint must identify a new Worker VERSION',
       );
-      const health = await (await context.request.get(`${origin}/api/health`)).json();
+      const health = await (await requestApi.get(`${origin}/api/health`)).json();
       assert(
         health.version === checkpoint.version,
         'Live Worker does not report new checkpoint version',
       );
-      const afterRestart = await (await context.request.get(sessionPath)).json();
+      const afterRestart = await (await requestApi.get(sessionPath)).json();
       assert(
         afterRestart.session.id === sessionId &&
           afterRestart.session.documentId === provider.session.documentId &&
@@ -534,7 +652,7 @@ try {
       };
       transfer.status = 'downloading';
       await persist();
-      const exportResponse = await context.request.get(
+      const exportResponse = await requestApi.get(
         `${origin}/api/organizations/${org}/documents/${completed.documentId}/export`,
       );
       assert(exportResponse.ok(), 'Download authorization failed');
@@ -542,6 +660,16 @@ try {
       assert(
         exported.document.originalSize === size && exported.document.homeFolderId === folderId,
         'Completed metadata has wrong size/home',
+      );
+      if (serviceCredential)
+        assert(
+          exported.document.createdBy === serviceCredential.userId,
+          'Uploaded document actor differs from verified owner',
+        );
+      transfer.versionId = exported.document.currentVersionId;
+      assert(
+        transfer.versionId === provider.session.versionId,
+        'Completed permanent version changed unexpectedly',
       );
       const url = exported.url;
       assert(
@@ -585,10 +713,104 @@ try {
       transfer.byteIntegrity = true;
       transfer.status = 'verified';
       await persist();
+      transfer.status = 'server-sha-pending';
+      process.stdout.write(
+        JSON.stringify({
+          phase: 'server-sha-pending',
+          documentId: completed.documentId,
+          versionId: transfer.versionId,
+          sizeGiB: size / GIB,
+          receipt: receiptPath,
+        }) + '\n',
+      );
+      const serverStarted = performance.now();
+      while (true) {
+        const response = await requestApi.get(
+          `${origin}/api/organizations/${org}/documents/${completed.documentId}/versions`,
+        );
+        assert(response.ok(), 'Could not inspect server hash verification');
+        const versions = await response.json(),
+          version = versions.versions.find((row: any) => row.id === transfer.versionId);
+        assert(
+          version && versions.currentVersionId === transfer.versionId && version.size === size,
+          'Server version metadata changed',
+        );
+        transfer.serverVerification = {
+          versionId: version.id,
+          sha256: version.sha256 ?? null,
+          processingStatus: version.processingStatus,
+          processingError: version.processingError ?? null,
+          waitedSeconds: seconds(serverStarted),
+          verified: false,
+        };
+        await persist();
+        if (typeof version.sha256 === 'string' && /^[a-f0-9]{64}$/.test(version.sha256)) {
+          assert(
+            version.sha256 === source.sha256,
+            'Worker original SHA256 differs from independent source/download',
+          );
+          transfer.serverVerification.verified = true;
+          break;
+        }
+        assert(
+          seconds(serverStarted) < 600,
+          'Server SHA256 remains pending after bounded10min; byte transfer verified, synthetic document preserved for pipeline inspection',
+        );
+        await new Promise((resolve) => setTimeout(resolve, 10000));
+      }
+      const backupRequest = join(directory, 'backup.request.json'),
+        backupReady = join(directory, 'backup.ready.json');
+      await rm(backupReady, { force: true });
+      await writeFile(
+        backupRequest,
+        JSON.stringify({
+          runId,
+          documentId: completed.documentId,
+          versionId: transfer.versionId,
+          sha256: source.sha256,
+          sizeBytes: size,
+          primaryStorageKey: exported.document.originalStorageKey,
+        }),
+        { mode: 0o600 },
+      );
+      transfer.status = 'backup-verification-pending';
+      await persist();
+      process.stdout.write(
+        JSON.stringify({
+          phase: 'awaiting-backup-verification',
+          versionId: transfer.versionId,
+          sizeGiB: size / GIB,
+          backupRequest,
+          backupReady,
+        }) + '\n',
+      );
+      const backup = await waitFor(
+        async () => {
+          try {
+            return JSON.parse(await readFile(backupReady, 'utf8'));
+          } catch {
+            return undefined;
+          }
+        },
+        'independent R2 backup whole-stream verification',
+        600000,
+      );
+      assert(
+        backup.verified === true &&
+          backup.wholeObjectStreamVerified === true &&
+          backup.versionId === transfer.versionId &&
+          backup.sha256 === source.sha256 &&
+          backup.sizeBytes === size &&
+          typeof backup.receiptPath === 'string',
+        'Independent backup receipt differs from source bytes',
+      );
+      transfer.backupVerification = backup;
+      transfer.status = 'verified';
+      await persist();
       // Only purge this run's exact synthetic document ID after a successful receipt.
       assert(
         (
-          await context.request.delete(
+          await requestApi.delete(
             `${origin}/api/organizations/${org}/documents/${completed.documentId}`,
           )
         ).ok(),
@@ -596,7 +818,7 @@ try {
       );
       assert(
         (
-          await context.request.delete(
+          await requestApi.delete(
             `${origin}/api/organizations/${org}/documents/trash/${completed.documentId}`,
           )
         ).ok(),
@@ -620,11 +842,22 @@ try {
         }) + '\n',
       );
     }
-    assert(
-      (await context.request.delete(`${origin}/api/organizations/${org}/folders/${folderId}`)).ok(),
-      'Empty disposable folder cleanup failed',
-    );
-    receipt.folderDeleted = true;
+    if (!keepFolder) {
+      assert(
+        (await requestApi.delete(`${origin}/api/organizations/${org}/folders/${folderId}`)).ok(),
+        'Empty disposable folder cleanup failed',
+      );
+      receipt.folderDeleted = true;
+    } else {
+      receipt.folderDeleted = false;
+      receipt.folderRetainedForNextBenchmark = true;
+    }
+    if (serviceCredential)
+      receipt.credentialRevocation = {
+        requiredOwnerUiAction: !keepFolder,
+        credentialId: serviceCredential.credentialId,
+        effectiveFolderAccessRemoved: !keepFolder,
+      };
     receipt.status = 'passed';
     await persist();
   }

@@ -2,7 +2,7 @@ import { apiClient } from '@/modules/shared/http/api-client';
 import type { ParentComponent } from 'solid-js';
 import type { Document } from '../documents.types';
 import { safely } from '@corentinth/chisels';
-import { A } from '@solidjs/router';
+import { A, useSearchParams } from '@solidjs/router';
 import { useQuery } from '@tanstack/solid-query';
 import pLimit from 'p-limit';
 import { createContext, createSignal, For, Match, Show, Switch, useContext } from 'solid-js';
@@ -70,6 +70,7 @@ type Task = { progress?: import('../drive-multipart.services').TransferProgress 
 );
 
 export const DocumentUploadProvider: ParentComponent<{ organizationId: string }> = (props) => {
+  const [searchParams] = useSearchParams();
   const throttledInvalidateOrganizationDocumentsQuery = throttle(
     invalidateOrganizationDocumentsQuery,
     500,
@@ -110,12 +111,13 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
   const uploadDocuments = async ({
     files,
     folderImport,
-    folderId,
+    folderId = typeof searchParams.folder === 'string' ? searchParams.folder : undefined,
   }: {
     files: File[];
     folderImport?: boolean;
     folderId?: string;
   }) => {
+    const organizationId = props.organizationId;
     setTasks((tasks) => [...tasks, ...files.map((file) => ({ file, status: 'pending' }) as const)]);
     setState('open');
 
@@ -132,7 +134,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
     if (folderImport) {
       const list = await apiClient<{
         folders: { id: string; parentId: string | null; name: string; isHome: boolean }[];
-      }>({ method: 'GET', path: `/api/organizations/${props.organizationId}/folders` });
+      }>({ method: 'GET', path: `/api/organizations/${organizationId}/folders` });
       folders.set('', folderId || list.folders.find((f) => f.isHome)!.id);
       for (const file of files) {
         const segments = file.webkitRelativePath.split('/').slice(0, -1);
@@ -149,7 +151,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
               folder: { id: string; parentId: string; name: string; isHome: boolean };
             }>({
               method: 'POST',
-              path: `/api/organizations/${props.organizationId}/folders`,
+              path: `/api/organizations/${organizationId}/folders`,
               body: { name, parentId },
             });
             folder = result.folder;
@@ -178,7 +180,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
           const [result, error] = await safely(
             uploadDocument({
               file,
-              organizationId: props.organizationId,
+              organizationId,
               folderId: folderImport
                 ? folders.get(file.webkitRelativePath.split('/').slice(0, -1).join('/'))
                 : folderId,
@@ -198,7 +200,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
           }
 
           void interruptedQuery.refetch();
-          throttledInvalidateOrganizationDocumentsQuery({ organizationId: props.organizationId });
+          throttledInvalidateOrganizationDocumentsQuery({ organizationId });
         });
       }),
     );

@@ -126,6 +126,7 @@ export function DriveSpaceCapabilities(props: { organizationId: string }) {
             <label class="block text-sm font-medium">
               Permission
               <select
+                aria-label="Permission"
                 class={`${driveFieldClass} mt-1`}
                 value={write() ? 'write' : 'read'}
                 onChange={(event) => setWrite(event.currentTarget.value === 'write')}
@@ -137,10 +138,12 @@ export function DriveSpaceCapabilities(props: { organizationId: string }) {
             <label class="block text-sm font-medium">
               Expires in
               <select
+                aria-label="Expires in"
                 class={`${driveFieldClass} mt-1`}
                 value={days()}
                 onChange={(event) => setDays(Number(event.currentTarget.value))}
               >
+                <option value={0.125}>3 hours</option>
                 <option value={1}>1 day</option>
                 <option value={7}>7 days</option>
                 <option value={30}>30 days</option>
