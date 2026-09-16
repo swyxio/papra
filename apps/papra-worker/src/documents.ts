@@ -67,6 +67,7 @@ async function purge(env: Env, d: Record<string, any>) {
   const versions = await all(env, 'SELECT * FROM versions WHERE document_id=?', d.id);
   for (const v of versions) {
     await env.FILES.delete(v.storage_key);
+    await env.BACKUPS.delete(v.storage_key);
     await deletePrefix(env.FILES, `derived/${v.id}/`);
     await deletePrefix(env.BACKUPS, `originals/${v.id}/`);
     await deletePrefix(env.BACKUPS, `versions/${v.id}/`);

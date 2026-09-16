@@ -5,7 +5,7 @@ import type { RowSelectionState, SortingState } from '@tanstack/solid-table';
 import type { Component, Setter } from 'solid-js';
 import type { BatchTargetFilter } from '../documents-batch.services';
 import type { DocumentSearchSortField, DocumentSearchSortOrder } from '../documents.constants';
-import { useParams } from '@solidjs/router';
+import { A, useParams } from '@solidjs/router';
 import { keepPreviousData, useMutation, useQuery } from '@tanstack/solid-query';
 import { createEffect, createMemo, createSignal, on, Show, Suspense } from 'solid-js';
 import { CreateDocumentViewModal } from '@/modules/document-views/components/document-view-modals';
@@ -266,7 +266,7 @@ export const DocumentsPage: Component = () => {
   return (
     <div class="p-6 mt-4 pb-32">
       <DriveFolders organizationId={params.organizationId} />
-      <DriveExport organizationId={params.organizationId} />
+      <div class="flex gap-3 mb-3"><Button as={A} variant="outline" href={`/organizations/${params.organizationId}/documents/new`}>Create document</Button><DriveExport organizationId={params.organizationId} /></div>
       <details class="my-4">
         <summary class="cursor-pointer text-sm font-medium">
           Semantic search, document answers and automation

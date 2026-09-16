@@ -31,6 +31,8 @@ export const SNAPSHOT_TABLES = [
   'signing_requests',
   'signing_recipients',
   'signing_mail',
+  'authored_versions',
+  'document_edit_locks',
 ] as const;
 export function snapshotPrefix(date: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('invalid_snapshot_date');

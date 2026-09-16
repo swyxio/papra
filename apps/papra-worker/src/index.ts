@@ -11,6 +11,7 @@ import { registerCollaborationRoutes } from './collaboration';
 import { registerShareRoutes } from './shares';
 import { registerSearchRoutes } from './search';
 import { consumeJobs, housekeeping } from './jobs';
+import { registerAuthoringRoutes } from './authoring';
 import { registerSigningRoutes, processSigning, repairSigning } from './signing';
 
 export { ImageProcessorContainer, ContainerProxy } from '../native/container';
@@ -101,6 +102,7 @@ registerShareRoutes(app);
 registerAutomationRoutes(app);
 registerSearchRoutes(app);
 registerSigningRoutes(app);
+registerAuthoringRoutes(app);
 app.all('/api/*', (c) => c.json({ message: 'API route not found' }, 404));
 app.all('*', async (c) => c.env.ASSETS.fetch(c.req.raw));
 app.onError((err, c) => {

@@ -1,3 +1,4 @@
+import { DocumentEditorPage, NewDocumentPage } from './modules/drive-signing/editor.pages';
 import type { RouteDefinition } from '@solidjs/router';
 import { Navigate, useParams } from '@solidjs/router';
 import { useQuery } from '@tanstack/solid-query';
@@ -154,6 +155,14 @@ export const routes: RouteDefinition[] = [
               {
                 path: '/documents/:documentId/pdf-viewer',
                 component: DocumentPdfViewerPage,
+              },
+              {
+                path: '/documents/new',
+                component: NewDocumentPage,
+              },
+              {
+                path: '/documents/:documentId/editor',
+                component: DocumentEditorPage,
               },
               {
                 path: '/documents/:documentId/signing',

@@ -3,7 +3,7 @@ import { all, first, run, error, id } from './db';
 import { ensureDocumentAccess, ensureOrganizationMember } from './collaboration';
 import { isApprovedEmail } from './auth';
 import { s3, signedDownload } from './storage';
-import { digestBytes, sealSigningPdf, signingPdf, validateFields, SIGNING_MAX_BYTES } from './signing-pdf';
+import { validateSigningText, digestBytes, sealSigningPdf, signingPdf, validateFields, SIGNING_MAX_BYTES } from './signing-pdf';
 import type { SigningField, PdfSigner } from './signing-pdf';
 import { enqueueVersion } from './jobs';
 
@@ -58,6 +58,7 @@ export function registerSigningRoutes(app:App){
     const b=await c.req.json();const requestKey=clean(b.idempotencyKey,100);
     const existing=await first<RequestRow>(c.env,'SELECT * FROM signing_requests WHERE created_by=? AND request_key=?',identity.userId,requestKey);
     if(existing){if(existing.document_id!==document.id)throw error(409,'This send key belongs to another document');return c.json({request:await signingDto(c.env,existing)},201);}
+    try{validateSigningText(document.name);}catch(e){throw error(400,(e as Error).message);}
     if(b.versionId!==document.current_version_id)throw error(409,'The document changed; reload the PDF before sending');
     const version=await first(c.env,'SELECT * FROM versions WHERE id=?',document.current_version_id);
     if(!version||version.mime_type!=='application/pdf')throw error(400,'Request signatures on a PDF');
@@ -65,6 +66,7 @@ export function registerSigningRoutes(app:App){
     if(!c.env.SIGNING_P12||!c.env.SIGNING_PASSPHRASE||!c.env.RESEND_API_KEY)throw error(503,'Signing is not configured yet');
     if(!Array.isArray(b.recipients)||b.recipients.length<1||b.recipients.length>20)throw error(400,'Add 1 to 20 recipients');
     const recipients=b.recipients.map((r:any,i:number)=>({id:id('sigrec'),name:clean(r.name),email:clean(r.email,254).toLowerCase(),position:i}));
+    try{for(const r of recipients){validateSigningText(r.name);validateSigningText(r.email);}}catch(e){throw error(400,(e as Error).message);}
     if(recipients.some((r:any)=>!/^\S+@[^@\s]+\.[^@\s]+$/.test(r.email))||new Set(recipients.map((r:any)=>r.email)).size!==recipients.length)throw error(400,'Use a different valid email for each recipient');
     const object=await c.env.FILES.get(version.storage_key);if(!object)throw error(404,'PDF not found');
     const bytes=new Uint8Array(await object.arrayBuffer());let pdf,fields:SigningField[];
@@ -96,7 +98,8 @@ export function registerSigningRoutes(app:App){
     const {request:r,recipient:p}=await publicSigning(c.env,c.req.param('token'));if(p.signed_at)return c.json({ok:true,status:r.status});if(r.status!=='pending')throw error(409,'Signing is not open');
     if(!(await c.env.AUTH_LIMITER.limit({key:`sign:${c.req.header('CF-Connecting-IP')||'local'}`})).success)throw error(429,'Please wait before trying again');
     const b=await c.req.json();if(b.consent!==true)throw error(400,'Consent to electronic signing is required');const name=clean(b.name),sig=clean(b.signature);
-    const fields=(JSON.parse(r.fields) as SigningField[]).filter(f=>f.recipient===p.position&&f.type==='text');const values:Record<string,string>={};for(const f of fields)values[f.id]=clean(b.values?.[f.id],500);
+    const fields=(JSON.parse(r.fields) as SigningField[]).filter(f=>f.recipient===p.position&&f.type==='text');try{validateSigningText(name);validateSigningText(sig);}catch(e){throw error(400,(e as Error).message);}
+    const values:Record<string,string>={};for(const f of fields){values[f.id]=clean(b.values?.[f.id],500);try{validateSigningText(values[f.id]);}catch(e){throw error(400,(e as Error).message);}}
     await run(c.env,"UPDATE signing_recipients SET name=?,signature=?,values_json=?,signed_at=?,address=?,user_agent=? WHERE id=? AND signed_at IS NULL AND rejected_at IS NULL AND EXISTS(SELECT 1 FROM signing_requests WHERE id=? AND status='pending')",name,sig,JSON.stringify(values),Date.now(),(c.req.header('CF-Connecting-IP')||'unavailable').slice(0,80),(c.req.header('User-Agent')||'').slice(0,512),p.id,r.id);
     const accepted=await first(c.env,'SELECT signed_at FROM signing_recipients WHERE id=?',p.id);if(!accepted?.signed_at)throw error(409,'The request closed before your signature was saved');
     try{await dispatch(c.env,r.id);}catch{/* Scheduler repairs accepted signing. */}return c.json({ok:true,status:'pending'});

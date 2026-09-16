@@ -1,7 +1,12 @@
 // Adapted from Documenso's AGPLv3 packages/signing/index.ts and transports/local.ts.
 // Source: https://github.com/swyxio/documenso/tree/3849e6317/packages/signing
 // LibPDF itself is MIT licensed. Keep Papra's public AGPL source offer.
-import { PDF, P12Signer, StandardFonts, rgb, measureText } from '@libpdf/core';
+import { PDF, P12Signer, rgb, measureText } from '@libpdf/core';
+
+import fonts from 'pdfmake/build/vfs_fonts.js';
+const fontBytes=(name:string)=>Uint8Array.from(atob(fonts[name]),x=>x.charCodeAt(0));
+const textFont=PDF.create().embedFont(fontBytes('Roboto-Regular.ttf'));
+export function validateSigningText(value:string){if(!textFont.canEncode(value))throw new Error('This text contains characters outside the supported signing font. Use a supported name or signature.');}
 
 export const SIGNING_MAX_BYTES = 10 * 1024 ** 2;
 export const SIGNING_MAX_PAGES = 100;
@@ -40,6 +45,7 @@ export type PdfSigner = { name: string; email: string; signedAt: number; signatu
 export async function sealSigningPdf(bytes: Uint8Array, fields: SigningField[], recipients: PdfSigner[], audit: { requestId:string; name:string; sourceSha256:string; createdAt:number }, p12: Uint8Array, passphrase: string) {
   const pdf = await signingPdf(bytes);
   const pages = pdf.getPages();
+  const regular=pdf.embedFont(fontBytes('Roboto-Regular.ttf')),italic=pdf.embedFont(fontBytes('Roboto-Italic.ttf')),bold=pdf.embedFont(fontBytes('Roboto-Medium.ttf'));
   for (const field of fields) {
     const recipient = recipients[field.recipient];
     const value = field.type === 'signature' ? recipient.signature : field.type === 'name' ? recipient.name : field.type === 'date' ? new Date(recipient.signedAt).toISOString().slice(0,10) : recipient.values[field.id];
@@ -48,7 +54,7 @@ export async function sealSigningPdf(bytes: Uint8Array, fields: SigningField[], 
     const vx=field.x*W+4, vy=(1-field.y-field.height)*H+Math.max(3,field.height*H*.3);
     // Invert the PDF viewer's clockwise rotation into PDF user coordinates.
     const point=page.rotation===90 ? {x:box.x+box.width-vy,y:box.y+vx} : page.rotation===180 ? {x:box.x+box.width-vx,y:box.y+box.height-vy} : page.rotation===270 ? {x:box.x+vy,y:box.y+box.height-vx} : {x:box.x+vx,y:box.y+vy};
-    const font=field.type==='signature' ? StandardFonts.TimesItalic : StandardFonts.Helvetica;
+    const font=field.type==='signature' ? italic : regular;
     let fontSize=Math.min(field.type==='signature' ? 22 : 12,field.height*H*.55);
     const width=measureText(value,font,fontSize);
     if (width>field.width*W-8) fontSize*= (field.width*W-8)/width;
@@ -56,11 +62,11 @@ export async function sealSigningPdf(bytes: Uint8Array, fields: SigningField[], 
   }
   // The record is inside the sealed byte range, not merely a detachable JSON log.
   let page=pdf.addPage({size:'letter'}), y=740;
-  function line(text:string,bold=false) {
+  function line(text:string,isBold=false) {
     const chunks=text.match(/.{1,92}/gu) || [''];
     for(const chunk of chunks) {
       if(y<50){page=pdf.addPage({size:'letter'});y=740;}
-      page.drawText(chunk,{x:45,y,size:bold?14:10,font:bold?StandardFonts.HelveticaBold:StandardFonts.Helvetica});y-=bold?25:16;
+      page.drawText(chunk,{x:45,y,size:isBold?14:10,font:isBold?bold:regular});y-=isBold?25:16;
     }
   }
   line('Signing record',true); line(audit.name); line(`Request: ${audit.requestId}`);

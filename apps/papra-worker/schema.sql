@@ -39,3 +39,7 @@ CREATE TABLE IF NOT EXISTS signing_requests(id TEXT PRIMARY KEY,organization_id 
 CREATE INDEX IF NOT EXISTS signing_requests_document ON signing_requests(document_id,created_at);
 CREATE TABLE IF NOT EXISTS signing_recipients(id TEXT PRIMARY KEY,request_id TEXT NOT NULL REFERENCES signing_requests(id) ON DELETE CASCADE,position INTEGER NOT NULL,name TEXT NOT NULL,email TEXT NOT NULL,signed_at INTEGER,signature TEXT,values_json TEXT,address TEXT,user_agent TEXT,rejected_at INTEGER,UNIQUE(request_id,position));
 CREATE TABLE IF NOT EXISTS signing_mail(id TEXT PRIMARY KEY,request_id TEXT NOT NULL REFERENCES signing_requests(id) ON DELETE CASCADE,recipient_id TEXT NOT NULL REFERENCES signing_recipients(id) ON DELETE CASCADE,kind TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,lease_token TEXT,updated_at INTEGER NOT NULL,provider_id TEXT,error TEXT,UNIQUE(request_id,recipient_id,kind));
+
+CREATE TABLE IF NOT EXISTS authored_versions ( version_id TEXT PRIMARY KEY REFERENCES versions(id) ON DELETE CASCADE, document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE, source_json TEXT NOT NULL, created_at INTEGER NOT NULL );
+CREATE INDEX IF NOT EXISTS authored_document ON authored_versions(document_id,created_at);
+CREATE TABLE IF NOT EXISTS document_edit_locks ( document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id), token TEXT NOT NULL, expires_at INTEGER NOT NULL );
