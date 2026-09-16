@@ -566,7 +566,7 @@ export function PublicSigningPage() {
           <h1 class="text-xl font-semibold mt-8">Signing link unavailable</h1>
         </Show>
         <p role="alert" class="mt-3">
-          {message(loadError())}
+          {loadError()}
         </p>
       </Show>
       <Show when={data.latest}>
