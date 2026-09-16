@@ -44,6 +44,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk-solid": "^1.1.2",
+    "diff": "8.0.2",
     "ofetch": "catalog:",
     "p-limit": "catalog:",
     "pdfjs-dist": "4.10.38",

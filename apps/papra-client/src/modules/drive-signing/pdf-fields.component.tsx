@@ -1,4 +1,4 @@
-import { createEffect, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
+import { createEffect, createSignal, For, Index, onCleanup, onMount, Show } from 'solid-js';
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
@@ -26,6 +26,6 @@ function PdfPage(props:{pdf:PDFDocumentProxy;page:number;fields:SigningField[]}&
   }
   return <div><p class="text-xs text-muted-foreground mb-2">Page {props.page}</p><div ref={wrapper} class="relative border shadow-sm bg-white overflow-hidden" style={{'aspect-ratio':ratio(),'touch-action':props.onPlace?'none':'auto'}} onClick={e=>{if(e.target!==canvas)return;const r=wrapper.getBoundingClientRect();props.onPlace?.(props.page,(e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height);}}>
     <canvas ref={canvas} class="w-full h-full"/><Show when={failed()}><p class="absolute top-4 left-4 text-red-700">Page rendering failed; reload before signing.</p></Show>
-    <For each={props.fields}>{field=><div class="absolute border-2 border-blue-500 bg-blue-100/70 text-blue-950 flex items-center justify-between px-1 text-xs select-none overflow-hidden" style={{left:`${field.x*100}%`,top:`${field.y*100}%`,width:`${field.width*100}%`,height:`${field.height*100}%`,'touch-action':'none',cursor:props.onMove?'move':'default'}} onPointerDown={e=>move(e,field)} onClick={e=>e.stopPropagation()}><span class="truncate">{props.labels?.(field)||field.label||field.type}</span><Show when={props.onRemove}><button type="button" aria-label={`Remove ${field.type} field`} class="px-1 font-bold" onPointerDown={e=>e.stopPropagation()} onClick={()=>props.onRemove?.(field.id)}>×</button></Show></div>}</For>
+    <Index each={props.fields}>{field=><div class="absolute border-2 border-blue-500 bg-blue-100/70 text-blue-950 flex items-center justify-between px-1 text-xs select-none overflow-hidden" style={{left:`${field().x*100}%`,top:`${field().y*100}%`,width:`${field().width*100}%`,height:`${field().height*100}%`,'touch-action':'none',cursor:props.onMove?'move':'default'}} onPointerDown={e=>move(e,field())} onClick={e=>e.stopPropagation()}><span class="truncate">{props.labels?.(field())||field().label||field().type}</span><Show when={props.onRemove}><button type="button" aria-label={`Remove ${field().type} field`} class="px-1 font-bold" onPointerDown={e=>e.stopPropagation()} onClick={()=>props.onRemove?.(field().id)}>×</button></Show></div>}</Index>
   </div></div>;
 }

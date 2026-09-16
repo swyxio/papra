@@ -1,3 +1,4 @@
+import { DocumentReviews } from '@/modules/drive-signing/review.pages';
 import { NativeDocumentAction } from '@/modules/drive-signing/editor.pages';
 import type { DropdownMenuTriggerProps } from '@kobalte/core/dropdown-menu';
 import type { Component, JSX } from 'solid-js';
@@ -462,6 +463,7 @@ export const DocumentPage: Component = () => {
                   </div>
                   <Separator class="my-3" />
 
+                  <Show when={!getDocument().isDeleted}><DocumentReviews organizationId={params.organizationId} documentId={params.documentId} /></Show>
                   <NativeDocumentAction organizationId={params.organizationId} documentId={params.documentId} />
                   <DocumentSigning organizationId={params.organizationId} documentId={params.documentId} mimeType={getDocument().mimeType} isDeleted={!!getDocument().isDeleted} />
 

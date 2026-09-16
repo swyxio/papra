@@ -1,3 +1,4 @@
+import { PublicReviewPage } from './modules/drive-signing/review.pages';
 import { DocumentEditorPage, NewDocumentPage } from './modules/drive-signing/editor.pages';
 import type { RouteDefinition } from '@solidjs/router';
 import { Navigate, useParams } from '@solidjs/router';
@@ -205,6 +206,10 @@ export const routes: RouteDefinition[] = [
   {
     path: '/sign/:token',
     component: PublicSigningPage,
+  },
+  {
+    path: '/review/:token',
+    component: PublicReviewPage,
   },
   {
     // Public document share page — accessible to anyone (logged in or not), no auth guard.

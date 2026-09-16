@@ -46,6 +46,7 @@ async function deletePrefix(bucket: R2Bucket, prefix: string) {
 }
 async function purge(env: Env, d: Record<string, any>) {
   await run(env, 'UPDATE documents SET is_deleted=2 WHERE id=? AND is_deleted<>0', d.id);
+  await run(env,'DELETE FROM document_reviews WHERE document_id=?',d.id);
   const signing = await all(env, 'SELECT id FROM signing_requests WHERE document_id=?', d.id);
   await run(env, "UPDATE signing_requests SET status='cancelled',lease_token=NULL WHERE document_id=?", d.id);
   for (const request of signing) {

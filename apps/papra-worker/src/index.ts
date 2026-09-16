@@ -11,6 +11,7 @@ import { registerCollaborationRoutes } from './collaboration';
 import { registerShareRoutes } from './shares';
 import { registerSearchRoutes } from './search';
 import { consumeJobs, housekeeping } from './jobs';
+import { registerReviewRoutes } from './reviews';
 import { registerAuthoringRoutes } from './authoring';
 import { registerSigningRoutes, processSigning, repairSigning } from './signing';
 
@@ -71,7 +72,7 @@ app.get('/api/config', (c) =>
 );
 registerAuthRoutes(app);
 app.use('/api/*', async (c, next) => {
-  if (c.req.path.startsWith('/api/share-links/') || c.req.path.startsWith('/api/signing/')) return next();
+  if (c.req.path.startsWith('/api/share-links/') || c.req.path.startsWith('/api/signing/') || c.req.path.startsWith('/api/reviews/')) return next();
   const identity =
     (await getIdentity(c.req.raw, c.env)) || (await serviceIdentity(c.req.raw, c.env));
   if (!identity) throw new HTTPException(401, { message: 'Google sign-in required' });
@@ -103,8 +104,9 @@ registerAutomationRoutes(app);
 registerSearchRoutes(app);
 registerSigningRoutes(app);
 registerAuthoringRoutes(app);
+registerReviewRoutes(app);
 app.all('/api/*', (c) => c.json({ message: 'API route not found' }, 404));
-app.all('*', async (c) => c.env.ASSETS.fetch(c.req.raw));
+app.all('*', async (c) => {const response=await c.env.ASSETS.fetch(c.req.raw);if(/^\/(sign|review)\//.test(c.req.path)){const headers=new Headers(response.headers);headers.set('Referrer-Policy','no-referrer');headers.set('X-Robots-Tag','noindex, noarchive');return new Response(response.body,{status:response.status,headers});}return response;});
 app.onError((err, c) => {
   if (err instanceof HTTPException) return c.json({ message: err.message }, err.status);
   // eslint-disable-next-line no-console -- Record a sanitized error name in Cloudflare logs.

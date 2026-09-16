@@ -58,6 +58,7 @@ export function registerSigningRoutes(app:App){
     const b=await c.req.json();const requestKey=clean(b.idempotencyKey,100);
     const existing=await first<RequestRow>(c.env,'SELECT * FROM signing_requests WHERE created_by=? AND request_key=?',identity.userId,requestKey);
     if(existing){if(existing.document_id!==document.id)throw error(409,'This send key belongs to another document');return c.json({request:await signingDto(c.env,existing)},201);}
+    if(await first(c.env,"SELECT p.id FROM review_proposals p JOIN document_reviews r ON r.id=p.review_id WHERE r.document_id=? AND p.status='pending' LIMIT 1",document.id))throw error(409,'Resolve proposed changes and comments before sending this PDF');
     try{validateSigningText(document.name);}catch(e){throw error(400,(e as Error).message);}
     if(b.versionId!==document.current_version_id)throw error(409,'The document changed; reload the PDF before sending');
     const version=await first(c.env,'SELECT * FROM versions WHERE id=?',document.current_version_id);
@@ -75,7 +76,8 @@ export function registerSigningRoutes(app:App){
     const now=Date.now(),requestId=id('sigreq');
     const current=await first(c.env,'SELECT current_version_id FROM documents WHERE id=?',document.id);if(current?.current_version_id!==version.id)throw error(409,'The document changed; reload before sending');
     try { await c.env.DB.batch([
-      c.env.DB.prepare('INSERT INTO signing_requests(id,organization_id,document_id,version_id,name,source_sha256,fields,created_by,sender_name,sender_email,created_at,updated_at,expires_at,request_key) SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,? FROM documents WHERE id=? AND current_version_id=? AND is_deleted=0').bind(requestId,document.organization_id,document.id,version.id,document.name,sha,JSON.stringify(fields),identity.userId,identity.name,identity.email,now,now,now+90*86400000,requestKey,document.id,version.id),
+      c.env.DB.prepare('INSERT INTO signing_requests(id,organization_id,document_id,version_id,name,source_sha256,fields,created_by,sender_name,sender_email,created_at,updated_at,expires_at,request_key) SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,? FROM documents WHERE id=? AND current_version_id=? AND is_deleted=0 AND NOT EXISTS(SELECT 1 FROM review_proposals p JOIN document_reviews r ON r.id=p.review_id WHERE r.document_id=documents.id AND p.status=\'pending\')').bind(requestId,document.organization_id,document.id,version.id,document.name,sha,JSON.stringify(fields),identity.userId,identity.name,identity.email,now,now,now+90*86400000,requestKey,document.id,version.id),
+      c.env.DB.prepare("UPDATE document_reviews SET status='closed' WHERE document_id=? AND EXISTS(SELECT 1 FROM signing_requests WHERE id=?)").bind(document.id,requestId),
       ...recipients.flatMap((r:any)=>[
         c.env.DB.prepare('INSERT INTO signing_recipients(id,request_id,position,name,email) SELECT ?,?,?,?,? FROM signing_requests WHERE id=?').bind(r.id,requestId,r.position,r.name,r.email,requestId),
         c.env.DB.prepare("INSERT INTO signing_mail(id,request_id,recipient_id,kind,updated_at) SELECT ?,?,?, 'request',? FROM signing_requests WHERE id=?").bind(id('sigmail'),requestId,r.id,now,requestId),
