@@ -32,14 +32,15 @@ export function NewDocumentPage(){
 }
 type EditorData={authored:boolean;canEdit:boolean;canSend:boolean;name:string;versionId:string;sourceVersionId:string;source:JSONContent};
 export function DocumentEditorPage(){
-  const params=useParams(),navigate=useNavigate(),base=`/api/organizations/${params.organizationId}/documents/${params.documentId}/editor`,token=randomKey();
+  const params=useParams(),navigate=useNavigate(),base=`/api/organizations/${params.organizationId}/documents/${params.documentId}/editor`,lockKey=`drive-editor:${params.documentId}`,token=sessionStorage.getItem(lockKey)||randomKey();
+  sessionStorage.setItem(lockKey,token);
   const [data]=createResource(()=>apiClient<EditorData>({path:base}));const [source,setSource]=createSignal<JSONContent>(),[version,setVersion]=createSignal(''),[dirty,setDirty]=createSignal(false),[locked,setLocked]=createSignal(false),[busy,setBusy]=createSignal(false),[error,setError]=createSignal(''),[saved,setSaved]=createSignal(false);
   let saveKey=randomKey();
   let pendingSave:{source:JSONContent;versionId:string}|undefined;
   async function lock(){try{await apiClient({path:`${base}/lock`,method:'POST',body:{token}});setLocked(true);setError('');}catch(e){setLocked(false);setError(getHttpErrorMessage(e));}}
   const timer=setInterval(()=>{if(locked())void lock();},40000);
   function beforeUnload(e:BeforeUnloadEvent){if(dirty()){e.preventDefault();e.returnValue='';}}
-  onMount(()=>window.addEventListener('beforeunload',beforeUnload));onCleanup(()=>{clearInterval(timer);window.removeEventListener('beforeunload',beforeUnload);void fetch(`${base}/release`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token}),keepalive:true});});
+  onMount(()=>window.addEventListener('beforeunload',beforeUnload));onCleanup(()=>{if(sessionStorage.getItem(lockKey)===token)sessionStorage.removeItem(lockKey);clearInterval(timer);window.removeEventListener('beforeunload',beforeUnload);void fetch(`${base}/release`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token}),keepalive:true});});
   async function save(sign=false){setBusy(true);setError('');try{if(!locked())await lock();if(!locked())return;
     if(dirty()){pendingSave ||= {source:source()||data()!.source,versionId:version()||data()!.versionId};const captured=pendingSave.source;const result=await apiClient<{versionId:string}>({path:base,method:'POST',body:{key:saveKey,token,versionId:pendingSave.versionId,source:captured}});setVersion(result.versionId);saveKey=randomKey();pendingSave=undefined;setDirty(source()!==captured);setSaved(!dirty());}
     if(sign&&!dirty())navigate(`/organizations/${params.organizationId}/documents/${params.documentId}/signing`);
