@@ -73,3 +73,13 @@ Native signing live proof (2026-09-16): synthetic, explicitly non-binding `doc_3
 ### Review before signing
 
 Apply `apps/papra-worker/reviews.sql`. Personal owners and team admins create document-only bearer review links lasting 30 days. Reviewers can comment on uploaded PDFs or submit edited native sources as separate proposals. Writers accept/reject proposals; accepting changes saves an immutable PDF and its source atomically. The UI shows word differences and the full proposed document for formatting/table review. These are whole-revision proposals, not Word tracked-change round trips. Comments must be resolved and proposals accepted/rejected before sending; creating a signing request closes its review links atomically. Revocation, sender removal, document trash, and expiry close public access.
+
+### Documenso retirement (2026-09-16)
+
+`sign.swyx.io` now redirects to `https://drive.swyx.io/sign` through the Cloudflare `papra-sign-redirect` Worker. Its source and custom-domain target are in this directory. The former Railway CNAME `sign → 422j0swl.up.railway.app` was replaced with the Worker custom domain. Old signing paths are intentionally retired. Native signing does not call Documenso.
+
+The six former envelopes were all explicitly TEST ONLY: two completed, three pending team requests and one personal draft. Five team documents, seven immutable PDF versions and both completed sealed PDFs were imported into their matching AIE, Latent Space and Smol spaces. The personal draft remains in the private operator recovery archive rather than being exposed to a team. Old pending signing links were not reissued.
+
+Before retirement, the PostgreSQL dump was restored into a temporary database and all six envelopes were recovered. All eight source PDFs and the 211,933-byte database dump were copied to private `papra-drive-backups/retired/documenso/2026-09-16/`, with complete SHA-256 readbacks. Its manifest is written last. Stable recovery credentials and the original certificate remain in owner-only local configuration, outside source control.
+
+All four Railway deployments (web, backup, Redis and Postgres) were stopped. Project `55ef0045-dc4a-468d-98e1-84edf2dafcae` deletion was accepted, with provider `deletedAt: 2026-09-18T18:52:31.376Z`; this is scheduled removal, not proof that delayed deletion has completed. The public Documenso source fork remains available for its former modified instance.
