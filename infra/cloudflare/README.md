@@ -42,6 +42,8 @@ pnpm --filter @papra/app-client build
 pnpm --filter @papra/worker exec wrangler deploy
 ```
 
+For a Worker/client-only release with the native image unchanged, deploy with `wrangler deploy --containers-rollout=none`; this preserves the already verified Container rollout. Rebuild and verify the Container image only when its source changes.
+
 Set `SOURCE_SHA` to the released commit and change `VERSION` for deployment checkpoints. Required stable secrets are `AUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`. Never commit or log them. The Google callback is exactly `https://drive.swyx.io/api/auth/callback/google`; the shared Tools client keeps its other callbacks.
 
 The initial D1 schema is `apps/papra-worker/schema.sql`. It initializes a new empty database; do not rerun it against an existing deployment. Worker bindings, container definition and custom-domain target belong to `apps/papra-worker/wrangler.jsonc`. Source/build/deployment/hostname/provider verification are separate receipts in [VERIFICATION.md](VERIFICATION.md).

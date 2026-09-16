@@ -5,7 +5,7 @@ import { safely } from '@corentinth/chisels';
 import { A, useSearchParams } from '@solidjs/router';
 import { useQuery } from '@tanstack/solid-query';
 import pLimit from 'p-limit';
-import { createContext, createSignal, For, Match, Show, Switch, useContext } from 'solid-js';
+import { createContext, createSignal, Index, Match, Show, Switch, useContext } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { useI18n } from '@/modules/i18n/i18n.provider';
 import { promptUploadFiles } from '@/modules/shared/files/upload';
@@ -267,15 +267,15 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
 
             <Show when={getState() === 'open'}>
               <div class="flex flex-col overflow-y-auto h-[450px] pb-4">
-                <For each={getTasks()}>
+                <Index each={getTasks()}>
                   {(task) => (
                     <Switch>
-                      <Match when={task.status === 'success'}>
+                      <Match when={task().status === 'success'}>
                         <A
-                          href={`/organizations/${(task as TaskSuccess).document.organizationId}/documents/${(task as TaskSuccess).document.id}`}
+                          href={`/organizations/${(task() as TaskSuccess).document.organizationId}/documents/${(task() as TaskSuccess).document.id}`}
                           class="text-sm truncate min-w-0 flex items-center gap-4 min-h-48px group hover:bg-muted/50 transition-colors px-6 border-b border-border/80"
                         >
-                          <div class="flex-1 truncate">{task.file.name}</div>
+                          <div class="flex-1 truncate">{task().file.name}</div>
 
                           <div class="flex-none">
                             <div class="i-tabler-circle-check text-primary size-5.5 group-hover:hidden" />
@@ -284,13 +284,13 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
                         </A>
                       </Match>
 
-                      <Match when={task.status === 'error'}>
+                      <Match when={task().status === 'error'}>
                         <div class="text-sm truncate min-w-0 flex items-center gap-4 min-h-48px px-6 border-b border-border/80">
                           <div class="flex-1 truncate">
-                            <div class="flex-1 truncate">{task.file.name}</div>
+                            <div class="flex-1 truncate">{task().file.name}</div>
 
                             <div class="text-xs text-muted-foreground truncate text-red-500">
-                              {getErrorMessage({ error: (task as TaskError).error })}
+                              {getErrorMessage({ error: (task() as TaskError).error })}
                             </div>
                           </div>
 
@@ -300,15 +300,15 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
                         </div>
                       </Match>
 
-                      <Match when={['pending', 'uploading'].includes(task.status)}>
+                      <Match when={['pending', 'uploading'].includes(task().status)}>
                         <div class="text-sm truncate min-w-0 flex items-center gap-4 min-h-48px px-6 border-b border-border/80">
                           <div class="flex-1 truncate">
-                            <div>{task.file.name}</div>
-                            <Show when={task.progress}>
+                            <div>{task().file.name}</div>
+                            <Show when={task().progress}>
                               {(progress) => (
                                 <div class="text-xs text-muted-foreground">
                                   {((progress().bytes / progress().total) * 100).toFixed(1)}% ·{' '}
-                                  {(progress().speed / 1024 ** 2).toFixed(1)} MB/s ·{' '}
+                                  {(progress().speed / 1024 ** 2).toFixed(1)} MiB/s ·{' '}
                                   {Math.ceil(progress().eta)}s left{' '}
                                   <Show when={progress().resumedParts > 0}>
                                     · resumed {progress().resumedParts} parts
@@ -330,7 +330,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
                       </Match>
                     </Switch>
                   )}
-                </For>
+                </Index>
 
                 <Show when={getTasks().length === 0}>
                   <div class="flex flex-col items-center justify-center gap-2 h-full mb-10">
