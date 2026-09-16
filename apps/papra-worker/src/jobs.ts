@@ -511,7 +511,7 @@ async function incorporateEnrichment(env: Env, j: Job, v: Version) {
   if (!m) return;
   const done = await all<Job>(
       env,
-      "SELECT * FROM jobs WHERE version_id=? AND status='done' AND (kind LIKE ? OR kind LIKE ?) ORDER BY kind",
+      "SELECT * FROM jobs WHERE version_id=? AND status='done' AND (kind LIKE ? OR kind LIKE ?) ORDER BY kind LIKE 'vision:%',length(kind),kind",
       v.id,
       `transcribe:${process.generation}:%`,
       `vision:${process.generation}:%`,

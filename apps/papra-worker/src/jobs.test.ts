@@ -326,3 +326,53 @@ test('vision jobs use Gemma multimodal messages and publish its chat completion 
     content: 'Manual corrected content',
   });
 });
+
+test('indexing incorporates cached media scenes in numeric order without rerunning AI enrichment', async () => {
+  const { env, DB, send, embed } = await fixture();
+  const scenes = [
+    { kind: 'vision:0:10', text: 'Tenth scene', startSeconds: 10 },
+    { kind: 'vision:0:2', text: 'Second scene', startSeconds: 2 },
+    { kind: 'vision:0:11', text: 'Eleventh scene', startSeconds: 11 },
+    { kind: 'transcribe:0:0', text: 'Spoken description', startSeconds: 0 },
+  ];
+  await DB.batch([
+    DB.prepare("UPDATE documents SET content='Old extracted text' WHERE id='d'"),
+    DB.prepare(
+      "INSERT INTO jobs(id,version_id,kind,status,generation,created_at,updated_at) VALUES('p','v','process','done',0,1,1)",
+    ),
+    ...scenes.map((scene, index) =>
+      DB.prepare(
+        "INSERT INTO jobs(id,version_id,kind,status,generation,created_at,updated_at) VALUES(?,'v',?,'done',0,1,1)",
+      ).bind(`scene-${index}`, scene.kind),
+    ),
+  ]);
+  env.FILES = {
+    get: async (key: string) => {
+      const scene = scenes.find(
+        (item) => key === `derived/v/${item.kind.replaceAll(':', '-')}.json`,
+      );
+      const value =
+        key === 'derived/v/native-g0.json'
+          ? { versionId: 'v', generation: 0, result: { text: 'Native OCR', outputs: [] } }
+          : scene
+            ? { chunks: [scene] }
+            : null;
+      return value ? { size: 100, json: async () => value } : null;
+    },
+  } as unknown as R2Bucket;
+  await enqueueVersion(env, 'v', 'index');
+  await consumeJobs(batch(send.mock.calls[0][0]), env);
+  const expected =
+    'Native OCR\n\n[0s] Spoken description\n\n[Frame 2s] Second scene\n\n[Frame 10s] Tenth scene\n\n[Frame 11s] Eleventh scene';
+  expect(await DB.prepare("SELECT content FROM documents WHERE id='d'").first()).toEqual({
+    content: expected,
+  });
+  expect(await DB.prepare("SELECT extracted_text FROM versions WHERE id='v'").first()).toEqual({
+    extracted_text: expected,
+  });
+  expect(await DB.prepare("SELECT text FROM chunks WHERE version_id='v'").first()).toEqual({
+    text: expected,
+  });
+  expect(embed).toHaveBeenCalledTimes(1);
+  expect(embed.mock.calls[0][0]).toBe('@cf/baai/bge-base-en-v1.5');
+});
