@@ -61,20 +61,45 @@ async function folder(name){
  if(state.folders[name])return state.folders[name];
  const {folder}=await api('folders',{name,parentId:auth.folderId});state.folders[name]=folder.id;await save(statePath,state);return folder.id;
 }
+const completions=[];let completionTimer;
+async function flushCompletions(){
+ if(completionTimer)clearTimeout(completionTimer);completionTimer=undefined;
+ const batch=completions.splice(0,20);if(completions.length)completionTimer=setTimeout(()=>void flushCompletions(),100);
+ if(!batch.length)return;
+ try{const {results}=await api('uploads/complete',{uploadIds:batch.map(x=>x.id)});
+  for(const item of batch){const result=results.find(x=>x.uploadId===item.id);if(result?.status===200&&result.document)item.resolve(result.document);else item.reject(new Error(`Upload completion failed ${result?.status||502}`));}
+ }catch(error){for(const item of batch)item.reject(error);}
+}
+const completeUpload=id=>new Promise((resolve,reject)=>{completions.push({id,resolve,reject});if(completions.length>=20)void flushCompletions();else if(!completionTimer)completionTimer=setTimeout(()=>void flushCompletions(),100);});
 async function upload(file,mimeType,folderId,label=path.basename(file)){
  const info=await fs.stat(file);const bytesHash=await fileHash(file);
- let asset=state.assets[label];
+ let asset=state.assets[label],created=false;
  if(asset&&(asset.sha256!==bytesHash||asset.bytes!==info.size))throw new Error('Upload asset changed');
  if(!asset){
   const {session}=await api('uploads',{fileName:label,mimeType,size:info.size,fingerprint:bytesHash,folderId});
-  asset={...session,sha256:bytesHash,bytes:info.size,file,label};state.assets[label]=asset;await save(statePath,state);
+  created=true;asset={...session,sha256:bytesHash,bytes:info.size,file,label};state.assets[label]=asset;await save(statePath,state);
  }
  if(asset.complete)return asset;
- const current=await api('uploads/'+asset.id);
+ let current=created?{session:asset,parts:[]}:await api('uploads/'+asset.id);
  if(current.session.status==='complete'){asset.complete=true;await save(statePath,state);return asset;}
- if(current.session.status==='stored'){const result=await api('uploads/'+asset.id+'/complete',{});asset.complete=true;asset.documentId=result.document.id;await save(statePath,state);return asset;}
+ if(current.session.status==='stored'){const document=await completeUpload(asset.id);asset.complete=true;asset.documentId=document.id;await save(statePath,state);return asset;}
+ if(current.session.mode==='single'){
+  if(info.size){const bytes=await fs.readFile(file);for(let attempt=0;;attempt++){
+   try{if(attempt){current=await api('uploads/'+asset.id);if(['stored','complete'].includes(current.session.status))break;}
+    const response=await fetch(current.session.uploadUrl,{method:'PUT',headers:current.session.uploadHeaders,body:bytes,signal:AbortSignal.timeout(180000)});if(!response.ok)throw new Error('R2 upload rejected '+response.status);break;
+   }catch(error){if(attempt>=5)throw error;await sleep(1000*2**attempt);}
+  }}
+  const document=await completeUpload(asset.id);asset.complete=true;asset.documentId=document.id;await save(statePath,state);return asset;
+ }
  const uploaded=new Set(current.parts.map(item=>item.partNumber));
  const handle=await fs.open(file,'r');
+ const signed=new Map();
+ async function partUrl(number,refresh){
+  if(refresh)return (await api('uploads/'+asset.id+'/parts',{partNumbers:[number]})).parts[0].url;
+  const start=Math.floor((number-1)/8)*8+1;
+  if(!signed.has(start))signed.set(start,api('uploads/'+asset.id+'/parts',{partNumbers:Array.from({length:Math.min(8,Math.ceil(info.size/asset.partSize)-start+1)},(_,i)=>start+i).filter(n=>!uploaded.has(n))}));
+  const {parts}=await signed.get(start);const part=parts.find(x=>x.partNumber===number);if(!part)throw new Error('Missing signed upload part');return part.url;
+ }
  try{
   let nextPart=1;
   await Promise.all(Array.from({length:4},async()=>{for(;;){
@@ -84,13 +109,12 @@ async function upload(file,mimeType,folderId,label=path.basename(file)){
    const buffer=Buffer.alloc(size);let readBytes=0;
    while(readBytes<size){const result=await handle.read(buffer,readBytes,size-readBytes,(number-1)*asset.partSize+readBytes);if(!result.bytesRead)throw new Error('Unexpected EOF');readBytes+=result.bytesRead;}
    for(let attempt=0;;attempt++){
-    const {parts}=await api('uploads/'+asset.id+'/parts',{partNumbers:[number]});
-    try{const response=await fetch(parts[0].url,{method:'PUT',body:buffer,signal:AbortSignal.timeout(180000)});if(!response.ok||!response.headers.get('etag'))throw new Error('R2 part rejected '+response.status);break;}
+    try{const response=await fetch(await partUrl(number,attempt>0),{method:'PUT',body:buffer,signal:AbortSignal.timeout(180000)});if(!response.ok||!response.headers.get('etag'))throw new Error('R2 part rejected '+response.status);break;}
     catch(error){if(attempt>=5)throw error;await sleep(1000*2**attempt);}
    }
   }}));
  }finally{await handle.close();}
- const result=await api('uploads/'+asset.id+'/complete',{});asset.complete=true;asset.documentId=result.document.id;await save(statePath,state);return asset;
+ const document=await completeUpload(asset.id);asset.complete=true;asset.documentId=document.id;await save(statePath,state);return asset;
 }
 async function fileHash(file){const hash=crypto.createHash('sha256');const handle=await fs.open(file,'r');try{for await(const chunk of handle.createReadStream())hash.update(chunk);}finally{await handle.close();}return hash.digest('hex');}
 async function command(argv){await new Promise((resolve,reject)=>{const child=spawn(argv[0],argv.slice(1),{stdio:['ignore','pipe','pipe']});let error='';child.stderr.on('data',b=>error+=b.toString().slice(0,2000));child.on('close',code=>code===0?resolve():reject(new Error('Archive verification failed: '+error)));});}

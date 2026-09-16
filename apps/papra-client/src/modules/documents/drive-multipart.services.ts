@@ -11,7 +11,16 @@ export type TransferProgress = {
   eta: number;
   resumedParts: number;
 };
-type Session = { id: string; partSize: number; documentId: string; status?: string };
+type Session = {
+  id: string;
+  partSize: number;
+  documentId: string;
+  status?: string;
+  mode?: 'single' | 'multipart';
+  uploadUrl?: string;
+  uploadHeaders?: Record<string, string>;
+};
+export type CompleteUpload = (uploadId: string) => Promise<{ document: AsDto<Document> }>;
 type Saved = { session: Session; hashes: Record<string, string> };
 const hex = (buffer: ArrayBuffer) =>
   Array.from(new Uint8Array(buffer), (v) => v.toString(16).padStart(2, '0')).join('');
@@ -32,7 +41,12 @@ export async function multipartUpload(
   file: File,
   organizationId: string,
   onProgress?: (progress: TransferProgress) => void,
-  options: { folderId?: string; documentId?: string; fileName?: string } = {},
+  options: {
+    folderId?: string;
+    documentId?: string;
+    fileName?: string;
+    completeUpload?: CompleteUpload;
+  } = {},
 ) {
   const fingerprint = await fileFingerprint(file);
   const key = `drive-upload:${organizationId}:${options.documentId || options.folderId || 'home'}:${options.fileName || file.name}:${fingerprint}`;
@@ -43,6 +57,8 @@ export async function multipartUpload(
   } catch {
     localStorage.removeItem(key);
   }
+  const { completeUpload, ...uploadOptions } = options;
+  let created = false;
   if (!saved) {
     const { session } = await apiClient<{ session: Session }>({
       method: 'POST',
@@ -52,17 +68,22 @@ export async function multipartUpload(
         mimeType: file.type || 'application/octet-stream',
         size: file.size,
         fingerprint,
-        ...options,
+        ...uploadOptions,
       },
     });
     saved = { session, hashes: {} };
+    created = true;
     localStorage.setItem(key, JSON.stringify(saved));
   }
   const state = saved;
   const path = `${base}/${state.session.id}`;
   let status: { session: Session; parts: { partNumber: number; etag: string; size: number }[] };
   try {
-    status = await apiClient({ method: 'GET', path });
+    status = created
+      ? { session: state.session, parts: [] }
+      : await apiClient({ method: 'GET', path });
+    state.session = status.session;
+    localStorage.setItem(key, JSON.stringify(state));
   } catch (error) {
     if (isHttpErrorWithStatusCode({ error, statusCode: 410 })) localStorage.removeItem(key);
     throw error;
@@ -70,6 +91,7 @@ export async function multipartUpload(
   const complete = async () => {
     for (let attempt = 0; ; attempt++) {
       try {
+        if (completeUpload) return await completeUpload(state.session.id);
         return await apiClient<{ document: AsDto<Document> }>({
           method: 'POST',
           path: `${path}/complete`,
@@ -87,7 +109,24 @@ export async function multipartUpload(
       }
     }
   };
-  if (['complete', 'stored'].includes(status.session.status || '')) {
+  if (state.session.mode === 'single') {
+    const checksum = await hash(file);
+    const expected = state.hashes.single;
+    if (
+      (expected && expected !== checksum) ||
+      (!expected && file.size > 0 && ['stored', 'complete'].includes(status.session.status || ''))
+    ) {
+      throw new Error(
+        'Reselected file does not match the interrupted upload. Choose the original file.',
+      );
+    }
+    state.hashes.single = checksum;
+    localStorage.setItem(key, JSON.stringify(state));
+  }
+  if (
+    ['complete', 'stored'].includes(status.session.status || '') ||
+    (state.session.mode === 'single' && file.size === 0)
+  ) {
     const { document } = await complete();
     localStorage.removeItem(key);
     return { document: coerceDates(document) };
@@ -131,11 +170,16 @@ export async function multipartUpload(
   let next = 1;
   let stopped = false;
   const controllers = new Set<XMLHttpRequest>();
-  const send = async (url: string, blob: Blob, n: number) =>
+  const send = async (url: string, blob: Blob, n: number, headers: Record<string, string> = {}) =>
     new Promise<void>((resolve, reject) => {
+      if (stopped) {
+        reject(new Error('Transfer interrupted. Reselect the file to resume.'));
+        return;
+      }
       const xhr = new XMLHttpRequest();
       controllers.add(xhr);
       xhr.open('PUT', url);
+      for (const [name, value] of Object.entries(headers)) xhr.setRequestHeader(name, value);
       xhr.timeout = 15 * 60 * 1000;
       xhr.upload.onprogress = (e) => {
         active.set(n, e.loaded);
@@ -143,8 +187,8 @@ export async function multipartUpload(
       };
       xhr.onload = () => {
         controllers.delete(xhr);
-        if (xhr.status >= 200 && xhr.status < 300 && xhr.getResponseHeader('ETag')) resolve();
-        else reject(new Error(`Part upload failed (${xhr.status})`));
+        if (xhr.status >= 200 && xhr.status < 300) resolve();
+        else reject(new Error(`Upload failed (${xhr.status})`));
       };
       xhr.onerror =
         xhr.ontimeout =
@@ -155,6 +199,66 @@ export async function multipartUpload(
           };
       xhr.send(blob);
     });
+  // Sign eight adjacent parts once; four transfer workers share the request.
+  const signedBatches = new Map<
+    number,
+    Promise<{ parts: { partNumber: number; url: string }[] }>
+  >();
+  const partUrl = async (n: number, refresh: boolean) => {
+    const start = Math.floor((n - 1) / 8) * 8 + 1;
+    if (refresh) {
+      const { parts } = await apiClient<{ parts: { partNumber: number; url: string }[] }>({
+        method: 'POST',
+        path: `${path}/parts`,
+        body: { partNumbers: [n] },
+      });
+      return parts[0].url;
+    }
+    if (!signedBatches.has(start)) {
+      signedBatches.set(
+        start,
+        apiClient({
+          method: 'POST',
+          path: `${path}/parts`,
+          body: {
+            partNumbers: Array.from(
+              { length: Math.min(8, count - start + 1) },
+              (_, i) => start + i,
+            ).filter((part) => !completed.has(part)),
+          },
+        }),
+      );
+    }
+    const result = await signedBatches.get(start)!;
+    const part = result.parts.find((part) => part.partNumber === n);
+    if (!part) throw new Error('Missing signed upload part');
+    return part.url;
+  };
+  if (state.session.mode === 'single') {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        if (attempt > 0) {
+          const refreshed = await apiClient<typeof status>({ method: 'GET', path });
+          state.session = refreshed.session;
+          if (['stored', 'complete'].includes(state.session.status || '')) break;
+        }
+        if (!state.session.uploadUrl) throw new Error('Missing upload URL');
+        await send(state.session.uploadUrl, file, 1, state.session.uploadHeaders);
+        break;
+      } catch (error) {
+        active.delete(1);
+        report();
+        if (attempt >= 3) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
+      }
+    }
+    active.clear();
+    finished = file.size;
+    report();
+    const { document } = await complete();
+    localStorage.removeItem(key);
+    return { document: coerceDates(document) };
+  }
   const worker = async () => {
     while (!stopped) {
       const n = next++;
@@ -169,12 +273,7 @@ export async function multipartUpload(
       let success = false;
       for (let attempt = 0; attempt < 4 && !stopped; attempt++) {
         try {
-          const { parts } = await apiClient<{ parts: { partNumber: number; url: string }[] }>({
-            method: 'POST',
-            path: `${path}/parts`,
-            body: { partNumbers: [n] },
-          });
-          await send(parts[0].url, blob, n);
+          await send(await partUrl(n, attempt > 0), blob, n);
           success = true;
           break;
         } catch (error) {
@@ -191,7 +290,7 @@ export async function multipartUpload(
     }
   };
   try {
-    await Promise.all(Array.from({ length: 3 }, worker));
+    await Promise.all(Array.from({ length: 4 }, worker));
   } catch (error) {
     stopped = true;
     for (const xhr of controllers) xhr.abort();

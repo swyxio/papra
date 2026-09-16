@@ -1,4 +1,4 @@
-import type { TransferProgress } from './drive-multipart.services';
+import type { CompleteUpload, TransferProgress } from './drive-multipart.services';
 import { multipartUpload } from './drive-multipart.services';
 import type { AsDto } from '../shared/http/http-client.types';
 import type { DocumentSearchSortField, DocumentSearchSortOrder } from './documents.constants';
@@ -12,8 +12,10 @@ export async function uploadDocument({
   onProgress,
   folderId,
   resolveDuplicate,
+  completeUpload,
 }: {
   file: File;
+  completeUpload?: CompleteUpload;
   organizationId: string;
   folderId?: string;
   resolveDuplicate?: (conflict: {
@@ -25,7 +27,10 @@ export async function uploadDocument({
   let options: { folderId?: string; documentId?: string; fileName?: string } = { folderId };
   while (true) {
     try {
-      return await multipartUpload(file, organizationId, onProgress, options);
+      return await multipartUpload(file, organizationId, onProgress, {
+        ...options,
+        completeUpload,
+      });
     } catch (error) {
       const conflict = error as {
         status?: number;

@@ -5,28 +5,40 @@ import { HTTPException } from 'hono/http-exception';
 import { Miniflare } from 'miniflare';
 import { afterEach, expect, test, vi } from 'vitest';
 import type { AppEnv, Env, Identity } from './types';
+import type * as JobModule from './jobs';
 import { registerUploadRoutes } from './uploads';
+import { registerProcessingRoutes } from './processing';
 import { semanticSources } from './search';
 import { keywordPredicate } from './keyword';
 import { formatDocument } from './db';
 
+vi.mock('@cloudflare/containers', () => ({ getContainer: vi.fn() }));
 const mocks = vi.hoisted(() => ({
   parts: vi.fn(),
   complete: vi.fn(),
   enqueue: vi.fn(),
   abort: vi.fn(),
+  multipart: vi.fn(async () => 'provider-upload'),
+  sign: vi.fn(
+    async (_method: string, key: string, _ttl: number, query: any) =>
+      `https://r2.example/${key}?partNumber=${query?.partNumber}`,
+  ),
 }));
 vi.mock('./storage', () => ({
   parts: mocks.parts,
   s3: () => ({
-    getMultipartUploadId: async () => 'provider-upload',
-    getPresignedUrl: async (_method: string, key: string, _ttl: number, query: any) =>
-      `https://r2.example/${key}?partNumber=${query?.partNumber}`,
+    getMultipartUploadId: mocks.multipart,
+    getPresignedUrl: mocks.sign,
     completeMultipartUpload: mocks.complete,
     abortMultipartUpload: mocks.abort,
   }),
 }));
-vi.mock('./jobs', () => ({ enqueueVersion: mocks.enqueue }));
+vi.mock('./jobs', async (importOriginal) => ({
+  ...(await importOriginal<typeof JobModule>()),
+  dispatchVersionJobs: async (env: Env, versions: string[]) => {
+    for (const v of versions) await mocks.enqueue(env, v);
+  },
+}));
 const instances: Miniflare[] = [];
 afterEach(async () => {
   vi.clearAllMocks();
@@ -76,6 +88,7 @@ async function fixture() {
     await next();
   });
   registerUploadRoutes(app);
+  registerProcessingRoutes(app);
   app.onError((e, c) =>
     c.json({ message: e.message }, e instanceof HTTPException ? e.status : 500),
   );
@@ -244,5 +257,101 @@ test('property values and selected labels are visible and searchable without wil
   expect(formatted.customProperties.find((p: any) => p.key === 'status')?.value).toEqual({
     optionId: 'approved',
     name: 'Approved',
+  });
+});
+
+test('small uploads sign one immutable PUT, recover stored bytes and do not create multipart uploads', async () => {
+  const f = await fixture();
+  const response = await f.call('', 'POST', {
+    fileName: 'small.md',
+    size: 12,
+    mimeType: 'text/markdown',
+    fingerprint: 'e'.repeat(64),
+  });
+  const { session } = (await response.json()) as any;
+  expect(session.mode).toBe('single');
+  expect(session.uploadUrl).toContain('r2.example');
+  expect(session.uploadHeaders).toEqual({ 'If-None-Match': '*', 'Content-Type': 'text/markdown' });
+  expect(mocks.multipart).not.toHaveBeenCalled();
+  expect(mocks.sign).toHaveBeenCalledWith(
+    'PUT',
+    expect.any(String),
+    900,
+    undefined,
+    session.uploadHeaders,
+  );
+  expect((await f.call(`/${session.id}/parts`, 'POST', { partNumbers: [1] })).status).toBe(409);
+  expect((await f.call(`/${session.id}/complete`, 'POST', {})).status).toBe(409);
+  const u = await f.DB.prepare('SELECT storage_key FROM uploads WHERE id=?')
+    .bind(session.id)
+    .first<any>();
+  f.objects.set(u.storage_key, { size: 13 });
+  expect((await f.call(`/${session.id}/complete`, 'POST', {})).status).toBe(409);
+  f.objects.set(u.storage_key, { size: 12 });
+  expect(((await (await f.call(`/${session.id}`)).json()) as any).session.status).toBe('stored');
+  expect((await f.call(`/${session.id}/complete`, 'POST', {})).status).toBe(200);
+  expect(mocks.complete).not.toHaveBeenCalled();
+  expect((await f.DB.prepare('SELECT kind FROM jobs ORDER BY kind').all()).results).toEqual([
+    { kind: 'backup' },
+    { kind: 'hash' },
+    { kind: 'process' },
+  ]);
+});
+test('batch completion isolates unauthorized/incomplete files and replay never changes generations or activity', async () => {
+  const f = await fixture();
+  const create = async (name: string, size = 0) =>
+    (
+      (await (
+        await f.call('', 'POST', { fileName: name, size, fingerprint: 'f'.repeat(64) })
+      ).json()) as any
+    ).session;
+  const first = await create('one.txt'),
+    second = await create('two.txt'),
+    pending = await create('pending.txt', 8);
+  f.user.userId = 'other';
+  const hidden = await create('hidden.txt');
+  f.user.userId = 'writer';
+  const ids = [first.id, second.id, pending.id, hidden.id];
+  const completed = await f.call('/complete', 'POST', { uploadIds: ids });
+  expect(completed.status).toBe(200);
+  expect(((await completed.json()) as any).results.map((x: any) => x.status)).toEqual([
+    200, 200, 409, 404,
+  ]);
+  await f.call('/complete', 'POST', { uploadIds: ids });
+  expect((await f.DB.prepare('SELECT count(*) n FROM versions').first<any>()).n).toBe(2);
+  expect((await f.DB.prepare('SELECT count(*) n FROM document_activity').first<any>()).n).toBe(2);
+  expect(
+    (await f.DB.prepare('SELECT count(*) n FROM jobs WHERE generation=0').first<any>()).n,
+  ).toBe(6);
+  expect((await f.call('/complete', 'POST', { uploadIds: [first.id, first.id] })).status).toBe(400);
+  expect(
+    (
+      await f.call('/complete', 'POST', {
+        uploadIds: Array.from({ length: 21 }, (_, i) => 'u' + i),
+      })
+    ).status,
+  ).toBe(400);
+});
+test('processing readback enforces restricted-folder and service-token scope in a batch', async () => {
+  const f = await fixture();
+  const res = await f.call('', 'POST', {
+    fileName: 'scoped.txt',
+    size: 0,
+    fingerprint: '1'.repeat(64),
+    folderId: 'private',
+  });
+  const { session } = (await res.json()) as any;
+  await f.call(`/${session.id}/complete`, 'POST', {});
+  // Reuse the registered routes through the fixture request prefix.
+  const path = '/../documents/processing';
+  f.user.userId = 'other';
+  const inaccessible = await f.call(path, 'POST', { documentIds: [session.documentId] });
+  expect(((await inaccessible.json()) as any).results[0]).toMatchObject({ status: 404 });
+  f.user.userId = 'writer';
+  const accessible = await f.call(path, 'POST', { documentIds: [session.documentId] });
+  expect(((await accessible.json()) as any).results[0]).toMatchObject({
+    status: 200,
+    uploaded: true,
+    backup: 'pending',
   });
 });

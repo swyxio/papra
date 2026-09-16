@@ -7,10 +7,14 @@ import {
   organizationHomeFolderId,
 } from './collaboration';
 import { s3, parts } from './storage';
-import { enqueueVersion } from './jobs';
+import { initialVersionJobs, dispatchVersionJobs } from './jobs';
+import { HTTPException } from 'hono/http-exception';
 
 const base = '/api/organizations/:org/uploads';
+const SINGLE_UPLOAD_BYTES = 32 * 1024 ** 2;
+const single = (u: Record<string, any>) => ['single', 'empty'].includes(u.upload_id);
 const dto = (u: Record<string, any>) => ({
+  mode: single(u) ? 'single' : 'multipart',
   id: u.id,
   documentId: u.document_id,
   versionId: u.version_id,
@@ -20,6 +24,16 @@ const dto = (u: Record<string, any>) => ({
   status: u.status,
   createdAt: new Date(u.created_at).toISOString(),
 });
+async function uploadDto(env: Env, u: Record<string, any>) {
+  const session = dto(u);
+  if (u.upload_id !== 'single' || u.status !== 'uploading') return session;
+  const uploadHeaders = { 'If-None-Match': '*', 'Content-Type': u.mime_type };
+  return {
+    ...session,
+    uploadHeaders,
+    uploadUrl: await s3(env).getPresignedUrl('PUT', u.storage_key, 900, undefined, uploadHeaders),
+  };
+}
 async function owned(env: Env, user: Identity, org: string, upload: string) {
   await ensureOrganizationMember(env, user, org);
   const u = await first(
@@ -35,6 +49,86 @@ async function owned(env: Env, user: Identity, org: string, upload: string) {
   if (folder.organization_id !== org) throw error(403, 'Folder access denied');
   if (u.replacement) await ensureDocumentAccess(env, user, u.document_id, 'write');
   return u;
+}
+async function prepareCompletion(env: Env, user: Identity, u: Record<string, any>) {
+  if (u.status === 'complete') return [];
+  let object = await env.FILES.head(u.storage_key);
+  if (!object && single(u)) throw error(409, 'Upload bytes have not arrived');
+  if (!object) {
+    const list = await parts(env, u.storage_key, u.upload_id),
+      count = Math.ceil(u.size / u.part_size);
+    if (
+      list.length !== count ||
+      list.some(
+        (p, i) =>
+          p.partNumber !== i + 1 || p.size !== Math.min(u.part_size, u.size - i * u.part_size),
+      )
+    )
+      throw error(409, 'Upload parts are incomplete');
+    try {
+      await s3(env).completeMultipartUpload(
+        u.storage_key,
+        u.upload_id,
+        list.map((p) => ({ partNumber: p.partNumber, etag: p.etag })),
+      );
+    } catch (e) {
+      if (!(await env.FILES.head(u.storage_key))) throw e;
+    }
+    object = await env.FILES.head(u.storage_key);
+  }
+  if (!object || object.size !== u.size) throw error(409, 'Stored object size does not match');
+  const now = Date.now(),
+    stmts = [];
+  if (!u.replacement)
+    stmts.push(
+      env.DB.prepare(
+        'INSERT OR IGNORE INTO documents(id,organization_id,created_by,name,mime_type,home_folder_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)',
+      ).bind(
+        u.document_id,
+        u.organization_id,
+        user.userId,
+        u.file_name,
+        u.mime_type,
+        u.folder_id,
+        now,
+        now,
+      ),
+    );
+  stmts.push(
+    env.DB.prepare(
+      'INSERT OR IGNORE INTO versions(id,document_id,storage_key,original_name,mime_type,size,created_by,created_at) VALUES(?,?,?,?,?,?,?,?)',
+    ).bind(
+      u.version_id,
+      u.document_id,
+      u.storage_key,
+      u.file_name,
+      u.mime_type,
+      u.size,
+      user.userId,
+      now,
+    ),
+  );
+  // The immutable version and permanent document pointer change atomically.
+  stmts.push(
+    env.DB.prepare(
+      "UPDATE documents SET current_version_id=?,mime_type=?,content='',updated_at=? WHERE id=? AND EXISTS(SELECT 1 FROM uploads WHERE id=? AND status='uploading')",
+    ).bind(u.version_id, u.mime_type, now, u.document_id, u.id),
+  );
+  stmts.push(
+    env.DB.prepare(
+      "INSERT OR IGNORE INTO document_activity(id,document_id,user_id,event,created_at) SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM uploads WHERE id=? AND status='uploading')",
+    ).bind(
+      `act_${u.version_id}`,
+      u.document_id,
+      user.userId,
+      u.replacement ? 'replaced' : 'uploaded',
+      now,
+      u.id,
+    ),
+  );
+  stmts.push(env.DB.prepare("UPDATE uploads SET status='complete' WHERE id=?").bind(u.id));
+  stmts.push(...initialVersionJobs(env, u.version_id, now));
+  return stmts;
 }
 export function registerUploadRoutes(app: App) {
   app.get(base, async (c) => {
@@ -116,7 +210,12 @@ export function registerUploadRoutes(app: App) {
       typeof b.mimeType === 'string' && b.mimeType.length < 255
         ? b.mimeType
         : 'application/octet-stream';
-    const providerId = b.size === 0 ? 'empty' : await s3(c.env).getMultipartUploadId(key, mimeType);
+    const providerId =
+      b.size === 0
+        ? 'empty'
+        : b.size <= SINGLE_UPLOAD_BYTES
+          ? 'single'
+          : await s3(c.env).getMultipartUploadId(key, mimeType);
     if (b.size === 0)
       await c.env.FILES.put(key, new Uint8Array(), { httpMetadata: { contentType: mimeType } });
     try {
@@ -155,19 +254,31 @@ export function registerUploadRoutes(app: App) {
           'Another upload with this name is in progress. Wait for it to finish or choose a different filename.',
         );
     } catch (e) {
-      if (providerId !== 'empty') await s3(c.env).abortMultipartUpload(key, providerId);
+      if (!['empty', 'single'].includes(providerId))
+        await s3(c.env).abortMultipartUpload(key, providerId);
       else await c.env.FILES.delete(key);
       throw e;
     }
     return c.json(
-      { session: dto((await first(c.env, 'SELECT * FROM uploads WHERE id=?', uploadId))!) },
+      {
+        session: await uploadDto(
+          c.env,
+          (await first(c.env, 'SELECT * FROM uploads WHERE id=?', uploadId))!,
+        ),
+      },
       201,
     );
   });
   app.get(`${base}/:upload`, async (c) => {
     const u = await owned(c.env, c.get('identity'), c.req.param('org'), c.req.param('upload'));
     let list: { partNumber: number; etag: string; size: number }[] = [];
-    if (u.status !== 'complete' && u.upload_id !== 'empty') {
+    if (u.status !== 'complete' && single(u)) {
+      const object = await c.env.FILES.head(u.storage_key);
+      if (object) {
+        if (object.size !== u.size) throw error(409, 'Stored object size does not match');
+        u.status = 'stored';
+      }
+    } else if (u.status !== 'complete') {
       try {
         list = await parts(c.env, u.storage_key, u.upload_id);
       } catch {
@@ -177,11 +288,12 @@ export function registerUploadRoutes(app: App) {
         u.status = 'stored';
       }
     }
-    return c.json({ session: dto(u), parts: list });
+    return c.json({ session: await uploadDto(c.env, u), parts: list });
   });
   app.post(`${base}/:upload/parts`, async (c) => {
     const u = await owned(c.env, c.get('identity'), c.req.param('org'), c.req.param('upload'));
-    if (u.status !== 'uploading') throw error(409, 'Upload already completed');
+    if (u.status !== 'uploading' || single(u))
+      throw error(409, 'Multipart signing is unavailable for this upload');
     const { partNumbers } = await c.req.json();
     const count = Math.ceil(u.size / u.part_size);
     if (
@@ -203,89 +315,61 @@ export function registerUploadRoutes(app: App) {
       ),
     });
   });
+  app.post(`${base}/complete`, async (c) => {
+    const { uploadIds } = await c.req.json();
+    if (
+      !Array.isArray(uploadIds) ||
+      !uploadIds.length ||
+      uploadIds.length > 20 ||
+      new Set(uploadIds).size !== uploadIds.length ||
+      uploadIds.some((x) => typeof x !== 'string' || !x || x.length > 100)
+    )
+      throw error(400, 'Provide up to 20 unique upload IDs');
+    const user = c.get('identity');
+    const prepared = await Promise.all(
+      uploadIds.map(async (uploadId: string) => {
+        try {
+          const u = await owned(c.env, user, c.req.param('org'), uploadId);
+          return { uploadId, u, statements: await prepareCompletion(c.env, user, u) };
+        } catch (e) {
+          return {
+            uploadId,
+            status: e instanceof HTTPException ? e.status : 500,
+            message:
+              e instanceof HTTPException ? e.message : 'Upload completion failed; retry this file',
+          };
+        }
+      }),
+    );
+    const accepted = prepared.filter((x) => x.u !== undefined);
+    const statements = accepted.flatMap((x) => x.statements || []);
+    if (statements.length) await c.env.DB.batch(statements);
+    await dispatchVersionJobs(
+      c.env,
+      accepted.map((x) => x.u!.version_id),
+    );
+    const results = await Promise.all(
+      prepared.map(async (item) =>
+        item.u
+          ? {
+              uploadId: item.uploadId,
+              status: 200,
+              document: await formatDocument(
+                c.env,
+                (await getDocument(c.env, item.u.document_id))!,
+              ),
+            }
+          : { uploadId: item.uploadId, status: item.status, message: item.message },
+      ),
+    );
+    return c.json({ results });
+  });
   app.post(`${base}/:upload/complete`, async (c) => {
     const user = c.get('identity'),
       u = await owned(c.env, user, c.req.param('org'), c.req.param('upload'));
-    if (u.status === 'complete')
-      return c.json({
-        document: await formatDocument(c.env, (await getDocument(c.env, u.document_id))!),
-      });
-    let object = await c.env.FILES.head(u.storage_key);
-    if (!object) {
-      const list = await parts(c.env, u.storage_key, u.upload_id),
-        count = Math.ceil(u.size / u.part_size);
-      if (
-        list.length !== count ||
-        list.some(
-          (p, i) =>
-            p.partNumber !== i + 1 || p.size !== Math.min(u.part_size, u.size - i * u.part_size),
-        )
-      )
-        throw error(409, 'Upload parts are incomplete');
-      try {
-        await s3(c.env).completeMultipartUpload(
-          u.storage_key,
-          u.upload_id,
-          list.map((p) => ({ partNumber: p.partNumber, etag: p.etag })),
-        );
-      } catch (e) {
-        if (!(await c.env.FILES.head(u.storage_key))) throw e;
-      }
-      object = await c.env.FILES.head(u.storage_key);
-    }
-    if (!object || object.size !== u.size) throw error(409, 'Stored object size does not match');
-    const now = Date.now(),
-      stmts = [];
-    if (!u.replacement)
-      stmts.push(
-        c.env.DB.prepare(
-          'INSERT OR IGNORE INTO documents(id,organization_id,created_by,name,mime_type,home_folder_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)',
-        ).bind(
-          u.document_id,
-          u.organization_id,
-          user.userId,
-          u.file_name,
-          u.mime_type,
-          u.folder_id,
-          now,
-          now,
-        ),
-      );
-    stmts.push(
-      c.env.DB.prepare(
-        'INSERT OR IGNORE INTO versions(id,document_id,storage_key,original_name,mime_type,size,created_by,created_at) VALUES(?,?,?,?,?,?,?,?)',
-      ).bind(
-        u.version_id,
-        u.document_id,
-        u.storage_key,
-        u.file_name,
-        u.mime_type,
-        u.size,
-        user.userId,
-        now,
-      ),
-    );
-    // The immutable version and permanent document pointer change atomically.
-    stmts.push(
-      c.env.DB.prepare(
-        "UPDATE documents SET current_version_id=?,mime_type=?,content='',updated_at=? WHERE id=? AND EXISTS(SELECT 1 FROM uploads WHERE id=? AND status='uploading')",
-      ).bind(u.version_id, u.mime_type, now, u.document_id, u.id),
-    );
-    stmts.push(
-      c.env.DB.prepare(
-        "INSERT OR IGNORE INTO document_activity(id,document_id,user_id,event,created_at) SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM uploads WHERE id=? AND status='uploading')",
-      ).bind(
-        `act_${u.version_id}`,
-        u.document_id,
-        user.userId,
-        u.replacement ? 'replaced' : 'uploaded',
-        now,
-        u.id,
-      ),
-    );
-    stmts.push(c.env.DB.prepare("UPDATE uploads SET status='complete' WHERE id=?").bind(u.id));
-    await c.env.DB.batch(stmts);
-    await enqueueVersion(c.env, u.version_id);
+    const statements = await prepareCompletion(c.env, user, u);
+    if (statements.length) await c.env.DB.batch(statements);
+    await dispatchVersionJobs(c.env, [u.version_id]);
     return c.json({
       document: await formatDocument(c.env, (await getDocument(c.env, u.document_id))!),
     });
@@ -293,7 +377,7 @@ export function registerUploadRoutes(app: App) {
   app.delete(`${base}/:upload`, async (c) => {
     const u = await owned(c.env, c.get('identity'), c.req.param('org'), c.req.param('upload'));
     if (u.status === 'complete') throw error(409, 'Upload already complete');
-    if (u.upload_id !== 'empty') await s3(c.env).abortMultipartUpload(u.storage_key, u.upload_id);
+    if (!single(u)) await s3(c.env).abortMultipartUpload(u.storage_key, u.upload_id);
     else await c.env.FILES.delete(u.storage_key);
     await c.env.DB.prepare("UPDATE uploads SET status='aborted' WHERE id=?").bind(u.id).run();
     return c.body(null, 204);

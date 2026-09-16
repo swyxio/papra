@@ -7,6 +7,8 @@ export type Env = {
   FILES: R2Bucket;
   BACKUPS: R2Bucket;
   JOBS: Queue;
+  TRANSFER_JOBS: Queue;
+  SEARCH_JOBS: Queue;
   AI: Ai;
   INDEX: VectorizeIndex;
   PROCESSOR: DurableObjectNamespace<ImageProcessorContainer>;

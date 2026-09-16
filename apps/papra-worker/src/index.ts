@@ -7,6 +7,7 @@ import { serviceIdentity, registerAutomationRoutes } from './automation';
 import { registerSpaceRoutes } from './spaces';
 import { registerDocumentRoutes, purgeExpiredTrash } from './documents';
 import { registerUploadRoutes } from './uploads';
+import { registerProcessingRoutes } from './processing';
 import { registerCollaborationRoutes } from './collaboration';
 import { registerShareRoutes } from './shares';
 import { registerSearchRoutes } from './search';
@@ -98,6 +99,7 @@ app.use('/api/*', async (c, next) => {
 registerSpaceRoutes(app);
 registerDocumentRoutes(app);
 registerUploadRoutes(app);
+registerProcessingRoutes(app);
 registerCollaborationRoutes(app);
 registerShareRoutes(app);
 registerAutomationRoutes(app);

@@ -52,6 +52,7 @@ import { DocumentContentEditionPanel } from '../components/document-content-edit
 import { DocumentDatePicker } from '../components/document-date-picker.component';
 import type { DocumentSelectionAnchor } from '../components/document-preview.component';
 import { DocumentPreview } from '../components/document-preview.component';
+import { DocumentProcessingStatus } from '../components/document-processing.component';
 import { DocumentOpenWithDropdownItems } from '../components/open-with.component';
 import { useRenameDocumentDialog } from '../components/rename-document-button.component';
 import {
@@ -419,7 +420,19 @@ export const DocumentPage: Component = () => {
 
                   <div class="i-tabler-pencil size-4 text-muted-foreground group-hover:text-foreground transition-colors flex-shrink-0" />
                 </Button>
-                <p class="text-sm text-muted-foreground mb-6">{getDocument().id}</p>
+                <p class="text-sm text-muted-foreground mb-2">{getDocument().id}</p>
+                <Suspense
+                  fallback={
+                    <p class="text-xs text-muted-foreground mb-4">
+                      Checking backup and search status…
+                    </p>
+                  }
+                >
+                  <DocumentProcessingStatus
+                    organizationId={params.organizationId}
+                    documentId={getDocument().id}
+                  />
+                </Suspense>
 
                 <div class="flex gap-2 mb-2">
                   <Button

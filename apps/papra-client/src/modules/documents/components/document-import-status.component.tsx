@@ -35,6 +35,13 @@ import { getHttpErrorMessage, isHttpErrorWithStatusCode } from '@/modules/shared
 import { Button } from '@/modules/ui/components/button';
 import { invalidateOrganizationDocumentsQuery } from '../documents.composables';
 import { uploadDocument } from '../documents.services';
+import { createUploadCompleter } from '../upload-completion.services';
+import {
+  fetchDocumentsProcessing,
+  processingActive,
+  processingLabel,
+} from '../document-processing.services';
+import type { DocumentProcessing } from '../document-processing.services';
 
 const DocumentUploadContext = createContext<{
   uploadDocuments: (args: {
@@ -79,7 +86,11 @@ type TaskError = {
   error: Error;
 };
 
-type Task = { progress?: TransferProgress } & (
+type Task = {
+  progress?: TransferProgress;
+  processing?: DocumentProcessing;
+  processingError?: string;
+} & (
   | TaskSuccess
   | TaskError
   | {
@@ -105,13 +116,18 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
     canReplace: boolean;
     resolve: (decision: DuplicateDecision) => void;
   }>();
-  const uploadLimit = pLimit(1);
+  const uploadLimit = pLimit(4);
+  const largeUploadLimit = pLimit(1);
+  const duplicateLimit = pLimit(1);
   const [newName, setNewName] = createSignal('');
   const resolveDuplicate = async (conflict: { name: string; canReplace: boolean }) =>
-    new Promise<DuplicateDecision>((resolve) => {
-      setNewName(conflict.name.replace(/(\.[^.]+)?$/, ' (new)$1'));
-      setDuplicate({ ...conflict, resolve });
-    });
+    duplicateLimit(
+      async () =>
+        new Promise<DuplicateDecision>((resolve) => {
+          setNewName(conflict.name.replace(/(\.[^.]+)?$/, ' (new)$1'));
+          setDuplicate({ ...conflict, resolve });
+        }),
+    );
   const decideDuplicate = (decision: DuplicateDecision) => {
     duplicate()?.resolve(decision);
     setDuplicate(undefined);
@@ -156,6 +172,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
     folderId?: string;
   }) => {
     const organizationId = props.organizationId;
+    const completeUpload = createUploadCompleter(organizationId);
     setTasks((tasks) => [...tasks, ...files.map((file) => ({ file, status: 'pending' }) as const)]);
     setState('open');
 
@@ -166,7 +183,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
     // Optimistic prevent upload if file is too large, the server will still validate it
     const maxUploadSize = organizationLimitsQuery.data?.plan.limits.maxFileSize;
 
-    // Serialize imports across drop areas so duplicate decisions never overwrite one another.
+    // Folder creation precedes parallel file transfers; only conflicting-name decisions are serialized.
     const folders = new Map<string, string>();
     if (folderImport) {
       const list = await apiClient<{
@@ -211,7 +228,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
           return;
         }
 
-        await uploadLimit(async () => {
+        const transfer = async () => {
           updateTaskStatus({ file, status: 'uploading' });
 
           const [result, error] = await safely(
@@ -219,6 +236,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
               file,
               organizationId,
               resolveDuplicate,
+              completeUpload,
               folderId: folderImport
                 ? folders.get(file.webkitRelativePath.split('/').slice(0, -1).join('/'))
                 : folderId,
@@ -237,12 +255,48 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
             updateTaskStatus({ file, status: 'success', document });
           }
 
-          void interruptedQuery.refetch();
           throttledInvalidateOrganizationDocumentsQuery({ organizationId });
-        });
+        };
+        await (file.size > 32 * 1024 ** 2 ? largeUploadLimit(transfer) : uploadLimit(transfer));
       }),
     );
+    void interruptedQuery.refetch();
   };
+
+  // Query at most twenty recent active rows per tick, rather than one poll per imported file.
+  const pendingProcessing = () =>
+    getTasks().filter(
+      (task) =>
+        task.status === 'success' &&
+        !task.processingError &&
+        (!task.processing || processingActive(task.processing)),
+    );
+  const processingQuery = useQuery(() => ({
+    queryKey: ['organizations', props.organizationId, 'upload-processing'],
+    enabled: getState() === 'open' && pendingProcessing().length > 0,
+    retry: 1,
+    refetchOnWindowFocus: false,
+    refetchInterval: (query) =>
+      !query.state.error && getState() === 'open' && pendingProcessing().length > 0 ? 5000 : false,
+    queryFn: async () => {
+      const selected = pendingProcessing().slice(-20) as TaskSuccess[];
+      const result = await fetchDocumentsProcessing(
+        props.organizationId,
+        Array.from(new Set(selected.map((task) => task.document.id))),
+      );
+      setTasks((tasks) =>
+        tasks.map((task) => {
+          if (task.status !== 'success') return task;
+          const state = result.results.find((state) => state.documentId === task.document.id);
+          if (!state) return task;
+          return 'uploaded' in state
+            ? { ...task, processing: state }
+            : { ...task, processingError: state.message };
+        }),
+      );
+      return result;
+    },
+  }));
 
   const getTitle = () => {
     if (getTasks().length === 0) {
@@ -363,7 +417,17 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
                           href={`/organizations/${(task() as TaskSuccess).document.organizationId}/documents/${(task() as TaskSuccess).document.id}`}
                           class="text-sm truncate min-w-0 flex items-center gap-4 min-h-48px group hover:bg-muted/50 transition-colors px-6 border-b border-border/80"
                         >
-                          <div class="flex-1 truncate">{task().file.name}</div>
+                          <div class="flex-1 min-w-0">
+                            <div class="truncate">{task().file.name}</div>
+                            <div class="text-xs text-muted-foreground whitespace-normal">
+                              {task().processing
+                                ? processingLabel(task().processing!)
+                                : task().processingError ||
+                                  (processingQuery.isError
+                                    ? 'Uploaded · processing status unavailable'
+                                    : 'Uploaded · backup and search processing continue')}
+                            </div>
+                          </div>
 
                           <div class="flex-none">
                             <div class="i-tabler-circle-check text-primary size-5.5 group-hover:hidden" />
@@ -400,9 +464,14 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
                             <Show when={task().progress}>
                               {(progress) => (
                                 <div class="text-xs text-muted-foreground">
-                                  {((progress().bytes / progress().total) * 100).toFixed(1)}% ·{' '}
-                                  {(progress().speed / 1024 ** 2).toFixed(1)} MiB/s ·{' '}
-                                  {Math.ceil(progress().eta)}s left{' '}
+                                  {progress().total
+                                    ? ((progress().bytes / progress().total) * 100).toFixed(1)
+                                    : '0'}
+                                  % transferred · {(progress().speed / 1024 ** 2).toFixed(1)} MiB/s
+                                  ·{' '}
+                                  {progress().bytes >= progress().total
+                                    ? 'Finalizing…'
+                                    : `${Math.ceil(progress().eta)}s left`}{' '}
                                   <Show when={progress().resumedParts > 0}>
                                     · resumed {progress().resumedParts} parts
                                   </Show>

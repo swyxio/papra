@@ -741,8 +741,6 @@ export async function processSigning(env: Env, requestId: string) {
       return;
     }
     await enqueueVersion(env, versionId, 'process');
-    await enqueueVersion(env, versionId, 'hash');
-    await enqueueVersion(env, versionId, 'backup');
     r = (await first<RequestRow>(env, 'SELECT * FROM signing_requests WHERE id=?', r.id))!;
   } catch (e) {
     const stored = await first(

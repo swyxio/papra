@@ -14,6 +14,8 @@ type Job = {
   lease_token: string | null;
   attempts: number;
   updated_at: number;
+  object_size?: number;
+  mime_type?: string;
 };
 type QueueBody = { jobId: string; generation: number };
 type Version = {
@@ -88,7 +90,7 @@ async function fencedPut(
   j: Job,
   bucket: R2Bucket,
   key: string,
-  value: string,
+  value: string | ArrayBuffer,
   options?: R2PutOptions,
 ) {
   if (!(await owned(env, j))) return false;
@@ -99,18 +101,71 @@ async function fencedPut(
   }
   return true;
 }
-async function dispatch(env: Env, j: Job) {
-  if (j.status !== 'pending') return;
-  try {
-    await env.JOBS.send({ jobId: j.id, generation: j.generation } satisfies QueueBody);
-  } catch {
-    await run(
-      env,
-      "UPDATE jobs SET error='queue_delivery_deferred' WHERE id=? AND generation=? AND status='pending'",
-      j.id,
-      j.generation,
-    );
+const jobSelect =
+  'SELECT j.*,v.size object_size,v.mime_type FROM jobs j JOIN versions v ON v.id=j.version_id';
+function jobQueue(env: Env, j: Job) {
+  if (['hash', 'backup', 'backup-hash'].includes(j.kind))
+    return { name: 'papra-drive-transfers', binding: env.TRANSFER_JOBS };
+  if (
+    j.kind !== 'process' ||
+    (j.object_size !== undefined &&
+      j.object_size <= WORKER_OBJECT_BYTES &&
+      (j.mime_type?.startsWith('text/') ||
+        ['application/json', 'application/xml', 'application/xhtml+xml'].includes(
+          j.mime_type || '',
+        )))
+  )
+    return { name: 'papra-drive-search', binding: env.SEARCH_JOBS };
+  return { name: 'papra-drive-jobs', binding: env.JOBS };
+}
+async function dispatchJobs(env: Env, jobs: Job[]) {
+  const groups = new Map<Queue, Job[]>();
+  for (const j of jobs) {
+    if (j.status !== 'pending') continue;
+    const queue = jobQueue(env, j).binding;
+    groups.set(queue, [...(groups.get(queue) || []), j]);
   }
+  await Promise.all(
+    Array.from(groups, async ([queue, records]) => {
+      for (let offset = 0; offset < records.length; offset += 100) {
+        const slice = records.slice(offset, offset + 100);
+        try {
+          await queue.sendBatch(
+            slice.map((j) => ({
+              body: { jobId: j.id, generation: j.generation } satisfies QueueBody,
+            })),
+          );
+        } catch {
+          await env.DB.batch(
+            slice.map((j) =>
+              env.DB.prepare(
+                "UPDATE jobs SET error='queue_delivery_deferred' WHERE id=? AND generation=? AND status='pending'",
+              ).bind(j.id, j.generation),
+            ),
+          );
+        }
+      }
+    }),
+  );
+}
+// Persist these in the same transaction as upload acceptance: a lost response cannot lose jobs.
+export function initialVersionJobs(env: Env, v: string, now: number) {
+  return ['process', 'hash', 'backup'].map((kind) =>
+    env.DB.prepare(
+      "INSERT OR IGNORE INTO jobs(id,version_id,kind,status,created_at,updated_at,generation) SELECT ?,?,?,'pending',?,?,0 WHERE EXISTS(SELECT 1 FROM versions v JOIN documents d ON d.id=v.document_id WHERE v.id=? AND d.is_deleted<>2)",
+    ).bind(id('job'), v, kind, now, now, v),
+  );
+}
+export async function dispatchVersionJobs(env: Env, versions: string[]) {
+  if (!versions.length) return;
+  await dispatchJobs(
+    env,
+    await all<Job>(
+      env,
+      `${jobSelect} WHERE j.version_id IN (${versions.map(() => '?').join(',')}) AND j.status='pending'`,
+      ...versions,
+    ),
+  );
 }
 export async function enqueueVersion(env: Env, v: string, kind = 'process') {
   if (!['process', 'index'].includes(kind)) throw new JobError('invalid_job_kind', true);
@@ -126,26 +181,33 @@ export async function enqueueVersion(env: Env, v: string, kind = 'process') {
     now,
     v,
   );
-  const j = await first<Job>(env, 'SELECT * FROM jobs WHERE version_id=? AND kind=?', v, kind);
-  if (j) await dispatch(env, j);
   if (kind === 'process') await ensureJobs(env, v, ['hash', 'backup']);
+  else {
+    const job = await first<Job>(env, `${jobSelect} WHERE j.version_id=? AND j.kind=?`, v, kind);
+    if (job) await dispatchJobs(env, [job]);
+  }
 }
 async function ensureJobs(env: Env, v: string, kinds: string[]) {
   const now = Date.now();
-  if (kinds.length)
-    await env.DB.batch(
-      kinds.map((kind) =>
-        env.DB.prepare(
-          "INSERT OR IGNORE INTO jobs(id,version_id,kind,status,created_at,updated_at,generation) SELECT ?,?,?,'pending',?,?,0 WHERE EXISTS(SELECT 1 FROM versions v JOIN documents d ON d.id=v.document_id WHERE v.id=? AND d.is_deleted<>2)",
-        ).bind(id('job'), v, kind, now, now, v),
-      ),
-    );
-  for (const j of await all<Job>(
-    env,
-    "SELECT * FROM jobs WHERE version_id=? AND status='pending'",
-    v,
-  ))
-    await dispatch(env, j);
+  const results = kinds.length
+    ? await env.DB.batch(
+        kinds.map((kind) =>
+          env.DB.prepare(
+            "INSERT OR IGNORE INTO jobs(id,version_id,kind,status,created_at,updated_at,generation) SELECT ?,?,?,'pending',?,?,0 WHERE EXISTS(SELECT 1 FROM versions v JOIN documents d ON d.id=v.document_id WHERE v.id=? AND d.is_deleted<>2) RETURNING *",
+          ).bind(id('job'), v, kind, now, now, v),
+        ),
+      )
+    : [];
+  const inserted = results.flatMap((result) => result.results as Job[]);
+  // The explicitly requeued process job is dispatched once; existing successor jobs are not republished.
+  const process = kinds.includes('hash')
+    ? await first<Job>(
+        env,
+        `${jobSelect} WHERE j.version_id=? AND j.kind='process' AND j.status='pending'`,
+        v,
+      )
+    : null;
+  await dispatchJobs(env, process ? [...inserted, process] : inserted);
 }
 async function readManifest(env: Env, v: string, g: number) {
   const object = await env.FILES.get(manifestKey(v, g));
@@ -761,6 +823,17 @@ async function backupOriginal(env: Env, j: Job, v: Version) {
     await ensureJobs(env, v.id, ['backup-hash']);
     return;
   }
+  if (v.size <= WORKER_OBJECT_BYTES) {
+    const bytes = await smallObjectBytes(env.FILES, v.storage_key, v.size);
+    if (
+      !(await fencedPut(env, j, env.BACKUPS, key, bytes, {
+        httpMetadata: { contentType: v.mime_type },
+      }))
+    )
+      return;
+    await ensureJobs(env, v.id, ['backup-hash']);
+    return;
+  }
   const uploadId = await backup.getMultipartUploadId(key, v.mime_type),
     parts: { partNumber: number; etag: string }[] = [];
   try {
@@ -838,7 +911,7 @@ async function settled(env: Env, v: string) {
   if (!process || !['done', 'failed'].includes(process.status)) return;
   const active = await first<{ n: number }>(
     env,
-    "SELECT count(*) n FROM jobs WHERE version_id=? AND status IN ('pending','processing') AND (kind IN ('hash','backup','backup-hash') OR kind LIKE ? OR kind LIKE ?)",
+    "SELECT count(*) n FROM jobs WHERE version_id=? AND status IN ('pending','processing') AND (kind LIKE ? OR kind LIKE ?)",
     v,
     `transcribe:${process.generation}:%`,
     `vision:${process.generation}:%`,
@@ -846,24 +919,34 @@ async function settled(env: Env, v: string) {
   if (active?.n) return;
   const failures = await all<{ error: string }>(
     env,
-    "SELECT error FROM jobs WHERE version_id=? AND status='failed' AND (kind IN ('process','hash','backup','backup-hash') OR kind LIKE ? OR kind LIKE ?)",
+    "SELECT error FROM jobs WHERE version_id=? AND status='failed' AND (kind='process' OR kind LIKE ? OR kind LIKE ?)",
     v,
     `transcribe:${process.generation}:%`,
     `vision:${process.generation}:%`,
   );
-  await run(
-    env,
-    'UPDATE versions SET processing_status=?,processing_error=coalesce(?,processing_error) WHERE id=?',
-    process.status === 'failed' ? 'failed' : 'ready',
-    failures.length
-      ? failures
-          .map((x) => x.error)
-          .join('; ')
-          .slice(0, 512)
-      : null,
-    v,
-  );
-  await enqueueVersion(env, v, 'index');
+  // Search scheduling and extraction completion commit together; transfer jobs are independent.
+  const now = Date.now();
+  const results = await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO jobs(id,version_id,kind,status,created_at,updated_at,generation) SELECT ?,?,'index','pending',?,?,0 WHERE EXISTS(SELECT 1 FROM versions WHERE id=? AND processing_status IN ('pending','processing')) ON CONFLICT(version_id,kind) DO UPDATE SET status='pending',generation=jobs.generation+1,lease_token=NULL,error=NULL,attempts=0,updated_at=excluded.updated_at",
+    ).bind(id('job'), v, now, now, v),
+    env.DB.prepare(
+      "UPDATE versions SET processing_status=?,processing_error=coalesce(?,processing_error) WHERE id=? AND processing_status IN ('pending','processing')",
+    ).bind(
+      process.status === 'failed' ? 'failed' : 'ready',
+      failures.length
+        ? failures
+            .map((x) => x.error)
+            .join('; ')
+            .slice(0, 512)
+        : null,
+      v,
+    ),
+  ]);
+  if (results[1].meta.changes) {
+    const index = await first<Job>(env, `${jobSelect} WHERE j.version_id=? AND j.kind='index'`, v);
+    if (index) await dispatchJobs(env, [index]);
+  }
 }
 export async function consumeJobs(batch: MessageBatch, env: Env) {
   for (const message of batch.messages) {
@@ -874,12 +957,23 @@ export async function consumeJobs(batch: MessageBatch, env: Env) {
     }
     const j = await first<Job>(
       env,
-      'SELECT * FROM jobs WHERE id=? AND generation=?',
+      `${jobSelect} WHERE j.id=? AND j.generation=?`,
       body.jobId,
       body.generation,
     );
     if (!j || j.status !== 'pending') {
       message.ack();
+      continue;
+    }
+    // Drain messages accepted before the split into their current queue without changing generations.
+    const target = jobQueue(env, j);
+    if (batch.queue && batch.queue !== target.name) {
+      try {
+        await target.binding.send({ jobId: j.id, generation: j.generation });
+        message.ack();
+      } catch {
+        message.retry({ delaySeconds: 60 });
+      }
       continue;
     }
     const lease = crypto.randomUUID(),
@@ -967,11 +1061,14 @@ export async function housekeeping(env: Env) {
       "UPDATE jobs SET status=CASE WHEN attempts>=3 THEN 'failed' ELSE 'pending' END,lease_token=NULL,error='expired_processing_lease',updated_at=? WHERE status='processing' AND updated_at<?",
     ).bind(now, now - LEASE_MS),
   ]);
-  for (const j of await all<Job>(
+  await dispatchJobs(
     env,
-    "SELECT * FROM jobs WHERE status='pending' ORDER BY updated_at,id LIMIT 100",
-  ))
-    await dispatch(env, j);
+    await all<Job>(
+      env,
+      `${jobSelect} WHERE j.status='pending' AND j.updated_at<? ORDER BY j.updated_at,j.id LIMIT 1000`,
+      now - 5 * 60_000,
+    ),
+  );
   for (const v of await all<{ id: string }>(
     env,
     "SELECT id FROM versions WHERE processing_status IN ('pending','processing') LIMIT 100",

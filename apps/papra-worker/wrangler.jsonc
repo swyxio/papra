@@ -25,9 +25,15 @@
     { "binding": "BACKUPS", "bucket_name": "papra-drive-backups" },
   ],
   "queues": {
-    "producers": [{ "binding": "JOBS", "queue": "papra-drive-jobs" }],
+    "producers": [
+      { "binding": "JOBS", "queue": "papra-drive-jobs" },
+      { "binding": "TRANSFER_JOBS", "queue": "papra-drive-transfers" },
+      { "binding": "SEARCH_JOBS", "queue": "papra-drive-search" },
+    ],
     "consumers": [
       { "queue": "papra-drive-jobs", "max_batch_size": 1, "max_retries": 3, "max_concurrency": 2 },
+      { "queue": "papra-drive-transfers", "max_batch_size": 1, "max_retries": 3, "max_concurrency": 4 },
+      { "queue": "papra-drive-search", "max_batch_size": 1, "max_retries": 3, "max_concurrency": 4 },
     ],
   },
   "ai": { "binding": "AI" },
@@ -52,7 +58,7 @@
     "bindings": [{ "name": "PROCESSOR", "class_name": "ImageProcessorContainer" }],
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ImageProcessorContainer"] }],
-  "triggers": { "crons": ["0 * * * *"] },
+  "triggers": { "crons": ["*/5 * * * *"] },
   "observability": { "enabled": true },
   "ratelimits": [
     {

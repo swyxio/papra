@@ -47,7 +47,24 @@ async function fixture() {
     embed = vi.fn(async (_model: string, _input: unknown) => ({ data: [Array(768).fill(0.01)] }));
   const env = {
     DB,
-    JOBS: { send },
+    JOBS: {
+      send,
+      sendBatch: vi.fn(async (messages) => {
+        for (const m of messages) await send(m.body);
+      }),
+    },
+    TRANSFER_JOBS: {
+      send,
+      sendBatch: vi.fn(async (messages) => {
+        for (const m of messages) await send(m.body);
+      }),
+    },
+    SEARCH_JOBS: {
+      send,
+      sendBatch: vi.fn(async (messages) => {
+        for (const m of messages) await send(m.body);
+      }),
+    },
     FILES: { get: async () => null },
     INDEX: { upsert, deleteByIds: vi.fn() },
     AI: { run: embed },
@@ -131,7 +148,13 @@ async function backupFixture() {
   const f = await fixture(),
     deleteObject = vi.fn(async () => {}),
     put = vi.fn(async () => {}),
-    head = vi.fn().mockResolvedValueOnce(null).mockResolvedValue({ size: 10 });
+    head = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue({ size: 2 * 1024 ** 2 });
+  await f.DB.prepare("UPDATE versions SET size=? WHERE id='v'")
+    .bind(2 * 1024 ** 2)
+    .run();
   Object.assign(f.env, {
     R2_ENDPOINT: 'https://r2-canary.example',
     R2_BUCKET: 'papra-drive',
@@ -382,7 +405,7 @@ test('indexing incorporates cached media scenes in numeric order without rerunni
 });
 
 test('small Markdown extraction and independent primary/backup hashes stay in Workers', async () => {
-  const { env, DB, send } = await fixture();
+  const { env, DB } = await fixture();
   const text = '# TEST ONLY\n\nA searchable bounded Markdown conversation.';
   const bytes = new TextEncoder().encode(text);
   const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (x) =>
@@ -442,5 +465,70 @@ test('small-object hashing refuses an oversized stored body before buffering it'
   expect(await DB.prepare("SELECT status,error FROM jobs WHERE id='bounded'").first()).toEqual({
     status: 'failed',
     error: 'original_size_mismatch',
+  });
+});
+
+test('bulk job delivery separates transfers from search and extraction queues without double dispatch', async () => {
+  const { env, DB } = await fixture();
+  await enqueueVersion(env, 'v');
+  expect(env.TRANSFER_JOBS.sendBatch).toHaveBeenCalledOnce();
+  expect(env.SEARCH_JOBS.sendBatch).toHaveBeenCalledOnce();
+  expect(env.JOBS.sendBatch).not.toHaveBeenCalled();
+  const transferIds = Array.from(vi.mocked(env.TRANSFER_JOBS.sendBatch).mock.calls[0][0]);
+  const transferJobIds = transferIds.map((x: any) => x.body.jobId);
+  expect(transferJobIds).toHaveLength(2);
+  expect(vi.mocked(env.SEARCH_JOBS.sendBatch).mock.calls[0][0]).toHaveLength(1);
+  await DB.prepare("UPDATE versions SET size=? WHERE id='v'")
+    .bind(2 * 1024 ** 2)
+    .run();
+  await enqueueVersion(env, 'v');
+  expect(env.JOBS.sendBatch).toHaveBeenCalledOnce();
+  expect(env.TRANSFER_JOBS.sendBatch).toHaveBeenCalledOnce();
+});
+test('old queue messages forward to their destination without claiming or consuming attempts', async () => {
+  const { env, DB } = await fixture();
+  await DB.prepare(
+    "INSERT INTO jobs(id,version_id,kind,status,created_at,updated_at) VALUES('move','v','backup','pending',1,1)",
+  ).run();
+  const incoming = batch({ jobId: 'move', generation: 0 });
+  Object.assign(incoming, { queue: 'papra-drive-jobs' });
+  await consumeJobs(incoming, env);
+  expect(env.TRANSFER_JOBS.send).toHaveBeenCalledWith({ jobId: 'move', generation: 0 });
+  expect(incoming.messages[0].ack).toHaveBeenCalled();
+  expect(await DB.prepare("SELECT status,attempts FROM jobs WHERE id='move'").first()).toEqual({
+    status: 'pending',
+    attempts: 0,
+  });
+});
+test('text extraction schedules search while backups are pending and transfer failures cannot reschedule indexing', async () => {
+  const { env, DB } = await fixture();
+  const bytes = new TextEncoder().encode('TEST ONLY');
+  await DB.batch([
+    DB.prepare("UPDATE versions SET size=?,extracted_text='' WHERE id='v'").bind(bytes.length),
+    DB.prepare("UPDATE documents SET content='' WHERE id='d'"),
+  ]);
+  const manifests = new Map<string, string>();
+  env.FILES = {
+    get: async (key: string) =>
+      key === 'originals/v' ? { size: bytes.length, arrayBuffer: async () => bytes.buffer } : null,
+    put: async (key: string, value: unknown) => manifests.set(key, String(value)),
+  } as unknown as R2Bucket;
+  env.BACKUPS = { put: vi.fn() } as unknown as R2Bucket;
+  await enqueueVersion(env, 'v');
+  const process = await DB.prepare("SELECT id FROM jobs WHERE kind='process'").first<any>();
+  await consumeJobs(batch({ jobId: process.id, generation: 0 }), env);
+  expect(await DB.prepare("SELECT processing_status FROM versions WHERE id='v'").first()).toEqual({
+    processing_status: 'ready',
+  });
+  expect(await DB.prepare("SELECT generation,status FROM jobs WHERE kind='index'").first()).toEqual(
+    { generation: 0, status: 'pending' },
+  );
+  expect(await DB.prepare("SELECT status FROM jobs WHERE kind='backup'").first()).toEqual({
+    status: 'pending',
+  });
+  const hash = await DB.prepare("SELECT id FROM jobs WHERE kind='hash'").first<any>();
+  await consumeJobs(batch({ jobId: hash.id, generation: 0 }), env);
+  expect(await DB.prepare("SELECT generation FROM jobs WHERE kind='index'").first()).toEqual({
+    generation: 0,
   });
 });
