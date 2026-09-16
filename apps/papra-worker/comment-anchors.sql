@@ -1,0 +1,1 @@
+CREATE TABLE IF NOT EXISTS comment_anchors(comment_id TEXT PRIMARY KEY REFERENCES comments(id) ON DELETE CASCADE,version_id TEXT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,quote TEXT NOT NULL,page INTEGER,start_offset INTEGER,end_offset INTEGER);

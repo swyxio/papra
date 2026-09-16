@@ -1,6 +1,6 @@
 import type { App, Env, Identity } from './types';
 import { getContainer } from '@cloudflare/containers';
-import { all, first, run, error, camel, formatDocument, getDocument } from './db';
+import { all, first, run, id, error, camel, formatDocument, getDocument } from './db';
 import { ensureDocumentAccess, permittedDocumentPredicateSQL } from './collaboration';
 import { signedDownload, s3 } from './storage';
 import { enqueueVersion } from './jobs';
@@ -46,9 +46,13 @@ async function deletePrefix(bucket: R2Bucket, prefix: string) {
 }
 async function purge(env: Env, d: Record<string, any>) {
   await run(env, 'UPDATE documents SET is_deleted=2 WHERE id=? AND is_deleted<>0', d.id);
-  await run(env,'DELETE FROM document_reviews WHERE document_id=?',d.id);
+  await run(env, 'DELETE FROM document_reviews WHERE document_id=?', d.id);
   const signing = await all(env, 'SELECT id FROM signing_requests WHERE document_id=?', d.id);
-  await run(env, "UPDATE signing_requests SET status='cancelled',lease_token=NULL WHERE document_id=?", d.id);
+  await run(
+    env,
+    "UPDATE signing_requests SET status='cancelled',lease_token=NULL WHERE document_id=?",
+    d.id,
+  );
   for (const request of signing) {
     await deletePrefix(env.FILES, `signing/${request.id}/`);
     await deletePrefix(env.BACKUPS, `signing/${request.id}/`);
@@ -371,15 +375,15 @@ export function registerDocumentRoutes(app: App) {
         d.id,
       );
     if (!v) throw error(404, 'Version not found');
-    await run(
-      c.env,
-      'UPDATE documents SET current_version_id=?,mime_type=?,content=?,updated_at=? WHERE id=?',
-      v.id,
-      v.mime_type,
-      v.extracted_text,
-      Date.now(),
-      d.id,
-    );
+    const restoredAt = Date.now();
+    await c.env.DB.batch([
+      c.env.DB.prepare(
+        'UPDATE documents SET current_version_id=?,mime_type=?,content=?,updated_at=? WHERE id=?',
+      ).bind(v.id, v.mime_type, v.extracted_text, restoredAt, d.id),
+      c.env.DB.prepare(
+        'INSERT INTO document_activity(id,document_id,user_id,event,created_at) VALUES(?,?,?,?,?)',
+      ).bind(id('act'), d.id, c.get('identity').userId, 'version-restored', restoredAt),
+    ]);
     await enqueueVersion(c.env, v.id, 'index');
     return c.json({ document: await formatDocument(c.env, (await getDocument(c.env, d.id))!) });
   });

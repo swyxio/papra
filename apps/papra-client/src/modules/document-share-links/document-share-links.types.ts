@@ -1,4 +1,5 @@
 export type ShareLink = {
+  canManage: boolean;
   id: string;
   documentId: string;
   organizationId: string;

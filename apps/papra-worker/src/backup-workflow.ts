@@ -22,6 +22,7 @@ export const SNAPSHOT_TABLES = [
   'service_tokens',
   'document_shortcuts',
   'comments',
+  'comment_anchors',
   'comment_mentions',
   'document_activity',
   'activity_inbox',

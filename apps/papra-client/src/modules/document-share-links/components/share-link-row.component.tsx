@@ -1,14 +1,18 @@
 import type { Component } from 'solid-js';
 import type { ShareLink } from '../document-share-links.types';
-import { Show } from 'solid-js';
+import { createSignal, Show } from 'solid-js';
 import { useI18n } from '@/modules/i18n/i18n.provider';
-import { useCopy } from '@/modules/shared/utils/copy';
+import { useCopyShareLink } from '../document-share-links.composables';
 import { ShareLinkActions } from './share-link-actions.component';
 import { ShareLinkStatus } from './share-link-status.component';
 
 export const ShareLinkRow: Component<{ shareLink: ShareLink }> = (props) => {
   const { t, formatDate } = useI18n();
-  const { copy, getIsJustCopied } = useCopy();
+  const { copyShareLink } = useCopyShareLink();
+  const [getIsJustCopied, setCopied] = createSignal(false);
+  async function copy() {
+    setCopied(await copyShareLink({ url: props.shareLink.url }));
+  }
 
   return (
     <div class="flex items-center gap-2 border rounded-md p-3">
@@ -16,7 +20,7 @@ export const ShareLinkRow: Component<{ shareLink: ShareLink }> = (props) => {
         <button
           type="button"
           class="group flex items-center gap-2 min-w-0 max-w-full cursor-pointer text-left text-muted-foreground transition hover:text-foreground"
-          onClick={() => copy({ text: props.shareLink.url })}
+          onClick={() => void copy()}
           title={t('document-share-links.copy')}
         >
           <span class="truncate text-sm font-mono min-w-0">{props.shareLink.url}</span>

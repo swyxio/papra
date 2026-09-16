@@ -1,4 +1,5 @@
-import { multipartUpload, type TransferProgress } from './drive-multipart.services';
+import type { TransferProgress } from './drive-multipart.services';
+import { multipartUpload } from './drive-multipart.services';
 import type { AsDto } from '../shared/http/http-client.types';
 import type { DocumentSearchSortField, DocumentSearchSortOrder } from './documents.constants';
 import type { Document, DocumentActivity } from './documents.types';
@@ -10,13 +11,48 @@ export async function uploadDocument({
   organizationId,
   onProgress,
   folderId,
+  resolveDuplicate,
 }: {
   file: File;
   organizationId: string;
   folderId?: string;
+  resolveDuplicate?: (conflict: {
+    name: string;
+    canReplace: boolean;
+  }) => Promise<{ action: 'replace' } | { action: 'rename'; name: string } | undefined>;
   onProgress?: (progress: TransferProgress) => void;
 }) {
-  return multipartUpload(file, organizationId, onProgress, { folderId });
+  let options: { folderId?: string; documentId?: string; fileName?: string } = { folderId };
+  while (true) {
+    try {
+      return await multipartUpload(file, organizationId, onProgress, options);
+    } catch (error) {
+      const conflict = error as {
+        status?: number;
+        data?: {
+          code?: string;
+          existingDocument?: { id: string; name: string };
+          canReplace?: boolean;
+        };
+      };
+      if (
+        conflict.status !== 409 ||
+        conflict.data?.code !== 'duplicate_file_name' ||
+        !conflict.data.existingDocument ||
+        !resolveDuplicate
+      )
+        throw error;
+      const decision = await resolveDuplicate({
+        name: conflict.data.existingDocument.name,
+        canReplace: !!conflict.data.canReplace,
+      });
+      if (!decision) throw new Error('Upload cancelled. The existing file was kept.');
+      options =
+        decision.action === 'replace'
+          ? { documentId: conflict.data.existingDocument.id }
+          : { folderId, fileName: decision.name.trim() };
+    }
+  }
 }
 
 export async function fetchOrganizationDocuments({

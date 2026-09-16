@@ -115,8 +115,9 @@ function expiry(value: unknown): number | null {
   return timestamp;
 }
 const iso = (value: number | null) => (value === null ? null : new Date(value).toISOString());
-function dto(env: Env, row: ShareRow) {
+function dto(env: Env, row: ShareRow, canManage = true) {
   return {
+    canManage,
     id: row.id,
     documentId: row.document_id,
     organizationId: row.organization_id,
@@ -143,6 +144,20 @@ async function documentScope(
   const document = await ensureDocumentAccess(env, identity, documentId, manage ? 'write' : 'read');
   if (document.organization_id !== organizationId) return fail(404, 'File not found');
   return document;
+}
+async function canManageSharing(
+  env: Env,
+  identity: Identity,
+  organizationId: string,
+  documentId: string,
+) {
+  try {
+    const document = await documentScope(env, identity, organizationId, documentId, true);
+    return !document.is_deleted;
+  } catch (error) {
+    if (error instanceof HTTPException && [403, 404].includes(error.status)) return false;
+    throw error;
+  }
 }
 async function managedShare(env: Env, identity: Identity, organizationId: string, shareId: string) {
   const row = await env.DB.prepare('SELECT * FROM share_links WHERE id=? AND organization_id=?')
@@ -258,7 +273,11 @@ export function registerShareRoutes(app: App) {
     )
       .bind(org, doc)
       .all<ShareRow>();
-    return context.json({ shareLinks: rows.results.map((row) => dto(env, row)) });
+    const canManage = await canManageSharing(env, context.get('identity'), org, doc);
+    return context.json({
+      canManage,
+      shareLinks: rows.results.map((row) => dto(env, row, canManage)),
+    });
   });
   app.get(`${base}/share-links`, async (context) => {
     const env = context.env;
@@ -275,7 +294,7 @@ export function registerShareRoutes(app: App) {
       try {
         await documentScope(env, identity, org, row.document_id);
         visible.push({
-          ...dto(env, row),
+          ...dto(env, row, await canManageSharing(env, identity, org, row.document_id)),
           documentName: row.document_name,
           isDocumentDeleted: !!row.is_document_deleted,
         });

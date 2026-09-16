@@ -1,12 +1,14 @@
 import { ZipWriter, HttpReader, TextReader } from '@zip.js/zip.js';
 import { createSignal } from 'solid-js';
+import { getHttpErrorMessage } from '@/modules/shared/http/http-errors';
 import { apiClient } from '@/modules/shared/http/api-client';
 import { Button } from '@/modules/ui/components/button';
 import { fetchOrganizationDocuments } from '../documents.services';
+
 type SaveWindow = Window & {
-  showSaveFilePicker?: (
-    options: Record<string, unknown>,
-  ) => Promise<{ createWritable: () => Promise<WritableStream<Uint8Array>> }>;
+  showSaveFilePicker?: (options: Record<string, unknown>) => Promise<{
+    createWritable: () => Promise<WritableStream<Uint8Array> & { close: () => Promise<void> }>;
+  }>;
 };
 export function DriveExport(props: { organizationId: string }) {
   const [status, setStatus] = createSignal(''),
@@ -18,13 +20,14 @@ export function DriveExport(props: { organizationId: string }) {
       return;
     }
     setBusy(true);
-    let writer: ZipWriter<unknown> | undefined;
+    let destination: (WritableStream<Uint8Array> & { close: () => Promise<void> }) | undefined;
     try {
-      const file = await save({
+      const file = await save.call(window, {
         suggestedName: 'drive-export.zip',
         types: [{ description: 'ZIP archive', accept: { 'application/zip': ['.zip'] } }],
       });
-      writer = new ZipWriter(await file.createWritable(), { zip64: true });
+      destination = await file.createWritable();
+      const writer = new ZipWriter(destination, { zip64: true, preventClose: true });
       const manifest: unknown[] = [];
       let pageIndex = 0,
         total = Infinity,
@@ -72,10 +75,22 @@ export function DriveExport(props: { organizationId: string }) {
         ),
       );
       await writer.close();
-      writer = undefined;
+      await destination.close();
+      destination = undefined;
       setStatus(`Saved ${done} files and their metadata.`);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Export failed');
+      // FSA writes to a temporary file. Aborting keeps a previous destination intact.
+      try {
+        await destination?.abort(error);
+      } catch {
+        /* Preserve the original export failure. */
+      }
+      destination = undefined;
+      setStatus(
+        error instanceof DOMException && error.name === 'AbortError'
+          ? 'Export cancelled. No file was saved.'
+          : `Export failed: ${getHttpErrorMessage(error)}`,
+      );
     } finally {
       setBusy(false);
     }
