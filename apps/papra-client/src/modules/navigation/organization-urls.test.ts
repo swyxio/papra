@@ -8,7 +8,7 @@ describe('organization UI URLs', () => {
     ['Smol', 'org_cb7a9094c1b013a08dafb6d8'],
   ])('%s resolves to immutable organization identity and has one canonical URL', (name, id) => {
     for (const suffix of ['', '/', '/documents/doc_123', '/settings/members?sort=name#role']) {
-      const readable = `/organizations/${name}${suffix}`;
+      const readable = `/orgs/${name}${suffix}`;
       const immutable = `/organizations/${id}${suffix}`;
       expect(resolveOrganizationRoute(readable)).toBe(immutable);
       expect(canonicalOrganizationUrl(immutable)).toBe(readable);
@@ -17,11 +17,21 @@ describe('organization UI URLs', () => {
     }
   });
 
+  test.each(['org_personal', 'AIE-extra', 'aie', 'Smolish'])('shortens all organization UI paths without changing unknown identity: %s', (id) => {
+    expect(canonicalOrganizationUrl(`/organizations/${id}/documents?tab=versions#source`))
+      .toBe(`/orgs/${id}/documents?tab=versions#source`);
+    expect(resolveOrganizationRoute(`/orgs/${id}/documents?tab=versions#source`))
+      .toBe(`/organizations/${id}/documents?tab=versions#source`);
+  });
+
+  test('shortens the organization index and preserves segment boundaries', () => {
+    expect(canonicalOrganizationUrl('/organizations?sort=name')).toBe('/orgs?sort=name');
+    expect(resolveOrganizationRoute('/orgs?sort=name')).toBe('/organizations?sort=name');
+    expect(canonicalOrganizationUrl('/organizations-extra')).toBe('/organizations-extra');
+    expect(resolveOrganizationRoute('/orgs-extra')).toBe('/orgs-extra');
+  });
+
   test.each([
-    '/organizations/org_personal/documents/doc_123',
-    '/organizations/AIE-extra/documents',
-    '/organizations/aie/documents',
-    '/organizations/Smolish',
     '/api/organizations/AIE/documents',
     '/api/organizations/org_419f9b6ce7fbbb7147a63378/documents',
     '/s/AIE',

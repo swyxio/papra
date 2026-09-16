@@ -4,8 +4,8 @@ const teamOrganizations = {
   Smol: 'org_cb7a9094c1b013a08dafb6d8',
 } as const;
 
-// Only the organization segment of UI routes changes. API paths, personal spaces,
-// document IDs, query strings and hashes retain their original identity.
+// UI routes use /orgs; route parameters and API paths retain immutable IDs.
+// Document IDs, query strings and hashes are preserved.
 function mapOrganizationSegment(path: string, direction: 'id' | 'name'): string {
   return path.replace(/^\/organizations\/([^/?#]+)(?=[/?#]|$)/, (prefix, segment: string) => {
     const organization = Object.entries(teamOrganizations).find(([name, id]) =>
@@ -18,9 +18,10 @@ function mapOrganizationSegment(path: string, direction: 'id' | 'name'): string 
 }
 
 export function resolveOrganizationRoute(path: string): string {
-  return mapOrganizationSegment(path, 'id');
+  return mapOrganizationSegment(path.replace(/^\/orgs(?=[/?#]|$)/, '/organizations'), 'id');
 }
 
 export function canonicalOrganizationUrl(path: string): string {
-  return mapOrganizationSegment(path, 'name');
+  return mapOrganizationSegment(path.replace(/^\/orgs(?=[/?#]|$)/, '/organizations'), 'name')
+    .replace(/^\/organizations(?=[/?#]|$)/, '/orgs');
 }
