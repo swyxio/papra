@@ -1,3 +1,4 @@
+import type { DocumentCustomProperty } from '@/modules/documents/documents.types';
 import type { IconName } from '@/modules/ui/components/icon';
 import type { ThemeColors } from '@/modules/ui/theme.constants';
 import { formatBytes } from '@corentinth/chisels';
@@ -8,7 +9,6 @@ import { useState } from 'react';
 import {
   ActivityIndicator,
   Platform,
-  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -17,14 +17,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Sharing from 'expo-sharing';
-import { useAppTranslations } from '@/modules/i18n/hooks/use-app-translations';
-import { useFormatters } from '@/modules/i18n/hooks/use-formatters';
 import { useApiClient, useAuthClient } from '@/modules/api/providers/api.provider';
 import { DocumentActionSheet } from '@/modules/documents/components/document-action-sheet';
-import { DocumentTagsDrawer } from '@/modules/documents/components/document-tags-drawer';
-import { formatCustomPropertyValue } from '@/modules/documents/documents.models';
-import { documentQueryOptions } from '@/modules/documents/documents.queries';
-import { fetchDocumentFile } from '@/modules/documents/documents.services';
+import { fetchDocument, fetchDocumentFile } from '@/modules/documents/documents.services';
 import { Tag } from '@/modules/tags/components/tag';
 import { Icon } from '@/modules/ui/components/icon';
 import { useAlert } from '@/modules/ui/providers/alert-provider';
@@ -36,10 +31,52 @@ const customPropertyTypeIcons: Record<string, IconName> = {
   'boolean': 'check-square',
   'date': 'calendar',
   'select': 'list',
-  'multi_select': 'list',
+  'multi-select': 'list',
   'document-relation': 'file',
   'user-relation': 'user',
 };
+
+function formatDate(date: Date): string {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(date);
+}
+
+function formatCustomPropertyValue({ type, value }: DocumentCustomProperty): string {
+  if (value == null || value === '' || (Array.isArray(value) && value.length === 0)) {
+    return '—';
+  }
+
+  if (typeof value === 'boolean') {
+    return value ? 'Yes' : 'No';
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .filter((item) => typeof item === 'string' || typeof item === 'number')
+      .map(String)
+      .join(', ');
+  }
+
+  if (typeof value === 'number') {
+    return String(value);
+  }
+
+  if (typeof value === 'string') {
+    if (type === 'date') {
+      const date = new Date(value);
+      if (!Number.isNaN(date.getTime())) {
+        return formatDate(date);
+      }
+    }
+
+    return value;
+  }
+
+  return JSON.stringify(value);
+}
 
 // Extract MIME type subtype, fallback to full MIME type if subtype is missing
 function getDisplayMimeType(mimeType: string): string {
@@ -76,8 +113,6 @@ function InfoRow({
 }
 
 export function DocumentDetailsScreen() {
-  const t = useAppTranslations();
-  const { formatDate } = useFormatters();
   const router = useRouter();
   const params = useLocalSearchParams<{ documentId: string; organizationId: string }>();
   const themeColors = useThemeColor();
@@ -86,17 +121,20 @@ export function DocumentDetailsScreen() {
   const apiClient = useApiClient();
   const authClient = useAuthClient();
   const [isActionSheetVisible, setIsActionSheetVisible] = useState(false);
-  const [isTagsDrawerVisible, setIsTagsDrawerVisible] = useState(false);
   const [pendingAction, setPendingAction] = useState<'download' | 'share' | undefined>(undefined);
 
   const { documentId, organizationId } = params;
 
-  const documentQuery = useQuery(documentQueryOptions({ organizationId, documentId, apiClient }));
+  const documentQuery = useQuery({
+    queryKey: ['organizations', organizationId, 'documents', documentId],
+    queryFn: async () => fetchDocument({ organizationId, documentId, apiClient }),
+    enabled: organizationId != null && documentId != null,
+  });
 
   if (organizationId == null || documentId == null) {
     showAlert({
-      title: t.common.error,
-      message: t.documents.missingIds,
+      title: 'Error',
+      message: 'Organization ID and Document ID are required',
     });
     return null;
   }
@@ -146,16 +184,13 @@ export function DocumentDetailsScreen() {
           encoding: FileSystem.EncodingType.Base64,
         });
 
-        showAlert({
-          title: t.documents.downloaded,
-          message: t.documents.saved({ name: document.name }),
-        });
+        showAlert({ title: 'Downloaded', message: `${document.name} has been saved` });
       } else {
         // On iOS saving a file goes through the share sheet ("Save to Files")
         await Sharing.shareAsync(fileUri);
       }
     } catch {
-      showAlert({ title: t.common.error, message: t.documents.downloadFailed });
+      showAlert({ title: 'Error', message: 'Failed to download document file' });
     } finally {
       setPendingAction(undefined);
     }
@@ -169,8 +204,8 @@ export function DocumentDetailsScreen() {
     const canShare = await Sharing.isAvailableAsync();
     if (!canShare) {
       showAlert({
-        title: t.documents.sharingFailed,
-        message: t.documents.sharingUnavailable,
+        title: 'Sharing Failed',
+        message: 'Sharing is not available on this device. Please share the document manually.',
       });
       return;
     }
@@ -180,7 +215,7 @@ export function DocumentDetailsScreen() {
       const fileUri = await getLocalFileUri();
       await Sharing.shareAsync(fileUri);
     } catch {
-      showAlert({ title: t.common.error, message: t.documents.downloadFailed });
+      showAlert({ title: 'Error', message: 'Failed to download document file' });
     } finally {
       setPendingAction(undefined);
     }
@@ -191,7 +226,7 @@ export function DocumentDetailsScreen() {
       return (
         <View style={styles.centeredContainer}>
           <ActivityIndicator size="large" color={themeColors.primary} />
-          <Text style={styles.centeredText}>{t.documents.loading}</Text>
+          <Text style={styles.centeredText}>Loading document...</Text>
         </View>
       );
     }
@@ -200,9 +235,9 @@ export function DocumentDetailsScreen() {
       return (
         <View style={styles.centeredContainer}>
           <Icon name="alert-circle" size={64} color={themeColors.mutedForeground} />
-          <Text style={styles.centeredTitle}>{t.documents.loadFailed}</Text>
+          <Text style={styles.centeredTitle}>Failed to load document</Text>
           <TouchableOpacity style={styles.retryButton} onPress={() => void documentQuery.refetch()}>
-            <Text style={styles.retryButtonText}>{t.common.retry}</Text>
+            <Text style={styles.retryButtonText}>Retry</Text>
           </TouchableOpacity>
         </View>
       );
@@ -214,18 +249,7 @@ export function DocumentDetailsScreen() {
     const hasNotes = document.notes != null && document.notes.trim() !== '';
 
     return (
-      <ScrollView
-        contentContainerStyle={styles.content}
-        alwaysBounceVertical
-        refreshControl={
-          <RefreshControl
-            refreshing={documentQuery.isRefetching}
-            onRefresh={() => void documentQuery.refetch()}
-            tintColor={themeColors.primary}
-            colors={[themeColors.primary]}
-          />
-        }
-      >
+      <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.hero}>
           <View style={styles.heroIconContainer}>
             <Icon name="file-text" size={28} color={themeColors.primary} />
@@ -245,7 +269,7 @@ export function DocumentDetailsScreen() {
         <View style={styles.actionsRow}>
           <TouchableOpacity style={styles.openButton} onPress={handleOpen} activeOpacity={0.7}>
             <Icon name="eye" size={18} color={themeColors.primaryForeground} />
-            <Text style={styles.openButtonText}>{t.common.open}</Text>
+            <Text style={styles.openButtonText}>Open</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.iconButton}
@@ -271,33 +295,20 @@ export function DocumentDetailsScreen() {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, styles.tagsTitle]}>{t.documents.tags}</Text>
-            <TouchableOpacity
-              style={styles.manageTagsButton}
-              onPress={() => setIsTagsDrawerVisible(true)}
-              accessibilityRole="button"
-              accessibilityLabel={t.documents.manageTags}
-            >
-              <Icon name="tag" size={16} color={themeColors.primary} />
-              <Text style={styles.manageTagsText}>{t.documents.manageTags}</Text>
-            </TouchableOpacity>
-          </View>
-          {document.tags.length > 0 ? (
+        {document.tags.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Tags</Text>
             <View style={styles.tagsContainer}>
               {document.tags.map((tag) => (
                 <Tag key={tag.id} name={tag.name} color={tag.color} />
               ))}
             </View>
-          ) : (
-            <Text style={styles.heroMeta}>{t.documents.tagPicker.noTags}</Text>
-          )}
-        </View>
+          </View>
+        )}
 
         {hasNotes && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>{t.documents.notes}</Text>
+            <Text style={styles.sectionTitle}>Notes</Text>
             <View style={styles.card}>
               <Text style={styles.notesText} selectable>
                 {document.notes}
@@ -310,35 +321,35 @@ export function DocumentDetailsScreen() {
           <View style={styles.card}>
             <InfoRow
               icon="file-text"
-              label={t.common.name}
+              label="Name"
               value={document.name}
               styles={styles}
               themeColors={themeColors}
             />
             <InfoRow
               icon="hard-drive"
-              label={t.documents.size}
+              label="Size"
               value={formatBytes({ bytes: document.originalSize })}
               styles={styles}
               themeColors={themeColors}
             />
             <InfoRow
               icon="file"
-              label={t.documents.type}
+              label="Type"
               value={getDisplayMimeType(document.mimeType)}
               styles={styles}
               themeColors={themeColors}
             />
             <InfoRow
               icon="calendar"
-              label={t.documents.date}
+              label="Date"
               value={formatDate(document.createdAt)}
               styles={styles}
               themeColors={themeColors}
             />
             <InfoRow
               icon="hash"
-              label={t.documents.id}
+              label="ID"
               value={document.id}
               isLast
               styles={styles}
@@ -349,14 +360,14 @@ export function DocumentDetailsScreen() {
 
         {customProperties.length > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>{t.documents.properties}</Text>
+            <Text style={styles.sectionTitle}>Properties</Text>
             <View style={styles.card}>
               {customProperties.map((property, index) => (
                 <InfoRow
                   key={property.key}
                   icon={customPropertyTypeIcons[property.type] ?? 'tag'}
                   label={property.name}
-                  value={formatCustomPropertyValue(property, { formatDate })}
+                  value={formatCustomPropertyValue(property)}
                   isLast={index === customProperties.length - 1}
                   styles={styles}
                   themeColors={themeColors}
@@ -376,7 +387,7 @@ export function DocumentDetailsScreen() {
           <Icon name="arrow-left" size={22} color={themeColors.foreground} />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>
-          {document?.name ?? t.documents.fallbackName}
+          {document?.name ?? 'Document'}
         </Text>
         <TouchableOpacity style={styles.headerButton} onPress={() => setIsActionSheetVisible(true)}>
           <Icon name="more-vertical" size={22} color={themeColors.foreground} />
@@ -389,13 +400,6 @@ export function DocumentDetailsScreen() {
         onClose={() => setIsActionSheetVisible(false)}
         excludedActions={['view']}
         onDeleted={() => router.back()}
-      />
-
-      <DocumentTagsDrawer
-        visible={isTagsDrawerVisible}
-        organizationId={organizationId}
-        documentId={documentId}
-        onClose={() => setIsTagsDrawerVisible(false)}
       />
 
       {renderContent()}
@@ -502,29 +506,6 @@ function createStyles({ themeColors }: { themeColors: ThemeColors }) {
       textTransform: 'uppercase',
       letterSpacing: 0.5,
       marginBottom: 8,
-    },
-    sectionHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: 12,
-      marginBottom: 8,
-    },
-    tagsTitle: {
-      marginBottom: 0,
-    },
-    manageTagsButton: {
-      flexShrink: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      paddingVertical: 12,
-    },
-    manageTagsText: {
-      flexShrink: 1,
-      color: themeColors.primary,
-      fontSize: 14,
-      fontWeight: '600',
     },
     tagsContainer: {
       flexDirection: 'row',

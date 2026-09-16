@@ -17,7 +17,6 @@ import {
 } from 'react-native';
 import Pdf from 'react-native-pdf';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useAppTranslations } from '@/modules/i18n/hooks/use-app-translations';
 import { useApiClient, useAuthClient } from '@/modules/api/providers/api.provider';
 import { DocumentActionSheet } from '@/modules/documents/components/document-action-sheet';
 import { fetchDocument, fetchDocumentFile } from '@/modules/documents/documents.services';
@@ -54,7 +53,6 @@ function DocumentViewer({
   themeColors: ThemeColors;
   onError: (message: string) => void;
 }) {
-  const t = useAppTranslations();
   const { mimeType } = file.doc;
 
   if (mimeType.startsWith('image/')) {
@@ -67,7 +65,7 @@ function DocumentViewer({
         source={{ uri: file.uri, cache: true }}
         style={styles.documentViewer}
         onError={() => {
-          onError(t.documents.preview.pdfFailed);
+          onError('Failed to load PDF');
         }}
         enablePaging
         horizontal={false}
@@ -95,8 +93,8 @@ function DocumentViewer({
         size={64}
         color={themeColors.mutedForeground}
       />
-      <Text style={styles.centeredTitle}>{t.documents.preview.unavailable}</Text>
-      <Text style={styles.centeredText}>{t.documents.preview.unsupported}</Text>
+      <Text style={styles.centeredTitle}>Preview not available</Text>
+      <Text style={styles.centeredText}>This file type cannot be previewed in the app</Text>
     </View>
   );
 }
@@ -108,11 +106,10 @@ function LoadingState({
   styles: ReturnType<typeof createStyles>;
   themeColors: ThemeColors;
 }) {
-  const t = useAppTranslations();
   return (
     <View style={styles.centeredContainer}>
       <ActivityIndicator size="large" color={themeColors.primary} />
-      <Text style={styles.centeredText}>{t.documents.loading}</Text>
+      <Text style={styles.centeredText}>Loading document...</Text>
     </View>
   );
 }
@@ -128,7 +125,6 @@ function ErrorState({
   onRetry: () => void;
   onGoBack: () => void;
 }) {
-  const t = useAppTranslations();
   return (
     <View style={styles.centeredContainer}>
       <MaterialCommunityIcons
@@ -136,19 +132,18 @@ function ErrorState({
         size={64}
         color={themeColors.mutedForeground}
       />
-      <Text style={styles.centeredTitle}>{t.documents.loadFailed}</Text>
+      <Text style={styles.centeredTitle}>Failed to load document</Text>
       <TouchableOpacity style={styles.actionButton} onPress={onRetry}>
-        <Text style={styles.actionButtonText}>{t.common.retry}</Text>
+        <Text style={styles.actionButtonText}>Retry</Text>
       </TouchableOpacity>
       <TouchableOpacity style={styles.actionButton} onPress={onGoBack}>
-        <Text style={styles.actionButtonText}>{t.common.goBack}</Text>
+        <Text style={styles.actionButtonText}>Go Back</Text>
       </TouchableOpacity>
     </View>
   );
 }
 
 export default function DocumentViewScreen() {
-  const t = useAppTranslations();
   const router = useRouter();
   const params = useLocalSearchParams<{ documentId: string; organizationId: string }>();
   const themeColors = useThemeColor();
@@ -162,8 +157,8 @@ export default function DocumentViewScreen() {
 
   if (organizationId == null || documentId == null) {
     showAlert({
-      title: t.common.error,
-      message: t.documents.missingIds,
+      title: 'Error',
+      message: 'Organization ID and Document ID are required',
     });
     return null;
   }
@@ -205,10 +200,10 @@ export default function DocumentViewScreen() {
   const isLoading = documentQuery.isLoading || documentFileQuery.isLoading;
   const error = documentQuery.error ?? documentFileQuery.error;
   const documentFile = documentFileQuery.data;
-  const documentName = documentFile?.doc.name ?? t.documents.fallbackName;
+  const documentName = documentFile?.doc.name ?? 'Document';
 
   const handleShowError = (message: string) => {
-    showAlert({ title: t.common.error, message });
+    showAlert({ title: 'Error', message });
   };
 
   const renderContent = () => {

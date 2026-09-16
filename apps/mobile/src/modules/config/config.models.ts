@@ -66,26 +66,11 @@ export function isForbiddenHeaderName({ name }: { name: string }) {
   );
 }
 
-export type CustomHeaderIssueCode =
-  | 'empty-name'
-  | 'invalid-name'
-  | 'forbidden-name'
-  | 'invalid-value';
-
-type CustomHeaderIssue = {
-  code: CustomHeaderIssueCode;
-  headerName: string;
-};
-
-export function validateCustomHeaders({ headers }: { headers: CustomHeader[] }):
-  | {
-      success: true;
-      headers: Record<string, string>;
-    }
-  | {
-      success: false;
-      issue: CustomHeaderIssue;
-    } {
+export function validateCustomHeaders({
+  headers,
+}: {
+  headers: CustomHeader[];
+}): Record<string, string> {
   const validatedHeaders: Record<string, string> = {};
 
   for (const header of headers) {
@@ -97,51 +82,22 @@ export function validateCustomHeaders({ headers }: { headers: CustomHeader[] }):
       continue;
     }
 
-    if (name === '') {
-      return {
-        success: false,
-        issue: {
-          code: 'empty-name',
-          headerName: name,
-        },
-      };
-    }
-
     if (!HEADER_NAME_REGEX.test(name)) {
-      return {
-        success: false,
-        issue: {
-          code: 'invalid-name',
-          headerName: name,
-        },
-      };
+      throw new Error(
+        name === '' ? 'Header names cannot be empty.' : `The header name "${name}" is invalid.`,
+      );
     }
 
     if (isForbiddenHeaderName({ name })) {
-      return {
-        success: false,
-        issue: {
-          code: 'forbidden-name',
-          headerName: name,
-        },
-      };
+      throw new Error(`The header "${name}" is managed by the app and cannot be overridden.`);
     }
 
     if (/[\r\n]/.test(value)) {
-      return {
-        success: false,
-        issue: {
-          code: 'invalid-value',
-          headerName: name,
-        },
-      };
+      throw new Error(`The value of the header "${name}" is invalid.`);
     }
 
     validatedHeaders[name] = value;
   }
 
-  return {
-    success: true,
-    headers: validatedHeaders,
-  };
+  return validatedHeaders;
 }

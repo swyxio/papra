@@ -14,6 +14,9 @@ import {
   Suspense,
   Switch,
 } from 'solid-js';
+import { DriveDocumentCapabilities } from '@/modules/drive-capabilities';
+import { DocumentComments } from '@/modules/drive-collaboration/document-comments.component';
+import { DocumentFolderPicker } from '@/modules/drive-collaboration/drive-folders.component';
 import { useConfig } from '@/modules/config/config.provider';
 import { DocumentCustomPropertiesPanel } from '@/modules/custom-properties/components/document-custom-properties-panel.component';
 import { fetchCustomPropertyDefinitions } from '@/modules/custom-properties/custom-properties.services';
@@ -166,6 +169,16 @@ const KeyValues: Component<{ data?: KeyValueItem[] }> = (props) => {
   );
 };
 
+const driveActivityLabels: Record<string, string> = {
+  'moved': 'Moved this file',
+  'commented': 'Added a comment',
+  'replied': 'Replied to a comment',
+  'comment-edited': 'Edited a comment',
+  'comment-deleted': 'Deleted a comment',
+  'shortcut-created': 'Added a shortcut',
+  'shortcut-deleted': 'Removed a shortcut',
+};
+
 const ActivityItem: Component<{ activity: DocumentActivity }> = (props) => {
   const { t, te } = useI18n();
   const params = useParams();
@@ -179,7 +192,12 @@ const ActivityItem: Component<{ activity: DocumentActivity }> = (props) => {
       </div>
       <div>
         <Switch
-          fallback={<span class="text-sm">{t(`activity.document.${props.activity.event}`)}</span>}
+          fallback={
+            <span class="text-sm">
+              {driveActivityLabels[props.activity.event] ??
+                t(`activity.document.${props.activity.event}`)}
+            </span>
+          }
         >
           <Match when={['tagged', 'untagged'].includes(props.activity.event)}>
             <span class="text-sm flex items-baseline gap-1">
@@ -250,7 +268,7 @@ const ActivityItem: Component<{ activity: DocumentActivity }> = (props) => {
   );
 };
 
-const tabs = ['info', 'content', 'activity'] as const;
+const tabs = ['info', 'content', 'comments', 'activity'] as const;
 type Tab = (typeof tabs)[number];
 
 const DocumentOpenWithDropdown: Component<{ document: Document; organizationId: string }> = (
@@ -442,6 +460,11 @@ export const DocumentPage: Component = () => {
                   </div>
                   <Separator class="my-3" />
 
+                  <DocumentFolderPicker
+                    documentId={params.documentId}
+                    organizationId={params.organizationId}
+                  />
+
                   <DocumentTagsList
                     documentId={params.documentId}
                     organizationId={params.organizationId}
@@ -468,6 +491,7 @@ export const DocumentPage: Component = () => {
                     <TabsList class="w-full h-8">
                       <TabsTrigger value="info">{t('documents.tabs.info')}</TabsTrigger>
                       <TabsTrigger value="content">{t('documents.tabs.content')}</TabsTrigger>
+                      <TabsTrigger value="comments">Comments</TabsTrigger>
                       <TabsTrigger value="activity">{t('documents.tabs.activity')}</TabsTrigger>
                       <TabsIndicator />
                     </TabsList>
@@ -561,8 +585,26 @@ export const DocumentPage: Component = () => {
                     </TabsContent>
 
                     <TabsContent value="content">
-                      <DocumentContentEditionPanel document={getDocument()} />
+                      <DocumentContentEditionPanel
+                        documentId={getDocument().id}
+                        organizationId={params.organizationId}
+                        content={getDocument().content}
+                      />
                     </TabsContent>
+                    <TabsContent value="comments">
+                      <DriveDocumentCapabilities
+                        organizationId={params.organizationId}
+                        documentId={params.documentId}
+                        onChanged={() => {
+                          void documentQuery.refetch();
+                        }}
+                      />
+                      <DocumentComments
+                        documentId={params.documentId}
+                        organizationId={params.organizationId}
+                      />
+                    </TabsContent>
+
                     <TabsContent value="activity">
                       <Show when={activityQuery.data?.pages}>
                         {(getActivitiesPages) => (

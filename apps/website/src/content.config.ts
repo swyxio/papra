@@ -20,18 +20,4 @@ const blog = defineCollection({
   }),
 });
 
-const docs = defineCollection({
-  // IDs are <locale>/<docId>; translations share the same locale-independent docId.
-  loader: glob({
-    pattern: '**/*.mdx',
-    base: './src/docs/content',
-    // Preserve index in IDs: Astro's default slugger turns en/index.mdx into en.
-    generateId: ({ entry }) => entry.replace(/\.mdx$/, ''),
-  }),
-  schema: z.object({
-    title: z.string(),
-    description: z.string(),
-  }),
-});
-
-export const collections = { blog, docs };
+export const collections = { blog };

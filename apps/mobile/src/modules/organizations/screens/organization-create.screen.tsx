@@ -14,7 +14,6 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useAppTranslations } from '@/modules/i18n/hooks/use-app-translations';
 import { useApiClient } from '@/modules/api/providers/api.provider';
 import { useAlert } from '@/modules/ui/providers/alert-provider';
 import { useThemeColor } from '@/modules/ui/providers/use-theme-color';
@@ -22,7 +21,6 @@ import { useOrganizations } from '../organizations.provider';
 import { createOrganization } from '../organizations.services';
 
 export function OrganizationCreateScreen() {
-  const t = useAppTranslations();
   const router = useRouter();
   const themeColors = useThemeColor();
   const apiClient = useApiClient();
@@ -41,8 +39,8 @@ export function OrganizationCreateScreen() {
     },
     onError: (error) => {
       showAlert({
-        title: t.common.error,
-        message: error instanceof Error ? error.message : t.organizations.createFailed,
+        title: 'Error',
+        message: error instanceof Error ? error.message : 'Failed to create organization',
       });
     },
   });
@@ -50,8 +48,8 @@ export function OrganizationCreateScreen() {
   const handleCreate = () => {
     if (organizationName.trim().length === 0) {
       showAlert({
-        title: t.common.invalidName,
-        message: t.organizations.nameRequired,
+        title: 'Invalid Name',
+        message: 'Please enter a valid organization name',
       });
       return;
     }
@@ -68,16 +66,19 @@ export function OrganizationCreateScreen() {
     >
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <View style={styles.header}>
-          <Text style={styles.title}>{t.organizations.createTitle}</Text>
-          <Text style={styles.subtitle}>{t.organizations.createDescription}</Text>
+          <Text style={styles.title}>Create organization</Text>
+          <Text style={styles.subtitle}>
+            Your documents will be grouped by organization. You can create multiple organizations to
+            separate your documents, for example, for personal and work documents.
+          </Text>
         </View>
 
         <View style={styles.formContainer}>
           <View style={styles.fieldContainer}>
-            <Text style={styles.label}>{t.organizations.nameLabel}</Text>
+            <Text style={styles.label}>Organization Name</Text>
             <TextInput
               style={styles.input}
-              placeholder={t.organizations.namePlaceholder}
+              placeholder="My Organization"
               placeholderTextColor={themeColors.mutedForeground}
               value={organizationName}
               onChangeText={setOrganizationName}
@@ -97,7 +98,7 @@ export function OrganizationCreateScreen() {
             {createMutation.isPending ? (
               <ActivityIndicator color={themeColors.primaryForeground} />
             ) : (
-              <Text style={styles.buttonText}>{t.organizations.create}</Text>
+              <Text style={styles.buttonText}>Create Organization</Text>
             )}
           </TouchableOpacity>
         </View>

@@ -44,7 +44,6 @@ import { planEntitlementsConfig } from '../plan-entitlements/plan-entitlements.c
 import { aiConfig } from '../ai/ai.config';
 import { autoTaggingConfig } from '../auto-tagging/auto-tagging.config';
 import { documentContentExtractionConfig } from '../documents/content-extraction/content-extraction.config';
-import { ensureIntakeEmailWebhookSecretisSetWhenIntakeEmailsAreEnabled } from '../intake-emails/intake-emails.config.models';
 
 const documentsStorageConfig = {
   ...createStorageConfig({
@@ -118,7 +117,7 @@ export const configDefinition = {
     trustedAppSchemes: {
       doc: 'A comma separated list of app schemes that are trusted for authentication. For example: "papra://,exp://". Note, setting this value will override the default schemes, so make sure to include them if needed.',
       schema: appSchemeSchema,
-      default: ['papra://', 'exp://', 'papra-dev://'],
+      default: ['papra://', 'exp://'],
       env: 'TRUSTED_APP_SCHEMES',
     },
     port: {
@@ -228,10 +227,7 @@ export async function parseConfig({
   validateParsedConfig({
     config,
     logger,
-    validators: [
-      ensureAuthSecretIsNotDefaultInProduction,
-      ensureIntakeEmailWebhookSecretisSetWhenIntakeEmailsAreEnabled,
-    ],
+    validators: [ensureAuthSecretIsNotDefaultInProduction],
   });
 
   return { config };

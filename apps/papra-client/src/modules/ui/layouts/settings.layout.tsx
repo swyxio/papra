@@ -16,16 +16,6 @@ export const SettingsLayout: ParentComponent = (props) => {
           icon: 'i-tabler-user',
           href: '/settings',
         },
-        {
-          label: t('layout.menu.api-keys'),
-          icon: 'i-tabler-key',
-          href: '/api-keys',
-        },
-        {
-          label: t('layout.menu.invitations'),
-          icon: 'i-tabler-mail',
-          href: '/invitations',
-        },
       ],
     },
   ];

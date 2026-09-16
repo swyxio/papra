@@ -1,0 +1,117 @@
+import { Hono } from 'hono';
+import { HTTPException } from 'hono/http-exception';
+import { bodyLimit } from 'hono/body-limit';
+import type { AppEnv, Env } from './types';
+import { getIdentity, registerAuthRoutes } from './auth';
+import { serviceIdentity, registerAutomationRoutes } from './automation';
+import { registerSpaceRoutes } from './spaces';
+import { registerDocumentRoutes, purgeExpiredTrash } from './documents';
+import { registerUploadRoutes } from './uploads';
+import { registerCollaborationRoutes } from './collaboration';
+import { registerShareRoutes } from './shares';
+import { registerSearchRoutes } from './search';
+import { consumeJobs, housekeeping } from './jobs';
+
+export { ImageProcessorContainer, ContainerProxy } from '../native/container';
+export { MetadataBackupWorkflow } from './backup-workflow';
+const app = new Hono<AppEnv>();
+app.use('/api/*', bodyLimit({ maxSize: 1024 ** 2 }));
+app.use('/api/*', async (c, next) => {
+  c.header('Cache-Control', 'no-store');
+  c.header('X-Content-Type-Options', 'nosniff');
+  const origin = c.req.header('Origin');
+  if (
+    !['GET', 'HEAD', 'OPTIONS'].includes(c.req.method) &&
+    origin &&
+    origin !== new URL(c.env.APP_URL).origin
+  )
+    throw new HTTPException(403, { message: 'Request origin is not allowed' });
+  if (
+    c.req.path.startsWith('/api/auth/') &&
+    !(await c.env.AUTH_LIMITER.limit({ key: c.req.header('CF-Connecting-IP') || 'unknown' }))
+      .success
+  )
+    throw new HTTPException(429, { message: 'Please wait a minute before trying sign-in again' });
+  await next();
+});
+app.get('/api/health', (c) =>
+  c.json({
+    status: 'ok',
+    version: c.env.VERSION,
+    sourceSha: c.env.SOURCE_SHA,
+    platform: 'cloudflare',
+  }),
+);
+app.get('/api/config', (c) =>
+  c.json({
+    config: {
+      version: c.env.VERSION,
+      gitCommitSha: c.env.SOURCE_SHA,
+      gitCommitDate: '2026-09-16',
+      auth: {
+        isRegistrationEnabled: true,
+        isPasswordResetEnabled: false,
+        isEmailVerificationRequired: true,
+        showLegalLinksOnAuthPage: false,
+        providers: {
+          email: { isEnabled: false },
+          github: { isEnabled: false },
+          google: { isEnabled: true },
+          customs: [],
+        },
+      },
+      documents: { deletedDocumentsRetentionDays: 90 },
+      organizations: { deletedOrganizationsPurgeDaysDelay: 90 },
+      intakeEmails: { isEnabled: false },
+      autoTagging: { isEnabled: false },
+    },
+  }),
+);
+registerAuthRoutes(app);
+app.use('/api/*', async (c, next) => {
+  if (c.req.path.startsWith('/api/share-links/')) return next();
+  const identity =
+    (await getIdentity(c.req.raw, c.env)) || (await serviceIdentity(c.req.raw, c.env));
+  if (!identity) throw new HTTPException(401, { message: 'Google sign-in required' });
+  if (identity.serviceScope) {
+    const org = c.req.path.match(/^\/api\/organizations\/([^/]+)\//)?.[1];
+    if (
+      org !== identity.serviceScope.organizationId ||
+      !/\/(documents|uploads|folders)(\/|$)/.test(c.req.path)
+    )
+      throw new HTTPException(403, {
+        message: 'Credential is scoped to file operations in one folder',
+      });
+    if (
+      !['GET', 'HEAD'].includes(c.req.method) &&
+      (!identity.serviceScope.permissions.includes('write') ||
+        /\/(acl|share-links|comments|mentions|shortcuts)(\/|$)/.test(c.req.path))
+    )
+      throw new HTTPException(403, { message: 'Credential operation is not allowed' });
+  }
+  c.set('identity', identity);
+  await next();
+});
+registerSpaceRoutes(app);
+registerDocumentRoutes(app);
+registerUploadRoutes(app);
+registerCollaborationRoutes(app);
+registerShareRoutes(app);
+registerAutomationRoutes(app);
+registerSearchRoutes(app);
+app.all('/api/*', (c) => c.json({ message: 'API route not found' }, 404));
+app.all('*', async (c) => c.env.ASSETS.fetch(c.req.raw));
+app.onError((err, c) => {
+  if (err instanceof HTTPException) return c.json({ message: err.message }, err.status);
+  // eslint-disable-next-line no-console -- Record a sanitized error name in Cloudflare logs.
+  console.error('Worker request failed', { name: err.name });
+  return c.json({ message: 'Request failed; please try again' }, 500);
+});
+export default {
+  fetch: app.fetch,
+  queue: consumeJobs,
+  scheduled: async (_event: ScheduledController, env: Env, ctx: ExecutionContext) => {
+    ctx.waitUntil(Promise.all([housekeeping(env), purgeExpiredTrash(env)]));
+  },
+};
+export { app };

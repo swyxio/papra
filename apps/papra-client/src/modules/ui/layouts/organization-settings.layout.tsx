@@ -18,26 +18,6 @@ export const OrganizationSettingsLayout: ParentComponent = (props) => {
           href: `/organizations/${params.organizationId}/settings`,
           icon: 'i-tabler-settings',
         },
-        {
-          label: t('layout.menu.auto-tagging'),
-          href: `/organizations/${params.organizationId}/settings/auto-tagging`,
-          icon: 'i-tabler-tag',
-        },
-        {
-          label: t('layout.menu.usage'),
-          href: `/organizations/${params.organizationId}/settings/usage`,
-          icon: 'i-tabler-chart-bar',
-        },
-        {
-          label: t('layout.menu.intake-emails'),
-          href: `/organizations/${params.organizationId}/settings/intake-emails`,
-          icon: 'i-tabler-mail',
-        },
-        {
-          label: t('layout.menu.webhooks'),
-          href: `/organizations/${params.organizationId}/settings/webhooks`,
-          icon: 'i-tabler-webhook',
-        },
       ],
     },
   ];

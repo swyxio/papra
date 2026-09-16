@@ -14,5 +14,4 @@ export const locales = [
   { key: 'sv', name: 'Svenska' },
   { key: 'zh', name: '简体中文' },
   { key: 'ca', name: 'Català' },
-  { key: 'sk', name: 'Slovenčina' },
 ] as const;

@@ -244,20 +244,10 @@ function setupIngestIntakeEmailRoute({
         });
       }
 
-      const secret = config.intakeEmails.webhookSecret;
-
-      if (isNil(secret)) {
-        logger.error(
-          'Webhook secret is not configured, cannot verify signature. Set the INTAKE_EMAILS_WEBHOOK_SECRET environment variable to a random string between 16 and 128 characters.',
-        );
-
-        throw createUnauthorizedError();
-      }
-
       const isSignatureValid = await verifySignature({
         signature,
         bodyBuffer,
-        secret,
+        secret: config.intakeEmails.webhookSecret,
       });
 
       if (!isSignatureValid) {

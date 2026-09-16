@@ -1,0 +1,70 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "papra-drive",
+  "main": "src/index.ts",
+  "account_id": "2d017c943ff16e4c52783635ef05e535",
+  "compatibility_date": "2026-07-21",
+  "compatibility_flags": ["nodejs_compat"],
+  "limits": { "cpu_ms": 300000 },
+  "workers_dev": true,
+  "assets": {
+    "directory": "../papra-client/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"],
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "papra-drive",
+      "database_id": "300e75cb-d501-4cfe-b170-67642e0ee1c1",
+    },
+  ],
+  "r2_buckets": [
+    { "binding": "FILES", "bucket_name": "papra-drive" },
+    { "binding": "BACKUPS", "bucket_name": "papra-drive-backups" },
+  ],
+  "queues": {
+    "producers": [{ "binding": "JOBS", "queue": "papra-drive-jobs" }],
+    "consumers": [{ "queue": "papra-drive-jobs", "max_batch_size": 1, "max_retries": 3 }],
+  },
+  "ai": { "binding": "AI" },
+  "workflows": [
+    {
+      "binding": "BACKUP_WORKFLOW",
+      "name": "papra-drive-metadata-backup",
+      "class_name": "MetadataBackupWorkflow",
+    },
+  ],
+  "vectorize": [{ "binding": "INDEX", "index_name": "papra-drive-search" }],
+  "containers": [
+    {
+      "class_name": "ImageProcessorContainer",
+      "image": "./native/Dockerfile",
+      "image_build_context": "./native",
+      "max_instances": 2,
+      "instance_type": "standard-1",
+    },
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "PROCESSOR", "class_name": "ImageProcessorContainer" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ImageProcessorContainer"] }],
+  "triggers": { "crons": ["0 * * * *"] },
+  "observability": { "enabled": true },
+  "ratelimits": [
+    {
+      "name": "SHARE_PASSWORD_LIMITER",
+      "namespace_id": "11001",
+      "simple": { "limit": 5, "period": 60 },
+    },
+    { "name": "AUTH_LIMITER", "namespace_id": "11002", "simple": { "limit": 10, "period": 60 } },
+  ],
+  "vars": {
+    "APP_URL": "https://drive.swyx.io",
+    "R2_ENDPOINT": "https://2d017c943ff16e4c52783635ef05e535.r2.cloudflarestorage.com",
+    "R2_BUCKET": "papra-drive",
+    "VERSION": "26.6.2-swyx.1",
+    "SOURCE_SHA": "pending",
+  },
+}

@@ -17,19 +17,8 @@ function asNumber<T extends number | undefined>(
     : number;
 }
 
-const demoOverride =
-  import.meta.env.DEV &&
-  (() => {
-    try {
-      return localStorage.getItem('papra:dev:demo-mode') === 'true';
-    } catch {
-      // Storage may be unavailable in privacy-restricted browsers.
-      return false;
-    }
-  })();
-
-// Keep direct env access so both the override and demo code tree-shake in production.
-export const isDemoMode = demoOverride || import.meta.env.VITE_IS_DEMO_MODE === 'true';
+// use the env variable directly to allow proper tree-shaking when building for non-demo mode
+export const isDemoMode = import.meta.env.VITE_IS_DEMO_MODE === 'true';
 
 export const buildTimeConfig = {
   baseUrl: asString(import.meta.env.VITE_BASE_URL, window.location.origin),
@@ -65,8 +54,6 @@ export const buildTimeConfig = {
     },
   },
   documents: {
-    // Only offer reprocessing when the server advertises support (also keeps demo mode disabled).
-    isReprocessingEnabled: false as boolean,
     deletedDocumentsRetentionDays: asNumber(
       import.meta.env.VITE_DOCUMENTS_DELETED_DOCUMENTS_RETENTION_DAYS,
       30,
@@ -85,10 +72,6 @@ export const buildTimeConfig = {
   },
   intakeEmails: {
     isEnabled: asBoolean(import.meta.env.VITE_INTAKE_EMAILS_IS_ENABLED, false),
-    address: {
-      canCustomizeUsername: false as boolean,
-      domains: [] as string[],
-    },
   },
   isSubscriptionsEnabled: asBoolean(import.meta.env.VITE_IS_SUBSCRIPTIONS_ENABLED, false),
   autoTagging: {

@@ -1,3 +1,7 @@
+# swyx Drive
+
+This maintained Papra fork powers the authorized team-drive deployment at https://drive.swyx.io for swyx, AI Engineer, Latent Space and Smol. Based on stable `@papra/app@26.6.2`. Modified source is public under AGPL-3.0-or-later; upstream notices are retained. See [operations](infra/cloudflare/README.md) and [executed verification](infra/cloudflare/VERIFICATION.md) for architecture, release, backup/recovery and material limitations.
+
 <p align="center">
 <picture>
     <source srcset="./.github/icon-dark.png" media="(prefers-color-scheme: light)">

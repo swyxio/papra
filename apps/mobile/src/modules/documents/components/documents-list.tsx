@@ -5,17 +5,8 @@ import type { ThemeColors } from '@/modules/ui/theme.constants';
 import { formatBytes } from '@corentinth/chisels';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import {
-  ActivityIndicator,
-  FlatList,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { DocumentActionSheet } from '@/modules/documents/components/document-action-sheet';
-import { useAppTranslations } from '@/modules/i18n/hooks/use-app-translations';
-import { useFormatters } from '@/modules/i18n/hooks/use-formatters';
 import { Tag } from '@/modules/tags/components/tag';
 import { Icon } from '@/modules/ui/components/icon';
 import { useThemeColor } from '@/modules/ui/providers/use-theme-color';
@@ -24,9 +15,6 @@ const maxVisibleTags = 3;
 
 type DocumentsListProps = {
   documents: CoerceDates<Document>[];
-  onLoadMore?: () => void;
-  isFetchingNextPage?: boolean;
-  isFetchNextPageError?: boolean;
   emptyState: {
     title: string;
     subtitle?: string;
@@ -37,21 +25,24 @@ type DocumentsListProps = {
 
 export function DocumentsList({
   documents,
-  onLoadMore,
-  isFetchingNextPage = false,
-  isFetchNextPageError = false,
   emptyState,
   refreshControl,
   keyboardShouldPersistTaps,
 }: DocumentsListProps) {
-  const t = useAppTranslations();
-  const { formatDate } = useFormatters();
   const themeColors = useThemeColor();
   const [onDocumentActionSheet, setOnDocumentActionSheet] = useState<
     CoerceDates<Document> | undefined
   >(undefined);
 
   const styles = createStyles({ themeColors });
+
+  const formatDate = (date: Date) => {
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    }).format(date);
+  };
 
   return (
     <>
@@ -131,29 +122,6 @@ export function DocumentsList({
             </View>
           </TouchableOpacity>
         )}
-        onEndReached={isFetchNextPageError ? undefined : onLoadMore}
-        onEndReachedThreshold={0.5}
-        ListFooterComponent={
-          isFetchingNextPage ? (
-            <View style={styles.footer}>
-              <ActivityIndicator
-                color={themeColors.primary}
-                accessibilityLabel={t.documents.loadingMore}
-              />
-            </View>
-          ) : isFetchNextPageError ? (
-            <View style={styles.footer}>
-              <Text style={styles.emptySubtext}>{t.documents.loadMoreFailed}</Text>
-              <TouchableOpacity
-                onPress={onLoadMore}
-                accessibilityRole="button"
-                style={styles.retryButton}
-              >
-                <Text style={styles.retryText}>{t.common.retry}</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null
-        }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>{emptyState.title}</Text>
@@ -172,20 +140,6 @@ export function DocumentsList({
 
 function createStyles({ themeColors }: { themeColors: ThemeColors }) {
   return StyleSheet.create({
-    footer: {
-      padding: 16,
-      alignItems: 'center',
-      gap: 8,
-    },
-    retryButton: {
-      paddingHorizontal: 16,
-      paddingVertical: 12,
-    },
-    retryText: {
-      color: themeColors.primary,
-      fontSize: 16,
-      fontWeight: '600',
-    },
     emptyList: {
       flex: 1,
     },

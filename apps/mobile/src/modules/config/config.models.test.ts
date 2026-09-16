@@ -55,11 +55,8 @@ describe('config models', () => {
           ],
         }),
       ).to.eql({
-        success: true,
-        headers: {
-          'X-Api-Key': 'secret',
-          'Authorization': 'Basic dXNlcjpwYXNz',
-        },
+        'X-Api-Key': 'secret',
+        'Authorization': 'Basic dXNlcjpwYXNz',
       });
     });
 
@@ -72,57 +69,63 @@ describe('config models', () => {
             { name: 'X-Foo', value: 'bar' },
           ],
         }),
-      ).to.eql({ success: true, headers: { 'X-Foo': 'bar' } });
+      ).to.eql({ 'X-Foo': 'bar' });
 
-      expect(validateCustomHeaders({ headers: [] })).to.eql({ success: true, headers: {} });
+      expect(validateCustomHeaders({ headers: [] })).to.eql({});
     });
 
-    test.each(['', '  '])('a header with a value but an empty name %j is rejected', (name) => {
-      expect(validateCustomHeaders({ headers: [{ name, value: 'foo' }] })).to.eql({
-        success: false,
-        issue: { code: 'empty-name', headerName: '' },
-      });
+    test('a header with a value but no name is rejected', () => {
+      expect(() => validateCustomHeaders({ headers: [{ name: '', value: 'foo' }] })).toThrow(
+        'Header names cannot be empty.',
+      );
     });
 
-    test.each(['X Foo', 'X-Foo:', 'X-Fôo', '  X Foo  '])(
-      'the invalid header name %j is rejected',
-      (name) => {
-        expect(validateCustomHeaders({ headers: [{ name, value: 'bar' }] })).to.eql({
-          success: false,
-          issue: { code: 'invalid-name', headerName: name.trim() },
-        });
-      },
-    );
+    test('header names with invalid characters are rejected', () => {
+      expect(() => validateCustomHeaders({ headers: [{ name: 'X Foo', value: 'bar' }] })).toThrow(
+        'The header name "X Foo" is invalid.',
+      );
+      expect(() =>
+        validateCustomHeaders({ headers: [{ name: 'X-Foo:', value: 'bar' }] }),
+      ).toThrow();
+      expect(() => validateCustomHeaders({ headers: [{ name: 'X-Fôo', value: 'bar' }] })).toThrow();
+    });
 
-    test.each(['Cookie', 'cookie', 'HOST', 'Content-Type', 'Origin', 'Referer'])(
-      'the managed header %j is denied, regardless of casing',
-      (name) => {
-        expect(validateCustomHeaders({ headers: [{ name, value: 'foo' }] })).to.eql({
-          success: false,
-          issue: { code: 'forbidden-name', headerName: name },
-        });
-      },
-    );
+    test('headers managed by the app are denied, regardless of casing', () => {
+      expect(() => validateCustomHeaders({ headers: [{ name: 'Cookie', value: 'a=b' }] })).toThrow(
+        'The header "Cookie" is managed by the app and cannot be overridden.',
+      );
+      expect(() =>
+        validateCustomHeaders({ headers: [{ name: 'cookie', value: 'a=b' }] }),
+      ).toThrow();
+      expect(() =>
+        validateCustomHeaders({ headers: [{ name: 'HOST', value: 'evil.com' }] }),
+      ).toThrow();
+      expect(() =>
+        validateCustomHeaders({ headers: [{ name: 'Content-Type', value: 'text/plain' }] }),
+      ).toThrow();
+      expect(() => validateCustomHeaders({ headers: [{ name: 'Origin', value: 'x' }] })).toThrow();
+      expect(() => validateCustomHeaders({ headers: [{ name: 'Referer', value: 'x' }] })).toThrow();
+    });
 
-    test.each(['Proxy-Authorization', 'Sec-Fetch-Mode', 'Access-Control-Request-Method'])(
-      'the header %j with a denied prefix is rejected',
-      (name) => {
-        expect(validateCustomHeaders({ headers: [{ name, value: 'foo' }] })).to.eql({
-          success: false,
-          issue: { code: 'forbidden-name', headerName: name },
-        });
-      },
-    );
+    test('headers with denied prefixes are rejected', () => {
+      expect(() =>
+        validateCustomHeaders({ headers: [{ name: 'Proxy-Authorization', value: 'x' }] }),
+      ).toThrow();
+      expect(() =>
+        validateCustomHeaders({ headers: [{ name: 'Sec-Fetch-Mode', value: 'cors' }] }),
+      ).toThrow();
+      expect(() =>
+        validateCustomHeaders({
+          headers: [{ name: 'Access-Control-Request-Method', value: 'GET' }],
+        }),
+      ).toThrow();
+    });
 
-    test.each(['bar\r\nbaz', 'bar\rbaz', 'bar\nbaz'])(
-      'the header value %j containing newlines is rejected',
-      (value) => {
-        expect(validateCustomHeaders({ headers: [{ name: '  X-Foo  ', value }] })).to.eql({
-          success: false,
-          issue: { code: 'invalid-value', headerName: 'X-Foo' },
-        });
-      },
-    );
+    test('values containing newlines are rejected', () => {
+      expect(() =>
+        validateCustomHeaders({ headers: [{ name: 'X-Foo', value: 'bar\r\nbaz' }] }),
+      ).toThrow('The value of the header "X-Foo" is invalid.');
+    });
 
     test('common reverse-proxy auth headers are allowed', () => {
       expect(
@@ -135,13 +138,10 @@ describe('config models', () => {
           ],
         }),
       ).to.eql({
-        success: true,
-        headers: {
-          'Authorization': 'Bearer token',
-          'CF-Access-Client-Id': 'id',
-          'CF-Access-Client-Secret': 'secret',
-          'X-Forwarded-User': 'corentin',
-        },
+        'Authorization': 'Bearer token',
+        'CF-Access-Client-Id': 'id',
+        'CF-Access-Client-Secret': 'secret',
+        'X-Forwarded-User': 'corentin',
       });
     });
   });

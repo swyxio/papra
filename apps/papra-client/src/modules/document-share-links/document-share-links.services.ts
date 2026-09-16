@@ -174,3 +174,7 @@ export async function fetchSharedDocumentFile({
 
   return { blob };
 }
+
+export async function fetchSharedDocumentDirect({token,accessToken,mode}: {token:string;accessToken?:string;mode:'download'|'preview'}) {
+ return httpClient<{url:string|null;status?:string}>({method:'GET',baseUrl:buildTimeConfig.baseApiUrl,url:`/api/share-links/${token}/document/file`,query:{direct:mode},headers:getAuthorizationHeaders({accessToken})});
+}

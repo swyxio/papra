@@ -1,25 +1,22 @@
+import { multipartUpload, type TransferProgress } from './drive-multipart.services';
 import type { AsDto } from '../shared/http/http-client.types';
 import type { DocumentSearchSortField, DocumentSearchSortOrder } from './documents.constants';
 import type { Document, DocumentActivity } from './documents.types';
 import { apiClient } from '../shared/http/api-client';
-import { coerceDates, getFormData } from '../shared/http/http-client.models';
+import { coerceDates } from '../shared/http/http-client.models';
 
 export async function uploadDocument({
   file,
   organizationId,
+  onProgress,
+  folderId,
 }: {
   file: File;
   organizationId: string;
+  folderId?: string;
+  onProgress?: (progress: TransferProgress) => void;
 }) {
-  const { document } = await apiClient<{ document: AsDto<Document> }>({
-    method: 'POST',
-    path: `/api/organizations/${organizationId}/documents`,
-    body: getFormData({ file }),
-  });
-
-  return {
-    document: coerceDates(document),
-  };
+  return multipartUpload(file, organizationId, onProgress, { folderId });
 }
 
 export async function fetchOrganizationDocuments({
@@ -108,20 +105,6 @@ export async function restoreDocument({
   await apiClient({
     method: 'POST',
     path: `/api/organizations/${organizationId}/documents/${documentId}/restore`,
-  });
-}
-
-export async function reprocessDocument({
-  documentId,
-  organizationId,
-}: {
-  documentId: string;
-  organizationId: string;
-}) {
-  await apiClient<void>({
-    method: 'POST',
-    path: `/api/organizations/${organizationId}/documents/${documentId}/reprocess`,
-    retry: 0,
   });
 }
 

@@ -16,7 +16,6 @@ import {
 } from '@/modules/ui/components/card';
 import { createToast } from '@/modules/ui/components/sonner';
 import { TextField, TextFieldLabel, TextFieldRoot } from '@/modules/ui/components/textfield';
-import { TwoFactorCard } from '../components/two-factor-card';
 import { useUpdateCurrentUser } from '../users.composables';
 import { nameSchema } from '../users.schemas';
 import { fetchCurrentUser } from '../users.services';
@@ -53,7 +52,9 @@ const UserEmailCard: Component<{ email: string }> = (props) => {
     <Card>
       <CardHeader class="border-b">
         <CardTitle>{t('user.settings.email.title')}</CardTitle>
-        <CardDescription>{t('user.settings.email.description')}</CardDescription>
+        <CardDescription>
+          Your verified email comes from Google. Team access follows your email domain.
+        </CardDescription>
       </CardHeader>
       <CardContent class="pt-6">
         <TextFieldRoot>
@@ -153,10 +154,6 @@ export const UserSettingsPage: Component = () => {
               <div class="mt-6 flex flex-col gap-6">
                 <UserEmailCard email={getUser().email} />
                 <UpdateFullNameCard name={getUser().name} />
-                <TwoFactorCard
-                  twoFactorEnabled={getUser().twoFactorEnabled}
-                  onUpdate={async () => query.refetch()}
-                />
                 <LogoutCard />
               </div>
             </>

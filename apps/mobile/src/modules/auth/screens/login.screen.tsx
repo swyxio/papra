@@ -15,22 +15,20 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as v from 'valibot';
-import { useAppTranslations } from '@/modules/i18n/hooks/use-app-translations';
 import { useAuthClient } from '@/modules/api/providers/api.provider';
 import { useAlert } from '@/modules/ui/providers/alert-provider';
 import { useThemeColor } from '@/modules/ui/providers/use-theme-color';
 import { useServerConfig } from '../../config/hooks/use-server-config';
 import { getEnabledOAuthProviders } from '../auth.models';
-import { AuthNavigation } from '../components/auth-navigation';
+import { BackToServerSelectionButton } from '../components/back-to-server-selection';
 import { TwoFactorVerificationForm } from '../components/two-factor-verification';
 
-export function LoginScreen() {
-  const t = useAppTranslations();
-  const loginSchema = v.object({
-    email: v.pipe(v.string(), v.email(t.auth.validation.email)),
-    password: v.pipe(v.string(), v.minLength(8, t.auth.validation.password)),
-  });
+const loginSchema = v.object({
+  email: v.pipe(v.string(), v.email('Please enter a valid email')),
+  password: v.pipe(v.string(), v.minLength(8, 'Password must be at least 8 characters')),
+});
 
+export function LoginScreen() {
   const router = useRouter();
   const themeColors = useThemeColor();
   const authClient = useAuthClient();
@@ -75,8 +73,8 @@ export function LoginScreen() {
         router.replace('/(app)/(with-organizations)/(tabs)/list');
       } catch (error) {
         showAlert({
-          title: t.auth.login.failed,
-          message: error instanceof Error ? error.message : t.common.anErrorOccurred,
+          title: 'Login Failed',
+          message: error instanceof Error ? error.message : 'An error occurred',
         });
       } finally {
         setIsSubmitting(false);
@@ -92,8 +90,8 @@ export function LoginScreen() {
       }
     } catch (error) {
       showAlert({
-        title: t.auth.login.socialFailed,
-        message: error instanceof Error ? error.message : t.common.anErrorOccurred,
+        title: 'Sign In Failed',
+        message: error instanceof Error ? error.message : 'An error occurred',
       });
     }
   };
@@ -107,13 +105,8 @@ export function LoginScreen() {
 
   if (isConfigLoading) {
     return (
-      <View style={[styles.container, { paddingTop: insets.top }]}>
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          <AuthNavigation />
-          <View style={styles.centerContent}>
-            <ActivityIndicator size="large" color={themeColors.primary} />
-          </View>
-        </ScrollView>
+      <View style={[styles.container, styles.centerContent]}>
+        <ActivityIndicator size="large" color={themeColors.primary} />
       </View>
     );
   }
@@ -129,8 +122,8 @@ export function LoginScreen() {
           keyboardShouldPersistTaps="handled"
         >
           <View style={styles.header}>
-            <Text style={styles.title}>{t.auth.twoFactor.title}</Text>
-            <Text style={styles.subtitle}>{t.auth.twoFactor.subtitle}</Text>
+            <Text style={styles.title}>Two-Factor Authentication</Text>
+            <Text style={styles.subtitle}>Verify your identity to continue</Text>
           </View>
 
           <TwoFactorVerificationForm
@@ -148,11 +141,11 @@ export function LoginScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-        <AuthNavigation disabled={isSubmitting} />
+        <BackToServerSelectionButton />
 
         <View style={styles.header}>
-          <Text style={styles.title}>{t.auth.login.title}</Text>
-          <Text style={styles.subtitle}>{t.auth.login.subtitle}</Text>
+          <Text style={styles.title}>Welcome Back</Text>
+          <Text style={styles.subtitle}>Sign in to your account</Text>
         </View>
 
         {isEmailEnabled && (
@@ -160,10 +153,10 @@ export function LoginScreen() {
             <form.Field name="email">
               {(field) => (
                 <View style={styles.fieldContainer}>
-                  <Text style={styles.label}>{t.common.email}</Text>
+                  <Text style={styles.label}>Email</Text>
                   <TextInput
                     style={styles.input}
-                    placeholder={t.auth.emailPlaceholder}
+                    placeholder="you@example.com"
                     placeholderTextColor={themeColors.mutedForeground}
                     value={field.state.value}
                     onChangeText={field.handleChange}
@@ -180,10 +173,10 @@ export function LoginScreen() {
             <form.Field name="password">
               {(field) => (
                 <View style={styles.fieldContainer}>
-                  <Text style={styles.label}>{t.auth.password}</Text>
+                  <Text style={styles.label}>Password</Text>
                   <TextInput
                     style={styles.input}
-                    placeholder={t.auth.login.passwordPlaceholder}
+                    placeholder="Enter your password"
                     placeholderTextColor={themeColors.mutedForeground}
                     value={field.state.value}
                     onChangeText={field.handleChange}
@@ -203,7 +196,7 @@ export function LoginScreen() {
               {isSubmitting ? (
                 <ActivityIndicator color={themeColors.primaryForeground} />
               ) : (
-                <Text style={styles.buttonText}>{t.auth.login.submit}</Text>
+                <Text style={styles.buttonText}>Sign In</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -214,7 +207,7 @@ export function LoginScreen() {
             {isEmailEnabled && (
               <View style={styles.divider}>
                 <View style={styles.dividerLine} />
-                <Text style={styles.dividerText}>{t.auth.login.or}</Text>
+                <Text style={styles.dividerText}>OR</Text>
                 <View style={styles.dividerLine} />
               </View>
             )}
@@ -227,7 +220,7 @@ export function LoginScreen() {
                   onPress={async () => handleSocialSignIn(provider.providerId)}
                 >
                   <Text style={styles.socialButtonText}>
-                    {t.auth.login.continueWith({ name: provider.providerName })}
+                    {`Continue with ${provider.providerName}`}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -237,7 +230,7 @@ export function LoginScreen() {
 
         {authConfig?.isRegistrationEnabled === true && (
           <TouchableOpacity style={styles.linkButton} onPress={() => router.push('/auth/signup')}>
-            <Text style={styles.linkText}>{t.auth.login.signupLink}</Text>
+            <Text style={styles.linkText}>Don&apos;t have an account? Sign up</Text>
           </TouchableOpacity>
         )}
       </ScrollView>
@@ -252,7 +245,6 @@ function createStyles({ themeColors }: { themeColors: ThemeColors }) {
       backgroundColor: themeColors.background,
     },
     centerContent: {
-      flex: 1,
       justifyContent: 'center',
       alignItems: 'center',
     },

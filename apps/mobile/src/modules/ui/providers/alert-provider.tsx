@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react';
 import { createContext, useContext, useState } from 'react';
-import { useAppTranslations } from '@/modules/i18n/hooks/use-app-translations';
 import { AlertDialog } from '@/modules/ui/components/alert-dialog';
 
 type AlertButton = {
@@ -22,7 +21,6 @@ type AlertContextType = {
 const AlertContext = createContext<AlertContextType | null>(null);
 
 export function AlertProvider({ children }: { children: ReactNode }) {
-  const t = useAppTranslations();
   const [alertState, setAlertState] = useState<AlertOptions & { visible: boolean }>({
     visible: false,
     title: '',
@@ -35,7 +33,7 @@ export function AlertProvider({ children }: { children: ReactNode }) {
       visible: true,
       title: options.title,
       message: options.message,
-      buttons: options.buttons ?? [{ text: t.common.ok, style: 'default' }],
+      buttons: options.buttons ?? [{ text: 'OK', style: 'default' }],
     });
   };
 

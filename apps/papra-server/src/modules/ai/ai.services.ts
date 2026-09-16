@@ -98,18 +98,16 @@ async function generateStructuredData<Schema extends GenericSchema | undefined>(
     config,
   });
 
-  if (config.ai.credits.isEnabled) {
-    await checkOrganizationHasSufficientAiCredits({
-      organizationId,
-      aiCreditsRepository,
-      getOrganizationPlan: createGetOrganizationPlanUsecase({
-        plansRepository,
-        planEntitlementDefinitionRegistry,
-        planEntitlementsRepository,
-        subscriptionsRepository,
-      }),
-    });
-  }
+  await checkOrganizationHasSufficientAiCredits({
+    organizationId,
+    aiCreditsRepository,
+    getOrganizationPlan: createGetOrganizationPlanUsecase({
+      plansRepository,
+      planEntitlementDefinitionRegistry,
+      planEntitlementsRepository,
+      subscriptionsRepository,
+    }),
+  });
 
   const data = await tanstackChat({
     adapter,
@@ -119,17 +117,13 @@ async function generateStructuredData<Schema extends GenericSchema | undefined>(
     systemPrompts: systemPrompt ? [systemPrompt] : undefined,
     middleware: [
       createLogMiddleware({ logger, context: { modelId } }),
-      ...(config.ai.credits.isEnabled
-        ? [
-            createAiCreditsMiddleware({
-              modelId,
-              organizationId,
-              source,
-              logger,
-              aiCreditsRepository,
-            }),
-          ]
-        : []),
+      createAiCreditsMiddleware({
+        modelId,
+        organizationId,
+        source,
+        logger,
+        aiCreditsRepository,
+      }),
     ],
   });
 

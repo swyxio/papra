@@ -15,21 +15,19 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as v from 'valibot';
-import { useAppTranslations } from '@/modules/i18n/hooks/use-app-translations';
 import { useAuthClient } from '@/modules/api/providers/api.provider';
 import { useAlert } from '@/modules/ui/providers/alert-provider';
 import { useThemeColor } from '@/modules/ui/providers/use-theme-color';
 import { useServerConfig } from '../../config/hooks/use-server-config';
-import { AuthNavigation } from '../components/auth-navigation';
+import { BackToServerSelectionButton } from '../components/back-to-server-selection';
+
+const signupSchema = v.object({
+  name: v.pipe(v.string(), v.minLength(1, 'Name is required')),
+  email: v.pipe(v.string(), v.email('Please enter a valid email')),
+  password: v.pipe(v.string(), v.minLength(8, 'Password must be at least 8 characters')),
+});
 
 export function SignupScreen() {
-  const t = useAppTranslations();
-  const signupSchema = v.object({
-    name: v.pipe(v.string(), v.minLength(1, t.auth.validation.name)),
-    email: v.pipe(v.string(), v.email(t.auth.validation.email)),
-    password: v.pipe(v.string(), v.minLength(8, t.auth.validation.password)),
-  });
-
   const router = useRouter();
   const themeColors = useThemeColor();
   const authClient = useAuthClient();
@@ -60,17 +58,18 @@ export function SignupScreen() {
 
         if (isEmailVerificationRequired) {
           showAlert({
-            title: t.auth.signup.checkEmail,
-            message: t.auth.signup.verificationSent,
-            buttons: [{ text: t.common.ok, onPress: () => router.replace('/auth/login') }],
+            title: 'Check your email',
+            message:
+              'We sent you a verification link. Please check your email to verify your account.',
+            buttons: [{ text: 'OK', onPress: () => router.replace('/auth/login') }],
           });
         } else {
           router.replace('/(app)/(with-organizations)/(tabs)/list');
         }
       } catch (error) {
         showAlert({
-          title: t.auth.signup.failed,
-          message: error instanceof Error ? error.message : t.common.anErrorOccurred,
+          title: 'Signup Failed',
+          message: error instanceof Error ? error.message : 'An error occurred',
         });
       } finally {
         setIsSubmitting(false);
@@ -85,29 +84,19 @@ export function SignupScreen() {
 
   if (isConfigLoading) {
     return (
-      <View style={[styles.container, { paddingTop: insets.top }]}>
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          <AuthNavigation />
-          <View style={styles.centerContent}>
-            <ActivityIndicator size="large" color={themeColors.primary} />
-          </View>
-        </ScrollView>
+      <View style={[styles.container, styles.centerContent]}>
+        <ActivityIndicator size="large" color={themeColors.primary} />
       </View>
     );
   }
 
   if (!isRegistrationEnabled) {
     return (
-      <View style={[styles.container, { paddingTop: insets.top }]}>
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          <AuthNavigation />
-          <View style={styles.centerContent}>
-            <Text style={styles.errorText}>{t.auth.signup.disabled}</Text>
-            <TouchableOpacity style={styles.linkButton} onPress={() => router.back()}>
-              <Text style={styles.linkText}>{t.auth.signup.backToLogin}</Text>
-            </TouchableOpacity>
-          </View>
-        </ScrollView>
+      <View style={[styles.container, styles.centerContent]}>
+        <Text style={styles.errorText}>Registration is currently disabled</Text>
+        <TouchableOpacity style={styles.linkButton} onPress={() => router.back()}>
+          <Text style={styles.linkText}>Go back to login</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -118,21 +107,21 @@ export function SignupScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-        <AuthNavigation disabled={isSubmitting} />
+        <BackToServerSelectionButton />
 
         <View style={styles.header}>
-          <Text style={styles.title}>{t.auth.signup.title}</Text>
-          <Text style={styles.subtitle}>{t.auth.signup.subtitle}</Text>
+          <Text style={styles.title}>Create Account</Text>
+          <Text style={styles.subtitle}>Sign up to get started</Text>
         </View>
 
         <View style={styles.formContainer}>
           <form.Field name="name">
             {(field) => (
               <View style={styles.fieldContainer}>
-                <Text style={styles.label}>{t.common.name}</Text>
+                <Text style={styles.label}>Name</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder={t.auth.signup.namePlaceholder}
+                  placeholder="Your name"
                   placeholderTextColor={themeColors.mutedForeground}
                   value={field.state.value}
                   onChangeText={field.handleChange}
@@ -147,10 +136,10 @@ export function SignupScreen() {
           <form.Field name="email">
             {(field) => (
               <View style={styles.fieldContainer}>
-                <Text style={styles.label}>{t.common.email}</Text>
+                <Text style={styles.label}>Email</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder={t.auth.emailPlaceholder}
+                  placeholder="you@example.com"
                   placeholderTextColor={themeColors.mutedForeground}
                   value={field.state.value}
                   onChangeText={field.handleChange}
@@ -167,10 +156,10 @@ export function SignupScreen() {
           <form.Field name="password">
             {(field) => (
               <View style={styles.fieldContainer}>
-                <Text style={styles.label}>{t.auth.password}</Text>
+                <Text style={styles.label}>Password</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder={t.auth.signup.passwordPlaceholder}
+                  placeholder="At least 8 characters"
                   placeholderTextColor={themeColors.mutedForeground}
                   value={field.state.value}
                   onChangeText={field.handleChange}
@@ -190,13 +179,13 @@ export function SignupScreen() {
             {isSubmitting ? (
               <ActivityIndicator color={themeColors.primaryForeground} />
             ) : (
-              <Text style={styles.buttonText}>{t.auth.signup.submit}</Text>
+              <Text style={styles.buttonText}>Sign Up</Text>
             )}
           </TouchableOpacity>
         </View>
 
         <TouchableOpacity style={styles.linkButton} onPress={() => router.back()}>
-          <Text style={styles.linkText}>{t.auth.signup.loginLink}</Text>
+          <Text style={styles.linkText}>Already have an account? Sign in</Text>
         </TouchableOpacity>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -210,7 +199,6 @@ function createStyles({ themeColors }: { themeColors: ThemeColors }) {
       backgroundColor: themeColors.background,
     },
     centerContent: {
-      flex: 1,
       justifyContent: 'center',
       alignItems: 'center',
       padding: 24,

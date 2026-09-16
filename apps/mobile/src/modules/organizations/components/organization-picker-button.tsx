@@ -1,6 +1,5 @@
 import type { ThemeColors } from '@/modules/ui/theme.constants';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { useAppTranslations } from '@/modules/i18n/hooks/use-app-translations';
 import { Icon } from '@/modules/ui/components/icon';
 import { useThemeColor } from '@/modules/ui/providers/use-theme-color';
 import { useOrganizations } from '../organizations.provider';
@@ -14,14 +13,13 @@ export function OrganizationPickerButton({
   onPress,
   variant = 'boxed',
 }: OrganizationPickerButtonProps) {
-  const t = useAppTranslations();
   const themeColors = useThemeColor();
   const { organizations, currentOrganizationId } = useOrganizations();
 
   const styles = createStyles({ themeColors });
 
   const currentOrganization = organizations.find((org) => org.id === currentOrganizationId);
-  const organizationName = currentOrganization?.name ?? t.organizations.selectTitle;
+  const organizationName = currentOrganization?.name ?? 'Select Organization';
 
   if (variant === 'plain') {
     return (

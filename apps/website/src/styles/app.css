@@ -66,9 +66,7 @@
   --ring: 0 0% 83.1%;
 }
 
-*,
-*::before,
-*::after {
+* {
   @apply border-border;
 }
 body {

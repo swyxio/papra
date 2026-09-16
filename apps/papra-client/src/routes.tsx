@@ -1,18 +1,10 @@
 import type { RouteDefinition } from '@solidjs/router';
 import { Navigate, useParams } from '@solidjs/router';
 import { useQuery } from '@tanstack/solid-query';
-import { Match, Show, Switch, lazy } from 'solid-js';
-import { adminRoutes } from './modules/admin/admin.routes';
-import { ApiKeysPage } from './modules/api-keys/pages/api-keys.page';
-import { CreateApiKeyPage } from './modules/api-keys/pages/create-api-key.page';
+import { Match, Show, Switch } from 'solid-js';
 import { authPagesPaths } from './modules/auth/auth.constants';
 import { PublicOnlyPage } from './modules/auth/middleware/protected-page.middleware';
-import { EmailValidationRequiredPage } from './modules/auth/pages/email-validation-required.page';
-import { EmailVerificationPage } from './modules/auth/pages/email-verification.page';
 import { LoginPage } from './modules/auth/pages/login.page';
-import { RegisterPage } from './modules/auth/pages/register.page';
-import { RequestPasswordResetPage } from './modules/auth/pages/request-password-reset.page';
-import { ResetPasswordPage } from './modules/auth/pages/reset-password.page';
 import { CreateCustomPropertyPage } from './modules/custom-properties/pages/create-custom-property.page';
 import { CustomPropertiesPage } from './modules/custom-properties/pages/custom-properties-list.page';
 import { UpdateCustomPropertyPage } from './modules/custom-properties/pages/update-custom-property.page';
@@ -23,37 +15,20 @@ import { DeletedDocumentsPage } from './modules/documents/pages/deleted-document
 import { DocumentPdfViewerPage } from './modules/documents/pages/document-pdf-viewer.page';
 import { DocumentPage } from './modules/documents/pages/document.page';
 import { DocumentsPage } from './modules/documents/pages/documents.page';
-import { IntakeEmailsPage } from './modules/intake-emails/pages/intake-emails.page';
-import { InvitationsPage } from './modules/invitations/pages/invitations.page';
 import { useLastOrganization } from './modules/organizations/composables/use-last-organization';
 import { fetchOrganizations } from './modules/organizations/organizations.services';
-import { CreateFirstOrganizationPage } from './modules/organizations/pages/create-first-organization.page';
-import { CreateOrganizationPage } from './modules/organizations/pages/create-organization.page';
-import { DeletedOrganizationsPage } from './modules/organizations/pages/deleted-organizations.page';
-import { InvitationsListPage } from './modules/organizations/pages/invitations-list.page';
-import { InviteMemberPage } from './modules/organizations/pages/invite-member.page';
 import { MembersPage } from './modules/organizations/pages/members.page';
-import { OrganizationUsagePage } from './modules/organizations/pages/organization-usage.page';
 import { OrganizationPage } from './modules/organizations/pages/organization.page';
 import { OrganizationsSettingsPage } from './modules/organizations/pages/organizations-settings.page';
 import { OrganizationsPage } from './modules/organizations/pages/organizations.page';
 import { AboutPage } from './modules/shared/pages/about.page';
 import { NotFoundPage } from './modules/shared/pages/not-found.page';
-import { CheckoutCancelPage } from './modules/subscriptions/pages/checkout-cancel.page';
-import { CheckoutSuccessPage } from './modules/subscriptions/pages/checkout-success.page';
-import { CreateTaggingRulePage } from './modules/tagging-rules/pages/create-tagging-rule.page';
-import { TaggingRulesPage } from './modules/tagging-rules/pages/tagging-rules.page';
-import { UpdateTaggingRulePage } from './modules/tagging-rules/pages/update-tagging-rule.page';
 import { TagsPage } from './modules/tags/pages/tags.page';
 import { OrganizationSettingsLayout } from './modules/ui/layouts/organization-settings.layout';
 import { OrganizationLayout } from './modules/ui/layouts/organization.layout';
 import { SettingsLayout } from './modules/ui/layouts/settings.layout';
 import { CurrentUserProvider } from './modules/users/composables/useCurrentUser';
 import { UserSettingsPage } from './modules/users/pages/user-settings.page';
-import { CreateWebhookPage } from './modules/webhooks/pages/create-webhook.page';
-import { EditWebhookPage } from './modules/webhooks/pages/edit-webhook.page';
-import { WebhooksPage } from './modules/webhooks/pages/webhooks.page';
-import { OrganizationsAutoTaggingSettingsPage } from './modules/organizations/pages/organizations-auto-tagging-settings.page';
 
 export const routes: RouteDefinition[] = [
   {
@@ -92,7 +67,10 @@ export const routes: RouteDefinition[] = [
                   </Match>
 
                   <Match when={getOrgs().length === 0}>
-                    <Navigate href="/organizations/first" />
+                    <p class="p-6" role="status">
+                      No spaces are assigned to this account. Sign out and sign in again with your
+                      approved Google account.
+                    </p>
                   </Match>
                 </Switch>
               )}
@@ -106,10 +84,6 @@ export const routes: RouteDefinition[] = [
           {
             path: '/',
             component: OrganizationsPage,
-          },
-          {
-            path: '/deleted',
-            component: DeletedOrganizationsPage,
           },
           {
             path: '/:organizationId',
@@ -167,32 +141,12 @@ export const routes: RouteDefinition[] = [
                     component: UpdateCustomPropertyPage,
                   },
                   {
-                    path: '/tagging-rules',
-                    component: TaggingRulesPage,
-                  },
-                  {
                     path: '/share-links',
                     component: OrganizationShareLinksPage,
                   },
                   {
-                    path: '/tagging-rules/create',
-                    component: CreateTaggingRulePage,
-                  },
-                  {
-                    path: '/tagging-rules/:taggingRuleId',
-                    component: UpdateTaggingRulePage,
-                  },
-                  {
                     path: '/members',
                     component: MembersPage,
-                  },
-                  {
-                    path: '/invite',
-                    component: InviteMemberPage,
-                  },
-                  {
-                    path: '/invitations',
-                    component: InvitationsListPage,
                   },
                 ],
               },
@@ -210,51 +164,10 @@ export const routes: RouteDefinition[] = [
                 path: '/',
                 component: OrganizationsSettingsPage,
               },
-              {
-                path: '/auto-tagging',
-                component: OrganizationsAutoTaggingSettingsPage,
-              },
-              {
-                path: '/usage',
-                component: OrganizationUsagePage,
-              },
-              {
-                path: '/webhooks/create',
-                component: CreateWebhookPage,
-              },
-              {
-                path: '/webhooks/:webhookId',
-                component: EditWebhookPage,
-              },
-              {
-                path: '/intake-emails',
-                component: IntakeEmailsPage,
-              },
-              {
-                path: '/webhooks',
-                component: WebhooksPage,
-              },
             ],
-          },
-          {
-            path: '/create',
-            component: CreateOrganizationPage,
-          },
-          {
-            path: '/first',
-            component: CreateFirstOrganizationPage,
           },
         ],
       },
-      {
-        path: '/claim/selfhst',
-        component: lazy(async () =>
-          import('./modules/plan-entitlements/pages/claim-selfhst.page').then((module) => ({
-            default: module.ClaimSelfhstPage,
-          })),
-        ),
-      },
-      adminRoutes,
     ],
   },
   {
@@ -265,18 +178,6 @@ export const routes: RouteDefinition[] = [
         path: '/settings',
         component: UserSettingsPage,
       },
-      {
-        path: '/api-keys',
-        component: ApiKeysPage,
-      },
-      {
-        path: '/api-keys/create',
-        component: CreateApiKeyPage,
-      },
-      {
-        path: '/invitations',
-        component: InvitationsPage,
-      },
     ],
   },
   {
@@ -284,40 +185,12 @@ export const routes: RouteDefinition[] = [
     component: () => <PublicOnlyPage children={<LoginPage />} />,
   },
   {
-    path: authPagesPaths.register,
-    component: () => <PublicOnlyPage children={<RegisterPage />} />,
-  },
-  {
-    path: authPagesPaths.resetPassword,
-    component: () => <PublicOnlyPage children={<ResetPasswordPage />} />,
-  },
-  {
-    path: authPagesPaths.requestPasswordReset,
-    component: () => <PublicOnlyPage children={<RequestPasswordResetPage />} />,
-  },
-  {
-    path: authPagesPaths.emailValidationRequired,
-    component: () => <PublicOnlyPage children={<EmailValidationRequiredPage />} />,
-  },
-  {
-    path: authPagesPaths.emailVerification,
-    component: () => <PublicOnlyPage children={<EmailVerificationPage />} />,
-  },
-  {
-    path: '/checkout-success',
-    component: CheckoutSuccessPage,
-  },
-  {
-    path: '/checkout-cancel',
-    component: CheckoutCancelPage,
-  },
-  {
     path: '/about',
     component: AboutPage,
   },
   {
     // Public document share page — accessible to anyone (logged in or not), no auth guard.
-    path: '/share/:token',
+    path: '/s/:token',
     component: SharedDocumentPage,
   },
   {

@@ -1,6 +1,6 @@
 import type { Component } from 'solid-js';
 import type { OrganizationMemberRole } from '../organizations.types';
-import { A, useParams } from '@solidjs/router';
+import { useParams } from '@solidjs/router';
 import { useMutation, useQuery } from '@tanstack/solid-query';
 import {
   createSolidTable,
@@ -8,9 +8,8 @@ import {
   getCoreRowModel,
   getPaginationRowModel,
 } from '@tanstack/solid-table';
-import { For, Show } from 'solid-js';
+import { For } from 'solid-js';
 import { useI18n } from '@/modules/i18n/i18n.provider';
-import { useConfirmModal } from '@/modules/shared/confirm';
 import { useI18nApiErrors } from '@/modules/shared/http/composables/i18n-api-errors';
 import { queryClient } from '@/modules/shared/query/query-client';
 import { Button } from '@/modules/ui/components/button';
@@ -19,10 +18,8 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuGroupLabel,
-  DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/modules/ui/components/dropdown-menu';
 import { createToast } from '@/modules/ui/components/sonner';
@@ -34,43 +31,23 @@ import {
   TableHeader,
   TableRow,
 } from '@/modules/ui/components/table';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/modules/ui/components/tooltip';
 import { useCurrentUserRole } from '../organizations.composables';
 import { ORGANIZATION_ROLES } from '../organizations.constants';
 import { getIsMemberRoleDisabled } from '../organizations.models';
-import {
-  fetchOrganizationMembers,
-  removeOrganizationMember,
-  updateOrganizationMemberRole,
-} from '../organizations.services';
+import { fetchOrganizationMembers, updateOrganizationMemberRole } from '../organizations.services';
 
 const MemberList: Component = () => {
   const params = useParams();
   const { t } = useI18n();
-  const { confirm } = useConfirmModal();
   const query = useQuery(() => ({
     queryKey: ['organizations', params.organizationId, 'members'],
     queryFn: async () => fetchOrganizationMembers({ organizationId: params.organizationId }),
   }));
   const { getErrorMessage } = useI18nApiErrors({ t });
 
-  const { getIsAtLeastAdmin, getRole } = useCurrentUserRole({
+  const { getRole } = useCurrentUserRole({
     organizationId: params.organizationId,
   });
-
-  const removeMemberMutation = useMutation(() => ({
-    mutationFn: async ({ memberId }: { memberId: string }) =>
-      removeOrganizationMember({ organizationId: params.organizationId, memberId }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: ['organizations', params.organizationId, 'members'],
-      });
-
-      createToast({
-        message: t('organizations.members.delete.success'),
-      });
-    },
-  }));
 
   const updateMemberRoleMutation = useMutation(() => ({
     mutationFn: async ({ memberId, role }: { memberId: string; role: OrganizationMemberRole }) =>
@@ -91,26 +68,6 @@ const MemberList: Component = () => {
       });
     },
   }));
-
-  const handleDelete = async ({ memberId }: { memberId: string }) => {
-    const confirmed = await confirm({
-      title: t('organizations.members.delete.confirm.title'),
-      message: t('organizations.members.delete.confirm.message'),
-      confirmButton: {
-        text: t('organizations.members.delete.confirm.confirm-button'),
-        variant: 'destructive',
-      },
-      cancelButton: {
-        text: t('organizations.members.delete.confirm.cancel-button'),
-      },
-    });
-
-    if (!confirmed) {
-      return;
-    }
-
-    removeMemberMutation.mutate({ memberId });
-  };
 
   const handleUpdateMemberRole = async ({
     memberId,
@@ -144,17 +101,6 @@ const MemberList: Component = () => {
                 <div class="i-tabler-dots-vertical size-4" />
               </DropdownMenuTrigger>
               <DropdownMenuContent>
-                <DropdownMenuItem
-                  onClick={async () => handleDelete({ memberId: data.row.original.id })}
-                  disabled={
-                    data.row.original.role === ORGANIZATION_ROLES.OWNER || !getIsAtLeastAdmin()
-                  }
-                >
-                  <div class="i-tabler-user-x size-4 mr-2" />
-                  {t('organizations.members.remove-from-organization')}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-
                 <DropdownMenuGroup>
                   <DropdownMenuGroupLabel class="font-normal">
                     {t('organizations.members.role')}
@@ -249,50 +195,15 @@ const MemberList: Component = () => {
 };
 export const MembersPage: Component = () => {
   const { t } = useI18n();
-  const params = useParams();
-  const { getIsAtLeastAdmin } = useCurrentUserRole({ organizationId: params.organizationId });
-
   return (
     <div class="p-6 max-w-screen-md mx-auto mt-4">
-      <div class="border-b mb-6 pb-4 flex justify-between items-center">
-        <div>
-          <h1 class="text-xl font-bold">{t('organizations.members.title')}</h1>
-          <p class="text-sm text-muted-foreground">{t('organizations.members.description')}</p>
-        </div>
-        <Show
-          when={getIsAtLeastAdmin()}
-          fallback={
-            <Tooltip>
-              <TooltipTrigger>
-                <Button disabled>
-                  <div class="i-tabler-plus size-4 mr-2" />
-                  {t('organizations.members.invite-member')}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {t('organizations.members.invite-member-disabled-tooltip')}
-              </TooltipContent>
-            </Tooltip>
-          }
-        >
-          <div class="flex items-center gap-2">
-            <Button
-              as={A}
-              href={`/organizations/${params.organizationId}/invitations`}
-              variant="outline"
-            >
-              <div class="i-tabler-mail size-4 mr-2" />
-              {t('organizations.invitations.title')}
-            </Button>
-
-            <Button as={A} href={`/organizations/${params.organizationId}/invite`}>
-              <div class="i-tabler-plus size-4 mr-2" />
-              {t('organizations.members.invite-member')}
-            </Button>
-          </div>
-        </Show>
+      <div class="border-b mb-6 pb-4">
+        <h1 class="text-xl font-bold">{t('organizations.members.title')}</h1>
+        <p class="text-sm text-muted-foreground">
+          Membership is assigned automatically from verified Google accounts. Personal spaces stay
+          private.
+        </p>
       </div>
-
       <MemberList />
     </div>
   );

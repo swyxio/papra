@@ -1,53 +1,18 @@
 import type { ExpoConfig } from 'expo/config';
-import { execFileSync } from 'node:child_process';
 import { version } from './package.json';
 
-function getGitCommitSha() {
-  const commitSha = process.env.EAS_BUILD_GIT_COMMIT_HASH || process.env.GIT_COMMIT;
-
-  if (commitSha) {
-    return commitSha.trim();
-  }
-
-  try {
-    return execFileSync('git', ['rev-parse', 'HEAD'], {
-      cwd: __dirname,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
-  } catch {
-    return undefined;
-  }
-}
-
-const isDevelopment = process.env.APP_VARIANT === 'development';
-
-const profile = isDevelopment
-  ? {
-      name: 'Papra - dev',
-      scheme: 'papra-dev',
-      ios: { bundleIdentifier: 'app.papra.ios.dev' },
-      android: { package: 'app.papra.android.dev' },
-    }
-  : {
-      name: 'Papra',
-      scheme: 'papra',
-      ios: { bundleIdentifier: 'app.papra.ios' },
-      android: { package: 'app.papra.android' },
-    };
-
 const config: ExpoConfig = {
-  name: profile.name,
+  name: 'Papra',
   slug: 'papra',
   version,
   orientation: 'portrait',
   icon: './src/assets/images/icon.png',
-  scheme: profile.scheme,
+  scheme: 'papra',
   userInterfaceStyle: 'automatic',
   newArchEnabled: true,
   ios: {
     supportsTablet: true,
-    bundleIdentifier: profile.ios.bundleIdentifier,
+    bundleIdentifier: 'app.papra.ios',
     icon: {
       dark: './src/assets/images/icon-dark.png',
       light: './src/assets/images/icon-light.png',
@@ -63,7 +28,7 @@ const config: ExpoConfig = {
     },
     edgeToEdgeEnabled: true,
     predictiveBackGestureEnabled: false,
-    package: profile.android.package,
+    package: 'app.papra.android',
   },
   plugins: [
     'expo-router',
@@ -103,14 +68,12 @@ const config: ExpoConfig = {
         androidMultiIntentFilters: ['*/*'],
       },
     ],
-    'expo-localization',
   ],
   experiments: {
     typedRoutes: true,
     reactCompiler: true,
   },
   extra: {
-    gitCommitSha: getGitCommitSha(),
     router: {},
     eas: {
       projectId: '8d127afd-9d57-415b-a108-3e7b85439cfd',

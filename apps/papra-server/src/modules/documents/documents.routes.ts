@@ -3,11 +3,7 @@ import { Readable } from 'node:stream';
 import * as v from 'valibot';
 import { requireAuthentication } from '../app/auth/auth.middleware';
 import { getUser } from '../app/auth/auth.models';
-import { createTooManyRequestsError } from '../app/rate-limit/rate-limit.errors';
-import { scopeKvStoreForRateLimit } from '../app/rate-limit/rate-limit.kv-store';
-import { getRateLimit } from '../app/rate-limit/rate-limit.usecases';
 import { createCustomPropertiesRepository } from '../custom-properties/custom-properties.repository';
-import { joinKeyParts } from '../kv-store/kv-store.models';
 import { organizationIdSchema } from '../organizations/organization.schemas';
 import { createOrganizationsRepository } from '../organizations/organizations.repository';
 import { ensureUserIsInOrganization } from '../organizations/organizations.usecases';
@@ -21,11 +17,7 @@ import { createSubscriptionsRepository } from '../subscriptions/subscriptions.re
 import { createTagsRepository } from '../tags/tags.repository';
 import { DEFAULT_DOCUMENT_SEARCH_SORT } from './document-search/document-search.constants';
 import { searchOrganizationDocuments } from './document-search/document-search.usecase';
-import {
-  createDocumentIsNotDeletedError,
-  createDocumentNotFoundError,
-  createDocumentReprocessingDisabledError,
-} from './documents.errors';
+import { createDocumentIsNotDeletedError } from './documents.errors';
 import {
   formatDocumentForApi,
   formatDocumentsForApi,
@@ -51,7 +43,6 @@ import {
   trashDocument,
   updateDocument,
 } from './documents.usecases';
-import { computeRetryAfterDuration } from '../app/rate-limit/rate-limit.models';
 
 export function registerDocumentsRoutes(context: RouteDefinitionContext) {
   setupCreateDocumentRoute(context);
@@ -65,68 +56,6 @@ export function registerDocumentsRoutes(context: RouteDefinitionContext) {
   setupDeleteDocumentRoute(context);
   setupGetDocumentFileRoute(context);
   setupUpdateDocumentRoute(context);
-  setupReprocessDocumentRoute(context);
-}
-
-function setupReprocessDocumentRoute({
-  app,
-  db,
-  config,
-  kvStore,
-  taskServices,
-}: RouteDefinitionContext) {
-  app.post(
-    '/api/organizations/:organizationId/documents/:documentId/reprocess',
-    requireAuthentication({ apiKeyPermissions: ['documents:update'] }),
-    validateParams(
-      v.strictObject({
-        organizationId: organizationIdSchema,
-        documentId: documentIdSchema,
-      }),
-    ),
-    async (context) => {
-      const { userId } = getUser({ context });
-      const { organizationId, documentId } = context.req.valid('param');
-
-      const organizationsRepository = createOrganizationsRepository({ db });
-      await ensureUserIsInOrganization({ userId, organizationId, organizationsRepository });
-
-      if (!config.documents.isReprocessingEnabled) {
-        throw createDocumentReprocessingDisabledError();
-      }
-
-      const documentsRepository = createDocumentsRepository({ db });
-      const { document } = await getDocumentOrThrow({
-        documentId,
-        organizationId,
-        documentsRepository,
-      });
-
-      if (document.isDeleted) {
-        throw createDocumentNotFoundError();
-      }
-
-      const { hasExceededLimit, resetAt } = await getRateLimit({
-        ...config.documents.reprocessingRateLimit,
-        key: joinKeyParts(['document-reprocessing', organizationId]),
-        kvStore: scopeKvStoreForRateLimit({ kvStore }),
-      });
-
-      if (hasExceededLimit) {
-        const retryAfter = computeRetryAfterDuration({ resetAt });
-        context.header('Retry-After', String(retryAfter));
-        throw createTooManyRequestsError();
-      }
-
-      // Reuse the processing pipeline without clearing content or tags while the job is pending.
-      await taskServices.scheduleJob({
-        taskName: 'extract-document-file-content',
-        data: { documentId, organizationId, ocrLanguages: config.documents.ocrLanguages },
-      });
-
-      return context.body(null, 202);
-    },
-  );
 }
 
 function setupCreateDocumentRoute({ app, ...deps }: RouteDefinitionContext) {
@@ -293,7 +222,9 @@ function setupDeleteDocumentRoute({ app, db, eventServices }: RouteDefinitionCon
         eventServices,
       });
 
-      return context.body(null, 204);
+      return context.json({
+        success: true,
+      });
     },
   );
 }

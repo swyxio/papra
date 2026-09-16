@@ -5,7 +5,7 @@ FROM node:${NODE_VERSION}-slim AS base
 
 LABEL fly_launch_runtime="Node.js"
 
-ARG PNPM_VERSION=12.4.2
+ARG PNPM_VERSION=11.22.0
 RUN npm install -g pnpm@${PNPM_VERSION}
 
 WORKDIR /app

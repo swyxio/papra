@@ -13,7 +13,6 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useAppTranslations } from '@/modules/i18n/hooks/use-app-translations';
 import { OrganizationPickerButton } from '@/modules/organizations/components/organization-picker-button';
 import { OrganizationPickerDrawer } from '@/modules/organizations/components/organization-picker-drawer';
 import { useOrganizations } from '@/modules/organizations/organizations.provider';
@@ -31,7 +30,6 @@ function generateDefaultBaseName({ now = new Date() }: { now?: Date } = {}): str
 }
 
 export default function ScanReviewScreen() {
-  const t = useAppTranslations();
   const router = useRouter();
   const themeColors = useThemeColor();
   const styles = createStyles({ themeColors });
@@ -61,8 +59,8 @@ export default function ScanReviewScreen() {
         setImageUris(scannedImageUris);
       } catch (error) {
         showAlert({
-          title: t.documents.scan.errorTitle,
-          message: error instanceof Error ? error.message : t.documents.scan.failed,
+          title: 'Scan Error',
+          message: error instanceof Error ? error.message : 'Failed to scan document',
         });
         router.back();
       } finally {
@@ -71,7 +69,7 @@ export default function ScanReviewScreen() {
     };
 
     void performScan();
-  }, [router, showAlert, t.documents.scan.errorTitle, t.documents.scan.failed]);
+  }, [router, showAlert]);
 
   const handleClose = () => {
     router.back();
@@ -83,16 +81,16 @@ export default function ScanReviewScreen() {
 
     if (organizationId == null) {
       showAlert({
-        title: t.documents.import.noOrganization,
-        message: t.documents.scan.selectBeforeUpload,
+        title: 'No Organization Selected',
+        message: 'Please select an organization before uploading.',
       });
       return;
     }
 
     if (!baseName) {
       showAlert({
-        title: t.documents.scan.nameRequiredTitle,
-        message: t.documents.scan.nameRequired,
+        title: 'Name Required',
+        message: 'Please enter a document name.',
       });
       return;
     }
@@ -106,17 +104,17 @@ export default function ScanReviewScreen() {
 
     if (result.success) {
       showAlert({
-        title: t.documents.import.uploadSuccessful,
-        message: t.documents.scan.uploaded({ count: result.documentCount }),
+        title: 'Upload Successful',
+        message: `Successfully uploaded ${result.documentCount} document${result.documentCount > 1 ? 's' : ''}.`,
       });
       router.back();
     } else {
       showAlert({
-        title: t.documents.import.uploadFailed,
-        message: result.error ?? t.documents.scan.uploadFailed,
+        title: 'Upload Failed',
+        message: result.error ?? 'Failed to upload documents. Please try again.',
         buttons: [
-          { text: t.common.cancel, style: 'cancel' },
-          { text: t.common.retry, onPress: () => void handleConfirm() },
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Retry', onPress: () => void handleConfirm() },
         ],
       });
     }
@@ -127,7 +125,7 @@ export default function ScanReviewScreen() {
       <SafeAreaView style={styles.container}>
         <View style={styles.centeredContainer}>
           <ActivityIndicator size="large" color={themeColors.primary} />
-          <Text style={styles.loadingText}>{t.documents.scan.opening}</Text>
+          <Text style={styles.loadingText}>Opening scanner...</Text>
         </View>
       </SafeAreaView>
     );
@@ -137,9 +135,9 @@ export default function ScanReviewScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.centeredContainer}>
-          <Text style={styles.errorText}>{t.documents.scan.empty}</Text>
+          <Text style={styles.errorText}>No images to review</Text>
           <TouchableOpacity style={styles.actionButton} onPress={handleClose}>
-            <Text style={styles.actionButtonText}>{t.common.goBack}</Text>
+            <Text style={styles.actionButtonText}>Go Back</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -153,8 +151,11 @@ export default function ScanReviewScreen() {
         <TouchableOpacity style={styles.headerButton} onPress={handleClose}>
           <Icon name="x" size={24} color={themeColors.foreground} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{t.documents.scan.title}</Text>
-        <Text style={styles.pageCount}>{t.documents.scan.pageCount({ count: pageCount })}</Text>
+        <Text style={styles.headerTitle}>Review Scan</Text>
+        <Text style={styles.pageCount}>
+          {pageCount} page
+          {pageCount > 1 ? 's' : ''}
+        </Text>
       </View>
 
       <KeyboardAvoidingView
@@ -178,7 +179,7 @@ export default function ScanReviewScreen() {
           <DocumentNameInput value={documentName} onChangeText={setDocumentName} format={format} />
 
           <View style={styles.orgSection}>
-            <Text style={styles.sectionLabel}>{t.documents.scan.uploadTo}</Text>
+            <Text style={styles.sectionLabel}>Upload to</Text>
             <OrganizationPickerButton onPress={() => setIsOrgPickerVisible(true)} />
           </View>
         </ScrollView>
@@ -187,7 +188,7 @@ export default function ScanReviewScreen() {
       {/* Footer */}
       <View style={styles.footer}>
         <TouchableOpacity style={styles.cancelButton} onPress={handleClose} disabled={isProcessing}>
-          <Text style={styles.cancelButtonText}>{t.common.cancel}</Text>
+          <Text style={styles.cancelButtonText}>Cancel</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -200,7 +201,7 @@ export default function ScanReviewScreen() {
           ) : (
             <>
               <Icon name="upload" size={18} color={themeColors.primaryForeground} />
-              <Text style={styles.confirmButtonText}>{t.common.confirm}</Text>
+              <Text style={styles.confirmButtonText}>Confirm</Text>
             </>
           )}
         </TouchableOpacity>
@@ -210,7 +211,7 @@ export default function ScanReviewScreen() {
         <View style={styles.loadingOverlay}>
           <View style={styles.loadingCard}>
             <ActivityIndicator size="large" color={themeColors.primary} />
-            <Text style={styles.loadingText}>{t.documents.scan.processing}</Text>
+            <Text style={styles.loadingText}>Processing and uploading...</Text>
           </View>
         </View>
       )}

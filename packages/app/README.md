@@ -1,22 +1,17 @@
-# Papra application package
+# Papra Application Package
 
-This package contains Papra application, which is distributed as Docker images.
+This package contains the Papra application, distributed as Docker images.
 
 ## Versioning
 
-This package uses year-based versioning with the format `YY.MINOR.PATCH`:
+This package uses **CalVer** (Calendar Versioning) with the format `YY.M.N`:
 
-- `YY`: The last two digits of the release year.
-- `MINOR`: The next feature release within that year. Incrementing this number resets `PATCH` to `0`.
-- `PATCH`: A maintenance release for the current minor version, including bug and security fixes.
-
-Versions move forwards along a single release line. Papra doesn't publish maintenance or security patches for older `YY.MINOR` versions.
+- `YY`: Two-digit year
+- `M`: Month number (1-12, not zero-padded, where 1 = January, 12 = December)
+- `N`: Release number for that month (starting at 0)
 
 ### Examples
 
-These examples show how application versions progress:
-
-- `26.6.0`: A feature release published in 2026.
-- `26.6.1`: A maintenance release for `26.6.0`.
-- `26.7.0`: The next feature release in 2026.
-- `27.0.0`: The first release in 2027.
+- `25.10.0`: First release in October 2025
+- `25.10.1`: Second release in October 2025
+- `25.11.0`: First release in November 2025

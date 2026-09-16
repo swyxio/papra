@@ -1,0 +1,137 @@
+import type { DriveSource } from './drive-capabilities.services';
+import { createResource, createSignal, For, Show } from 'solid-js';
+import { Button } from '../ui/components/button';
+import { askDocuments, semanticSearch, sourceHref } from './drive-capabilities.services';
+
+export const driveFieldClass = 'w-full rounded-md border border-input bg-background p-2 text-sm';
+export function DriveError(props: { error: unknown }) {
+  return (
+    <Show when={props.error}>
+      <p role="alert" class="text-sm text-destructive">
+        {props.error instanceof Error
+          ? props.error.message
+          : 'The request failed. Please try again.'}
+      </p>
+    </Show>
+  );
+}
+function Sources(props: { organizationId: string; sources: DriveSource[] }) {
+  return (
+    <ul class="space-y-3">
+      <For each={props.sources}>
+        {(source) => (
+          <li class="rounded-md border p-3 text-sm">
+            <a
+              class="font-medium text-primary underline"
+              href={sourceHref(props.organizationId, source)}
+            >
+              {source.citation ? `[${source.citation}] ` : ''}
+              {source.name}
+            </a>
+            <p class="mt-1 whitespace-pre-wrap break-words text-muted-foreground">{source.text}</p>
+          </li>
+        )}
+      </For>
+    </ul>
+  );
+}
+export function DriveEvidence(props: { organizationId: string; documentId?: string }) {
+  const [question, setQuestion] = createSignal('');
+  const [submitted, setSubmitted] = createSignal<{
+    organizationId: string;
+    documentId?: string;
+    text: string;
+    mode: 'search' | 'answer';
+  }>();
+  const sameScope = () =>
+    submitted()?.organizationId === props.organizationId &&
+    submitted()?.documentId === props.documentId;
+  const [result] = createResource(
+    () => {
+      const value = submitted();
+      return value?.organizationId === props.organizationId && value.documentId === props.documentId
+        ? value
+        : undefined;
+    },
+    async (value) =>
+      value.mode === 'answer'
+        ? askDocuments(value.organizationId, value.text, value.documentId)
+        : { answer: '', sources: (await semanticSearch(value.organizationId, value.text)).results },
+  );
+  const submit = (mode: 'search' | 'answer') => {
+    if (!question().trim()) return;
+    setSubmitted({
+      organizationId: props.organizationId,
+      documentId: props.documentId,
+      text: question().trim(),
+      mode,
+    });
+  };
+  return (
+    <section class="space-y-4 rounded-lg border p-4">
+      <h2 class="text-lg font-semibold">
+        {props.documentId ? 'Ask this document' : 'Search and ask your files'}
+      </h2>
+      <p class="text-sm text-muted-foreground">
+        Answers use indexed text from files you can access. Open the sources to verify the answer.
+      </p>
+      <form
+        class="space-y-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          submit(props.documentId ? 'answer' : 'search');
+        }}
+      >
+        <label class="block text-sm font-medium">
+          {props.documentId ? 'Question' : 'Search or question'}
+          <textarea
+            class={`${driveFieldClass} mt-1`}
+            rows={3}
+            required
+            maxLength={1500}
+            value={question()}
+            onInput={(event) => setQuestion(event.currentTarget.value)}
+            placeholder="What do these files say about…?"
+          />
+        </label>
+        <div class="flex flex-wrap gap-2">
+          <Show when={!props.documentId}>
+            <Button type="submit" isLoading={result.loading} disabled={!question().trim()}>
+              Search
+            </Button>
+          </Show>
+          <Button
+            type={props.documentId ? 'submit' : 'button'}
+            variant={props.documentId ? 'default' : 'outline'}
+            isLoading={result.loading}
+            disabled={!question().trim()}
+            onClick={() => !props.documentId && submit('answer')}
+          >
+            Ask for an answer
+          </Button>
+        </div>
+      </form>
+      <DriveError error={sameScope() ? result.error : undefined} />
+      <Show when={sameScope() && !result.loading && !result.error && result()}>
+        {(value) => (
+          <div class="space-y-4" aria-live="polite">
+            <Show when={value().answer}>
+              <p class="whitespace-pre-wrap break-words">{value().answer}</p>
+            </Show>
+            <Show
+              when={value().sources.length}
+              fallback={
+                <p class="text-sm text-muted-foreground">
+                  No accessible indexed text matched. Text extraction may still be processing.
+                </p>
+              }
+            >
+              <h3 class="font-medium">Sources</h3>
+              <Sources organizationId={props.organizationId} sources={value().sources} />
+            </Show>
+          </div>
+        )}
+      </Show>
+    </section>
+  );
+}

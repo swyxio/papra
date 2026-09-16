@@ -11,6 +11,7 @@ import {
   Suspense,
   Switch,
 } from 'solid-js';
+import { apiClient } from '@/modules/shared/http/api-client';
 import { useI18n } from '@/modules/i18n/i18n.provider';
 import { Card } from '@/modules/ui/components/card';
 import { fetchDocumentFile } from '../documents.services';
@@ -193,6 +194,36 @@ export const DocumentBlobPreview: Component<{ blob: Blob; mimeType: string }> = 
 };
 
 export const DocumentPreview: Component<{ document: Document }> = (props) => {
+  const useDerivative = () =>
+    props.document.originalSize > 32 * 1024 ** 2 ||
+    props.document.mimeType.startsWith('image/') ||
+    props.document.mimeType.startsWith('video/') ||
+    props.document.mimeType === 'application/pdf';
+  const preview = useQuery(() => ({
+    queryKey: [
+      'organizations',
+      props.document.organizationId,
+      'documents',
+      props.document.id,
+      'preview',
+    ],
+    enabled: useDerivative(),
+    queryFn: async () =>
+      apiClient<{
+        status: 'pending' | 'processing' | 'ready' | 'unavailable' | 'failed';
+        reason: string | null;
+        url: string | null;
+        integrityStatus: string;
+        sha256: string | null;
+      }>({
+        path: `/api/organizations/${props.document.organizationId}/documents/${props.document.id}/preview`,
+      }),
+    refetchInterval: (query) =>
+      ['pending', 'processing'].includes(query.state.data?.status ?? 'pending') ||
+      ['pending', 'verifying'].includes(query.state.data?.integrityStatus ?? '')
+        ? 3000
+        : 240000,
+  }));
   const query = useQuery(() => ({
     queryKey: [
       'organizations',
@@ -201,16 +232,56 @@ export const DocumentPreview: Component<{ document: Document }> = (props) => {
       props.document.id,
       'file',
     ],
+    enabled: !useDerivative(),
     queryFn: async () =>
       fetchDocumentFile({
         documentId: props.document.id,
         organizationId: props.document.organizationId,
       }),
   }));
-
   return (
-    <Show when={query.data}>
-      {(getBlob) => <DocumentBlobPreview blob={getBlob()} mimeType={props.document.mimeType} />}
+    <Show
+      when={useDerivative()}
+      fallback={
+        <Show when={query.data}>
+          {(blob) => <DocumentBlobPreview blob={blob()} mimeType={props.document.mimeType} />}
+        </Show>
+      }
+    >
+      <Switch>
+        <Match when={preview.isError}>
+          <Card class="p-6 text-sm">Could not load preview status.</Card>
+        </Match>
+        <Match when={preview.data?.status === 'ready' && preview.data.url}>
+          <img
+            src={preview.data?.url ?? undefined}
+            alt={`Preview of ${props.document.name}`}
+            class="max-w-full max-h-800px object-contain mx-auto"
+          />
+          <p class="text-xs text-muted-foreground mt-2">Preview · first page or frame</p>
+        </Match>
+        <Match when={['unavailable', 'failed'].includes(preview.data?.status ?? '')}>
+          <Card class="p-6 text-sm text-muted-foreground">
+            {preview.data?.reason ?? 'Preview unavailable.'} Use Download to stream the original
+            directly from storage.
+          </Card>
+        </Match>
+        <Match when={true}>
+          <Card class="p-6 text-sm text-muted-foreground">
+            Generating a small preview in the background…
+          </Card>
+        </Match>
+      </Switch>
+      <Show when={preview.data}>
+        <p class="text-xs text-muted-foreground mt-3">
+          Integrity:{' '}
+          {preview.data?.integrityStatus === 'verified'
+            ? 'SHA-256 computed; stored size checked'
+            : preview.data?.integrityStatus === 'failed'
+              ? 'Verification failed; original retained'
+              : 'Verifying original in background'}
+        </p>
+      </Show>
     </Show>
   );
 };

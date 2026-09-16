@@ -3,12 +3,7 @@ export function isAzureBlobAlreadyExistsError({
 }: {
   error: Error & { code?: unknown; statusCode?: unknown };
 }) {
-  return (
-    error.code === 'BlobAlreadyExists' ||
-    error.code === 'ConditionNotMet' ||
-    error.statusCode === 409 ||
-    error.statusCode === 412
-  );
+  return error.code === 'BlobAlreadyExists' || error.statusCode === 409;
 }
 
 export function isAzureBlobNotFoundError({

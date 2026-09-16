@@ -96,10 +96,11 @@ function createStyles({ themeColors }: { themeColors: ThemeColors }) {
       lineHeight: 20,
     },
     buttonContainer: {
-      flexDirection: 'column',
+      flexDirection: 'row',
       gap: 12,
     },
     button: {
+      flex: 1,
       paddingVertical: 12,
       paddingHorizontal: 16,
       borderRadius: 8,
@@ -110,7 +111,6 @@ function createStyles({ themeColors }: { themeColors: ThemeColors }) {
       fontSize: 16,
       fontWeight: '600',
       color: themeColors.primaryForeground,
-      textAlign: 'center',
     },
     cancelButton: {
       backgroundColor: themeColors.secondaryBackground,

@@ -1,10 +1,11 @@
+import { apiClient } from '@/modules/shared/http/api-client';
 import type { ParentComponent } from 'solid-js';
 import type { Document } from '../documents.types';
 import { safely } from '@corentinth/chisels';
 import { A } from '@solidjs/router';
 import { useQuery } from '@tanstack/solid-query';
 import pLimit from 'p-limit';
-import { createContext, createSignal, For, lazy, Match, Show, Switch, useContext } from 'solid-js';
+import { createContext, createSignal, For, Match, Show, Switch, useContext } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { useI18n } from '@/modules/i18n/i18n.provider';
 import { promptUploadFiles } from '@/modules/shared/files/upload';
@@ -14,21 +15,14 @@ import { throttle } from '@/modules/shared/utils/timing';
 import { fetchOrganizationSubscription } from '@/modules/subscriptions/subscriptions.services';
 import { Button } from '@/modules/ui/components/button';
 import { invalidateOrganizationDocumentsQuery } from '../documents.composables';
-import { MAX_CONCURRENT_DOCUMENT_UPLOADS } from '../documents.constants';
 import { uploadDocument } from '../documents.services';
 
-const DocumentGenerationDevtool = import.meta.env.DEV
-  ? lazy(async () =>
-      import('@/modules/devtools/tools/document-generation/document-generation.devtool').then(
-        (mod) => ({
-          default: mod.DocumentGenerationDevtool,
-        }),
-      ),
-    )
-  : null;
-
 const DocumentUploadContext = createContext<{
-  uploadDocuments: (args: { files: File[] }) => Promise<void>;
+  uploadDocuments: (args: {
+    files: File[];
+    folderImport?: boolean;
+    folderId?: string;
+  }) => Promise<void>;
 }>();
 
 export function useDocumentUpload() {
@@ -47,6 +41,10 @@ export function useDocumentUpload() {
 
       await uploadDocuments({ files });
     },
+    promptFolderImport: async () => {
+      const { files } = await promptUploadFiles({ directory: true });
+      await uploadDocuments({ files, folderImport: true });
+    },
   };
 }
 
@@ -62,13 +60,14 @@ type TaskError = {
   error: Error;
 };
 
-type Task =
+type Task = { progress?: import('../drive-multipart.services').TransferProgress } & (
   | TaskSuccess
   | TaskError
   | {
       file: File;
       status: 'pending' | 'uploading';
-    };
+    }
+);
 
 export const DocumentUploadProvider: ParentComponent<{ organizationId: string }> = (props) => {
   const throttledInvalidateOrganizationDocumentsQuery = throttle(
@@ -98,7 +97,25 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
     refetchOnWindowFocus: false,
   }));
 
-  const uploadDocuments = async ({ files }: { files: File[] }) => {
+  const interruptedQuery = useQuery(() => ({
+    queryKey: ['organizations', props.organizationId, 'uploads'],
+    queryFn: () =>
+      apiClient<{ uploads: { id: string; fileName: string }[] }>({
+        method: 'GET',
+        path: `/api/organizations/${props.organizationId}/uploads`,
+      }),
+    refetchOnWindowFocus: true,
+  }));
+
+  const uploadDocuments = async ({
+    files,
+    folderImport,
+    folderId,
+  }: {
+    files: File[];
+    folderImport?: boolean;
+    folderId?: string;
+  }) => {
     setTasks((tasks) => [...tasks, ...files.map((file) => ({ file, status: 'pending' }) as const)]);
     setState('open');
 
@@ -110,7 +127,38 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
     const maxUploadSize = organizationLimitsQuery.data?.plan.limits.maxFileSize;
 
     // Limit concurrent uploads to 3 to avoid overwhelming browser/server
-    const limit = pLimit(MAX_CONCURRENT_DOCUMENT_UPLOADS);
+    const limit = pLimit(1);
+    const folders = new Map<string, string>();
+    if (folderImport) {
+      const list = await apiClient<{
+        folders: { id: string; parentId: string | null; name: string; isHome: boolean }[];
+      }>({ method: 'GET', path: `/api/organizations/${props.organizationId}/folders` });
+      folders.set('', folderId || list.folders.find((f) => f.isHome)!.id);
+      for (const file of files) {
+        const segments = file.webkitRelativePath.split('/').slice(0, -1);
+        let path = '';
+        for (const name of segments) {
+          const parentId = folders.get(path)!;
+          path = path ? `${path}/${name}` : name;
+          if (folders.has(path)) continue;
+          let folder = list.folders.find(
+            (f) => f.parentId === parentId && f.name.toLowerCase() === name.toLowerCase(),
+          );
+          if (!folder) {
+            const result = await apiClient<{
+              folder: { id: string; parentId: string; name: string; isHome: boolean };
+            }>({
+              method: 'POST',
+              path: `/api/organizations/${props.organizationId}/folders`,
+              body: { name, parentId },
+            });
+            folder = result.folder;
+            list.folders.push(folder);
+          }
+          folders.set(path, folder.id);
+        }
+      }
+    }
 
     await Promise.all(
       files.map(async (file) => {
@@ -128,7 +176,17 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
           updateTaskStatus({ file, status: 'uploading' });
 
           const [result, error] = await safely(
-            uploadDocument({ file, organizationId: props.organizationId }),
+            uploadDocument({
+              file,
+              organizationId: props.organizationId,
+              folderId: folderImport
+                ? folders.get(file.webkitRelativePath.split('/').slice(0, -1).join('/'))
+                : folderId,
+              onProgress: (progress) =>
+                setTasks((tasks) =>
+                  tasks.map((task) => (task.file === file ? { ...task, progress } : task)),
+                ),
+            }),
           );
 
           if (error) {
@@ -139,6 +197,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
             updateTaskStatus({ file, status: 'success', document });
           }
 
+          void interruptedQuery.refetch();
           throttledInvalidateOrganizationDocumentsQuery({ organizationId: props.organizationId });
         });
       }),
@@ -172,11 +231,14 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
 
   return (
     <DocumentUploadContext.Provider value={{ uploadDocuments }}>
-      {DocumentGenerationDevtool && (
-        <DocumentGenerationDevtool organizationId={props.organizationId} />
-      )}
       {props.children}
-
+      <Show when={interruptedQuery.data?.uploads.length}>
+        <div class="fixed bottom-2 left-2 max-w-sm bg-card border rounded-lg p-3 text-sm shadow-lg">
+          Interrupted uploads:{' '}
+          {interruptedQuery.data?.uploads.map((upload) => upload.fileName).join(', ')}. Choose
+          Import and reselect the same files to resume.
+        </div>
+      </Show>
       <Portal>
         <Show when={getState() !== 'closed'}>
           <div class="fixed bottom-0 right-0 sm:right-20px w-full sm:w-400px bg-card border-l border-t border-r sm:rounded-t-xl shadow-lg">
@@ -238,7 +300,26 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
 
                       <Match when={['pending', 'uploading'].includes(task.status)}>
                         <div class="text-sm truncate min-w-0 flex items-center gap-4 min-h-48px px-6 border-b border-border/80">
-                          <div class="flex-1 truncate">{task.file.name}</div>
+                          <div class="flex-1 truncate">
+                            <div>{task.file.name}</div>
+                            <Show when={task.progress}>
+                              {(progress) => (
+                                <div class="text-xs text-muted-foreground">
+                                  {((progress().bytes / progress().total) * 100).toFixed(1)}% ·{' '}
+                                  {(progress().speed / 1024 ** 2).toFixed(1)} MB/s ·{' '}
+                                  {Math.ceil(progress().eta)}s left{' '}
+                                  <Show when={progress().resumedParts > 0}>
+                                    · resumed {progress().resumedParts} parts
+                                  </Show>
+                                  <progress
+                                    class="w-full"
+                                    value={progress().bytes}
+                                    max={progress().total}
+                                  />
+                                </div>
+                              )}
+                            </Show>
+                          </div>
 
                           <div class="flex-none">
                             <div class="i-tabler-loader-2 animate-spin text-muted-foreground size-5.5" />

@@ -9,7 +9,6 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useAppTranslations } from '@/modules/i18n/hooks/use-app-translations';
 import { useAuthClient } from '@/modules/api/providers/api.provider';
 import { useAlert } from '@/modules/ui/providers/alert-provider';
 import { useThemeColor } from '@/modules/ui/providers/use-theme-color';
@@ -23,7 +22,6 @@ export function TwoFactorVerificationForm({
   onSuccess: () => void;
   onBack: () => void;
 }) {
-  const t = useAppTranslations();
   const themeColors = useThemeColor();
   const authClient = useAuthClient();
   const { showAlert } = useAlert();
@@ -49,8 +47,8 @@ export function TwoFactorVerificationForm({
       onSuccess();
     } catch (error) {
       showAlert({
-        title: t.auth.twoFactor.failed,
-        message: error instanceof Error ? error.message : t.common.anErrorOccurred,
+        title: 'Verification Failed',
+        message: error instanceof Error ? error.message : 'An error occurred',
       });
     } finally {
       setIsVerifying(false);
@@ -73,21 +71,15 @@ export function TwoFactorVerificationForm({
   return (
     <View style={styles.formContainer}>
       <View style={styles.fieldContainer}>
-        <Text style={styles.label}>
-          {useBackupCode ? t.auth.twoFactor.backupCode : t.auth.twoFactor.verificationCode}
-        </Text>
+        <Text style={styles.label}>{useBackupCode ? 'Backup code' : 'Verification code'}</Text>
         <Text style={styles.description}>
           {useBackupCode
-            ? t.auth.twoFactor.backupDescription
-            : t.auth.twoFactor.verificationDescription}
+            ? 'Enter one of your backup codes'
+            : 'Enter the 6-digit code from your authenticator app'}
         </Text>
         <TextInput
           style={styles.input}
-          placeholder={
-            useBackupCode
-              ? t.auth.twoFactor.backupPlaceholder
-              : t.auth.twoFactor.verificationPlaceholder
-          }
+          placeholder={useBackupCode ? 'Enter a backup code' : '000000'}
           placeholderTextColor={themeColors.mutedForeground}
           value={code}
           onChangeText={handleCodeChange}
@@ -102,7 +94,7 @@ export function TwoFactorVerificationForm({
       </View>
 
       <View style={styles.trustDeviceRow}>
-        <Text style={styles.trustDeviceLabel}>{t.auth.twoFactor.trustDevice}</Text>
+        <Text style={styles.trustDeviceLabel}>Trust this device</Text>
         <Switch
           value={trustDevice}
           onValueChange={setTrustDevice}
@@ -119,18 +111,18 @@ export function TwoFactorVerificationForm({
         {isVerifying ? (
           <ActivityIndicator color={themeColors.primaryForeground} />
         ) : (
-          <Text style={styles.buttonText}>{t.auth.twoFactor.verify}</Text>
+          <Text style={styles.buttonText}>Verify</Text>
         )}
       </TouchableOpacity>
 
       <TouchableOpacity style={styles.linkButton} onPress={switchCodeMode} disabled={isVerifying}>
         <Text style={styles.linkText}>
-          {useBackupCode ? t.auth.twoFactor.useAuthenticator : t.auth.twoFactor.useBackupCode}
+          {useBackupCode ? 'Use an authenticator code' : 'Use a backup code'}
         </Text>
       </TouchableOpacity>
 
       <TouchableOpacity style={styles.linkButton} onPress={onBack} disabled={isVerifying}>
-        <Text style={styles.linkText}>{t.auth.twoFactor.backToLogin}</Text>
+        <Text style={styles.linkText}>Back to login</Text>
       </TouchableOpacity>
     </View>
   );

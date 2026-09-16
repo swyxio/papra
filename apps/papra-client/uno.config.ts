@@ -26,9 +26,9 @@ export default defineConfig({
     }),
     presetAnimations(),
     presetWebFonts({
-      provider: 'none',
+      provider: 'bunny',
       fonts: {
-        sans: 'Inter',
+        sans: 'Inter:400,500,600,700,800,900',
       },
     }),
     presetIcons({

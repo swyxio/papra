@@ -26,6 +26,7 @@ import { TextField, TextFieldLabel, TextFieldRoot } from '@/modules/ui/component
 import { LanguageSwitcher } from '@/modules/ui/layouts/sidenav.layout';
 import {
   fetchSharedDocument,
+  fetchSharedDocumentDirect,
   fetchSharedDocumentFile,
   verifySharePassword,
 } from '../document-share-links.services';
@@ -102,12 +103,8 @@ const SharedDocumentCard: Component<{
 
   const downloadMutation = useMutation(() => ({
     mutationFn: async () =>
-      fetchSharedDocumentFile({ token: props.token, accessToken: props.accessToken }),
-    onSuccess: ({ blob }) => {
-      const url = URL.createObjectURL(blob);
-      downloadFile({ url, fileName: props.document.name });
-      URL.revokeObjectURL(url);
-    },
+      fetchSharedDocumentDirect({ token: props.token, accessToken: props.accessToken, mode:'download' }),
+    onSuccess: ({ url }) => { if(url) { const link = window.document.createElement('a'); link.href=url; link.click(); } },
     onError: () =>
       createToast({ type: 'error', message: t('document-share-links.public.download-error') }),
   }));
@@ -116,11 +113,12 @@ const SharedDocumentCard: Component<{
     queryKey: ['share-link', props.token, 'file', props.accessToken],
     queryFn: async () =>
       fetchSharedDocumentFile({ token: props.token, accessToken: props.accessToken }),
-    enabled: isPreviewable(props.document.mimeType),
+    enabled: props.document.size <= 32 * 1024**2 && isPreviewable(props.document.mimeType),
     retry: false,
     refetchOnWindowFocus: false,
   }));
 
+  const derivativeQuery=useQuery(()=>({queryKey:['share-link',props.token,'derivative',props.accessToken],queryFn:()=>fetchSharedDocumentDirect({token:props.token,accessToken:props.accessToken,mode:'preview'}),enabled:props.document.size > 32 * 1024**2,retry:false,refetchInterval:5000}));
   return (
     <div>
       <div class="flex flex-col md:flex-row items-center gap-2 md:gap-4 max-w-5xl px-6 w-full mx-auto py-12 border-b">
@@ -144,6 +142,7 @@ const SharedDocumentCard: Component<{
       </div>
 
       <div class="p-6 flex justify-center max-w-5xl mx-auto w-full">
+        <Show when={derivativeQuery.data?.url}>{url=><img src={url()} alt="File preview" class="max-w-full" />}</Show>
         <Show when={previewQuery.data?.blob}>
           {(getBlob) => (
             <div class="rounded-md overflow-hidden w-full min-h-1200px">

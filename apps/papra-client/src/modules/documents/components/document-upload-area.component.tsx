@@ -7,7 +7,7 @@ import { useDocumentUpload } from './document-import-status.component';
 export const DocumentUploadArea: Component = () => {
   const [isDragging, setIsDragging] = createSignal(false);
 
-  const { promptImport, uploadDocuments } = useDocumentUpload();
+  const { promptImport, promptFolderImport, uploadDocuments } = useDocumentUpload();
 
   const handleDragOver = (event: DragEvent) => {
     event.preventDefault();
@@ -25,7 +25,7 @@ export const DocumentUploadArea: Component = () => {
       return;
     }
 
-    const files = [...event.dataTransfer.files].filter((file) => file.type === 'application/pdf');
+    const files = [...event.dataTransfer.files];
     await uploadDocuments({ files });
   };
 
@@ -46,6 +46,7 @@ export const DocumentUploadArea: Component = () => {
         <div class="i-tabler-upload mr-2" />
         Select files
       </Button>
+      <Button class="mt-2" variant="ghost" onClick={promptFolderImport}>Upload a folder</Button>
     </div>
   );
 };

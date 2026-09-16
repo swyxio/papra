@@ -1,3 +1,6 @@
+import { DriveSpaceCapabilities } from '@/modules/drive-capabilities';
+import { DriveFolders } from '@/modules/drive-collaboration/drive-folders.component';
+import { DriveExport } from '../components/drive-export.component';
 import type { RowSelectionState, SortingState } from '@tanstack/solid-table';
 import type { Component, Setter } from 'solid-js';
 import type { BatchTargetFilter } from '../documents-batch.services';
@@ -262,6 +265,9 @@ export const DocumentsPage: Component = () => {
 
   return (
     <div class="p-6 mt-4 pb-32">
+      <DriveFolders organizationId={params.organizationId} />
+      <DriveExport organizationId={params.organizationId} />
+      <DriveSpaceCapabilities organizationId={params.organizationId} />
       <Suspense>
         {documentsQuery.data?.documents?.length === 0 && debouncedSearchQuery().length === 0 ? (
           <>
