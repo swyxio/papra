@@ -14,7 +14,7 @@ export function PdfFields(props:{url:string;fields:SigningField[];onReady?:()=>v
     void task.promise.then(d=>{if(active){setPdf(d);setMessage('');props.onReady?.();}}).catch(()=>{if(active){setMessage('Could not load the PDF. Reload to try again.');props.onError?.();}});
     onCleanup(()=>{active=false;void task.destroy();});
   });
-  return <div class="space-y-6"><Show when={message()}><p role="status">{message()}</p></Show><Show when={pdf()}>{d=><For each={Array.from({length:d().numPages},(_,i)=>i+1)}>{page=><PdfPage {...props} pdf={d()} page={page} fields={props.fields.filter(f=>f.page===page)}/>}</For>}</Show></div>;
+  return <div class="space-y-6 min-w-0 w-full"><Show when={message()}><p role="status">{message()}</p></Show><Show when={pdf()}>{d=><For each={Array.from({length:d().numPages},(_,i)=>i+1)}>{page=><PdfPage {...props} pdf={d()} page={page} fields={props.fields.filter(f=>f.page===page)}/>}</For>}</Show></div>;
 }
 function PdfPage(props:{pdf:PDFDocumentProxy;page:number;fields:SigningField[]}&FieldActions){
   let canvas!:HTMLCanvasElement;let wrapper!:HTMLDivElement;
@@ -24,8 +24,8 @@ function PdfPage(props:{pdf:PDFDocumentProxy;page:number;fields:SigningField[]}&
     if(!props.onMove)return;event.stopPropagation();event.preventDefault();const node=event.currentTarget as HTMLElement,rect=wrapper.getBoundingClientRect();const dx=event.clientX-rect.left-field.x*rect.width,dy=event.clientY-rect.top-field.y*rect.height;
     node.setPointerCapture(event.pointerId);node.onpointermove=e=>props.onMove?.(field.id,Math.max(0,Math.min(1-field.width,(e.clientX-rect.left-dx)/rect.width)),Math.max(0,Math.min(1-field.height,(e.clientY-rect.top-dy)/rect.height)));node.onpointerup=()=>{node.onpointermove=null;node.onpointerup=null;};
   }
-  return <div><p class="text-xs text-muted-foreground mb-2">Page {props.page}</p><div ref={wrapper} class="relative border shadow-sm bg-white overflow-hidden" style={{'aspect-ratio':ratio(),'touch-action':props.onPlace?'none':'auto'}} onClick={e=>{if(e.target!==canvas)return;const r=wrapper.getBoundingClientRect();props.onPlace?.(props.page,(e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height);}}>
-    <canvas ref={canvas} class="w-full h-full"/><Show when={failed()}><p class="absolute top-4 left-4 text-red-700">Page rendering failed; reload before signing.</p></Show>
+  return <div class="min-w-0 w-full"><p class="text-xs text-muted-foreground mb-2">Page {props.page}</p><div ref={wrapper} class="relative w-full min-w-0 border shadow-sm bg-white overflow-hidden" style={{'aspect-ratio':ratio(),'touch-action':props.onPlace?'none':'auto'}} onClick={e=>{if(e.target!==canvas)return;const r=wrapper.getBoundingClientRect();props.onPlace?.(props.page,(e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height);}}>
+    <canvas ref={canvas} class="block w-full h-full max-w-full"/><Show when={failed()}><p class="absolute top-4 left-4 text-red-700">Page rendering failed; reload before signing.</p></Show>
     <Index each={props.fields}>{field=><div class="absolute border-2 border-blue-500 bg-blue-100/70 text-blue-950 flex items-center justify-between px-1 text-xs select-none overflow-hidden" style={{left:`${field().x*100}%`,top:`${field().y*100}%`,width:`${field().width*100}%`,height:`${field().height*100}%`,'touch-action':'none',cursor:props.onMove?'move':'default'}} onPointerDown={e=>move(e,field())} onClick={e=>e.stopPropagation()}><span class="truncate">{props.labels?.(field())||field().label||field().type}</span><Show when={props.onRemove}><button type="button" aria-label={`Remove ${field().type} field`} class="px-1 font-bold" onPointerDown={e=>e.stopPropagation()} onClick={()=>props.onRemove?.(field().id)}>×</button></Show></div>}</Index>
   </div></div>;
 }

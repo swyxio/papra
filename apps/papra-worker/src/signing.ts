@@ -50,7 +50,7 @@ export function registerSigningRoutes(app:App){
     const version=await first(c.env,'SELECT * FROM versions WHERE id=? AND document_id=?',c.req.param('versionId'),d.id);
     if(!version||version.mime_type!=='application/pdf')throw error(404,'PDF revision not found');
     if(version.size>SIGNING_MAX_BYTES)throw error(413,'Signing supports PDFs up to 10 MiB');
-    const object=await c.env.FILES.get(version.storage_key);if(!object)throw error(404,'PDF not found');c.header('Content-Type','application/pdf');return c.body(object.body);
+    const object=await c.env.FILES.get(version.storage_key);if(!object)throw error(404,'PDF not found');if(c.req.query('check')==='true'){try{await signingPdf(new Uint8Array(await object.arrayBuffer()));}catch(e){throw error(400,(e as Error).message);}return c.json({ok:true});}c.header('Content-Type','application/pdf');return c.body(object.body);
   });
   app.get(base,async c=>{const d=await ensureDocumentAccess(c.env,c.get('identity'),c.req.param('doc'));if(d.organization_id!==c.req.param('org'))throw error(404,'File not found');const role=await ensureOrganizationMember(c.env,c.get('identity'),d.organization_id);const links=['owner','admin'].includes(role)&&!c.get('identity').serviceScope;const rows=await all<RequestRow>(c.env,'SELECT * FROM signing_requests WHERE document_id=? ORDER BY created_at DESC',d.id);return c.json({canSend:links,requests:await Promise.all(rows.map(r=>signingDto(c.env,r,links))),maxBytes:SIGNING_MAX_BYTES});});
   app.post(base,async c=>{

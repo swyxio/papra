@@ -13,3 +13,11 @@ function isHttpErrorWithStatusCode({ error, statusCode }: { error: unknown; stat
 function isRateLimitError({ error }: { error: unknown }) {
   return isHttpErrorWithStatusCode({ error, statusCode: 429 });
 }
+
+export function getHttpErrorMessage(error: unknown): string {
+  const detail = get(error, ['data', 'message']);
+  if (typeof detail === 'string') return detail;
+  return error instanceof Error && error.name !== 'FetchError'
+    ? error.message
+    : 'Request failed. Please try again.';
+}

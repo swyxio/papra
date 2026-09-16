@@ -2,6 +2,7 @@ import type { Component, ComponentProps, JSX } from 'solid-js';
 import { A } from '@solidjs/router';
 import { For } from 'solid-js';
 import { cn } from '@/modules/shared/style/cn';
+import { canonicalOrganizationUrl } from '@/modules/navigation/organization-urls';
 import { Button } from './button';
 
 export type SideNavMenuItem = {
@@ -27,7 +28,7 @@ const MenuItemButton: Component<SideNavMenuItem> = (props) => {
         ? { onClick: props.onClick }
         : ({
             as: A,
-            href: props.href,
+            href: props.href && canonicalOrganizationUrl(props.href),
             activeClass: 'bg-accent/50! text-accent-foreground! truncate',
             end: true,
           } as ComponentProps<typeof Button>))}

@@ -11,6 +11,8 @@ import { ConfigProvider } from './modules/config/config.provider';
 import { ShareDocumentDialogProvider } from './modules/document-share-links/components/share-document-dialog.component';
 import { RenameDocumentDialogProvider } from './modules/documents/components/rename-document-button.component';
 import { I18nProvider } from './modules/i18n/i18n.provider';
+import { CanonicalOrganizationNavigation } from './modules/navigation/canonical-organization-navigation';
+import { resolveOrganizationRoute } from './modules/navigation/organization-urls';
 import { AboutDialogProvider } from './modules/shared/components/about-dialog';
 import { ConfirmModalProvider } from './modules/shared/confirm';
 import { queryClient } from './modules/shared/query/query-client';
@@ -32,9 +34,11 @@ render(() => {
   return (
     <QueryClientProvider client={queryClient}>
       <Router
+        transformUrl={resolveOrganizationRoute}
         children={routes}
         root={(props) => (
           <>
+            <CanonicalOrganizationNavigation />
             <PageViewTracker />
             <IdentifyUser />
             <I18nProvider>
