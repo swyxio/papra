@@ -19,6 +19,19 @@ class ProcessingError extends Error {
     this.status = status;
   }
 }
+// Report only known errno identifiers; exception messages may contain signed object URLs.
+async function objectFetch(url, options) {
+  try {
+    return await fetch(url, options);
+  } catch (error) {
+    const raw = error?.cause?.code ?? error?.code;
+    const code =
+      typeof raw === 'string' && /^[A-Z_]{1,60}$/.test(raw) ? raw.toLowerCase() : 'network_failed';
+    // oxlint-disable-next-line no-console -- Errno-only provider diagnostics exclude capability URLs.
+    console.error(JSON.stringify({ error: 'object_fetch_failed', causeCode: code }));
+    throw new ProcessingError(`object_fetch_${code}`, 502);
+  }
+}
 function bound(value, fallback, minimum, maximum) {
   if (value === undefined) return fallback;
   if (!Number.isInteger(value) || value < minimum || value > maximum)
@@ -140,7 +153,7 @@ async function command(program, args, signal, maxOutput = MAX_TEXT_BYTES) {
   });
 }
 async function download(source, destination, maxBytes, signal) {
-  const response = await fetch(source.url, { signal, redirect: 'error' });
+  const response = await objectFetch(source.url, { signal, redirect: 'error' });
   if (!response.ok || !response.body) throw new ProcessingError('source_download_failed', 502);
   const declared = Number(response.headers.get('content-length'));
   if (declared > maxBytes) {
@@ -166,7 +179,7 @@ async function upload(file, output, kind, contentType, signal, timeline = {}) {
   const size = (await stat(file)).size;
   const hash = createHash('sha256');
   for await (const chunk of createReadStream(file)) hash.update(chunk);
-  const response = await fetch(output.url, {
+  const response = await objectFetch(output.url, {
     method: 'PUT',
     body: createReadStream(file),
     duplex: 'half',
@@ -419,7 +432,7 @@ export async function hashObject(job) {
   }
   const url = authorizedUrl(job.source.url, true);
   const signal = AbortSignal.timeout(JOB_TIMEOUT_MS);
-  const response = await fetch(url, { signal, redirect: 'error' });
+  const response = await objectFetch(url, { signal, redirect: 'error' });
   if (!response.ok || !response.body) throw new ProcessingError('source_download_failed', 502);
   const hash = createHash('sha256');
   let received = 0;

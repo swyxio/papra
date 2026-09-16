@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { validateJob, server } from './server.mjs';
+import { validateJob, server, hashObject } from './server.mjs';
 
 const host = 'https://2d017c943ff16e4c52783635ef05e535.r2.cloudflarestorage.com/papra-drive/';
 const signed = (key) => host + key + '?X-Amz-Signature=test';
@@ -51,4 +51,29 @@ test('invalid payloads return safe domain errors without echoing capability URLs
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
+});
+
+test('native network diagnostics expose errno only, excluding signed URLs and exception messages', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => {
+    throw new TypeError('failed signed private URL SECRET', {
+      cause: { code: 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' },
+    });
+  });
+  const logs = [];
+  t.mock.method(console, 'error', (line) => logs.push(line));
+  await assert.rejects(
+    hashObject({
+      jobId: 'safe-network',
+      source: { url: signed('originals/example'), byteSize: 100 },
+    }),
+    (error) => {
+      assert.equal(error.code, 'object_fetch_unable_to_verify_leaf_signature');
+      assert.equal(error.status, 502);
+      assert.ok(!error.message.includes('SECRET'));
+      return true;
+    },
+  );
+  assert.deepEqual(logs, [
+    JSON.stringify({ error: 'object_fetch_failed', causeCode: 'unable_to_verify_leaf_signature' }),
+  ]);
 });
