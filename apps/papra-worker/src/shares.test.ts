@@ -164,6 +164,31 @@ async function fixture() {
 }
 
 describe('Worker share link permission and revocation', () => {
+  test('sharing lists expose actual manage permission without inviting members to forbidden actions', async () => {
+    const { request, create } = await fixture();
+    const share = await create();
+    const member = (await (
+      await request(
+        '/api/organizations/team/documents/open/share-links',
+        'GET',
+        undefined,
+        'member',
+      )
+    ).json()) as any;
+    expect(member.canManage).toBe(false);
+    expect(member.shareLinks[0].canManage).toBe(false);
+    expect(member.shareLinks[0].id).toBe(share.id);
+    const owner = (await (
+      await request('/api/organizations/team/documents/open/share-links')
+    ).json()) as any;
+    expect(owner.canManage).toBe(true);
+    expect(owner.shareLinks[0].canManage).toBe(true);
+    const organization = (await (
+      await request('/api/organizations/team/share-links', 'GET', undefined, 'member')
+    ).json()) as any;
+    expect(organization.shareLinks[0].canManage).toBe(false);
+    expect((await request(`/api/share-links/${share.token}/document`)).status).toBe(200);
+  });
   test('salted PBKDF2 passwords verify exactly and reject malformed hashes', async () => {
     const first = await hashSharePassword('correct password');
     const second = await hashSharePassword('correct password');

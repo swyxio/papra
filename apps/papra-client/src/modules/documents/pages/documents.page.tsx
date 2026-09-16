@@ -3,11 +3,12 @@ import { DriveFolders } from '@/modules/drive-collaboration/drive-folders.compon
 import { DriveExport } from '../components/drive-export.component';
 import type { RowSelectionState, SortingState } from '@tanstack/solid-table';
 import type { Component, Setter } from 'solid-js';
+import type { Document } from '../documents.types';
 import type { BatchTargetFilter } from '../documents-batch.services';
 import type { DocumentSearchSortField, DocumentSearchSortOrder } from '../documents.constants';
 import { A, useParams } from '@solidjs/router';
 import { keepPreviousData, useMutation, useQuery } from '@tanstack/solid-query';
-import { createEffect, createMemo, createSignal, on, Show, Suspense } from 'solid-js';
+import { createEffect, createMemo, createSignal, on, For, Show, Suspense } from 'solid-js';
 import { CreateDocumentViewModal } from '@/modules/document-views/components/document-view-modals';
 import { useI18n } from '@/modules/i18n/i18n.provider';
 import { useConfirmModal } from '@/modules/shared/confirm';
@@ -36,6 +37,7 @@ import {
   DOCUMENT_SEARCH_SORT_FIELDS,
   DOCUMENT_SEARCH_SORT_ORDERS,
 } from '../documents.constants';
+import { fetchCustomPropertyDefinitions } from '@/modules/custom-properties/custom-properties.services';
 import { fetchOrganizationDocuments } from '../documents.services';
 
 export const DocumentsPage: Component = () => {
@@ -82,6 +84,48 @@ export const DocumentsPage: Component = () => {
     setSortField(first.id as DocumentSearchSortField);
     setSortOrder(first.desc ? 'desc' : 'asc');
     return next;
+  };
+
+  const [propertyId, setPropertyId] = createSignal('');
+  const [propertyValue, setPropertyValue] = createSignal('');
+  const propertiesQuery = useQuery(() => ({
+    queryKey: ['organizations', params.organizationId, 'custom-properties'],
+    queryFn: async () => fetchCustomPropertyDefinitions({ organizationId: params.organizationId }),
+  }));
+  const propertyDisplay = (value: unknown): string => {
+    if (value === null || value === undefined) return 'Not set';
+    if (Array.isArray(value)) return value.map(propertyDisplay).join(', ');
+    if (typeof value === 'object')
+      return String(
+        (value as { name?: string; email?: string }).name ||
+          (value as { email?: string }).email ||
+          '',
+      );
+    return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
+      ? String(value)
+      : '';
+  };
+  const propertiesColumn = {
+    id: 'properties',
+    header: 'Properties',
+    enableSorting: false,
+    cell: (data: { row: { original: Document } }) => (
+      <div class="space-y-1 text-xs">
+        <For each={data.row.original.customProperties?.filter((p) => p.value !== null)}>
+          {(property) => (
+            <div class="max-w-56 break-words">
+              <span class="text-muted-foreground">{property.name}: </span>
+              {propertyDisplay(property.value)}
+            </div>
+          )}
+        </For>
+      </div>
+    ),
+  };
+  const addPropertyFilter = () => {
+    const quoted = propertyValue().replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+    setSearchQuery(`${getSearchQuery().trim()} property.${propertyId()}:"${quoted}"`.trim());
+    setPagination((current) => ({ ...current, pageIndex: 0 }));
   };
 
   const documentsQuery = useQuery(() => ({
@@ -266,7 +310,16 @@ export const DocumentsPage: Component = () => {
   return (
     <div class="p-6 mt-4 pb-32">
       <DriveFolders organizationId={params.organizationId} />
-      <div class="flex gap-3 mb-3"><Button as={A} variant="outline" href={`/organizations/${params.organizationId}/documents/new`}>Create document</Button><DriveExport organizationId={params.organizationId} /></div>
+      <div class="flex gap-3 mb-3">
+        <Button
+          as={A}
+          variant="outline"
+          href={`/organizations/${params.organizationId}/documents/new`}
+        >
+          Create document
+        </Button>
+        <DriveExport organizationId={params.organizationId} />
+      </div>
       <details class="my-4">
         <summary class="cursor-pointer text-sm font-medium">
           Semantic search, document answers and automation
@@ -342,6 +395,43 @@ export const DocumentsPage: Component = () => {
               </Show>
             </div>
 
+            <p class="mt-2 text-xs text-muted-foreground">
+              Search filenames, document text, notes and property values. Filters: tag:Contract ·
+              created:&gt;=2026-01-01 · has:date
+            </p>
+            <Show when={propertiesQuery.data?.propertyDefinitions.length}>
+              <div class="mt-3 flex flex-wrap items-end gap-2 rounded-lg border p-3">
+                <label class="space-y-1 text-sm">
+                  <span class="block">Filter by property</span>
+                  <select
+                    class="rounded-md border bg-background p-2"
+                    value={propertyId()}
+                    onChange={(event) => setPropertyId(event.currentTarget.value)}
+                  >
+                    <option value="">Choose property</option>
+                    <For each={propertiesQuery.data?.propertyDefinitions}>
+                      {(property) => <option value={property.id}>{property.name}</option>}
+                    </For>
+                  </select>
+                </label>
+                <label class="space-y-1 text-sm">
+                  <span class="block">Value</span>
+                  <input
+                    class="rounded-md border bg-background p-2"
+                    placeholder="Exact value (e.g. Approved)"
+                    value={propertyValue()}
+                    onInput={(event) => setPropertyValue(event.currentTarget.value)}
+                  />
+                </label>
+                <Button
+                  variant="outline"
+                  disabled={!propertyId() || !propertyValue().trim()}
+                  onClick={addPropertyFilter}
+                >
+                  Apply property filter
+                </Button>
+              </div>
+            </Show>
             <div class="mb-4 mt-2 ml-2 min-h-8 flex items-center">
               <Show
                 when={showToolbar()}
@@ -459,6 +549,7 @@ export const DocumentsPage: Component = () => {
               setSorting={setSorting}
               extraColumns={[
                 tagsColumn,
+                propertiesColumn,
                 documentDateColumn,
                 createdAtColumn,
                 standardActionsColumn,

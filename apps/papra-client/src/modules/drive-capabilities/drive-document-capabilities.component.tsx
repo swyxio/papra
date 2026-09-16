@@ -10,6 +10,7 @@ export function DriveDocumentCapabilities(props: {
   documentId: string;
   onChanged?: () => void;
 }) {
+  let replacementInput: HTMLInputElement | undefined;
   const [history, { refetch }] = createResource(
     () => [props.organizationId, props.documentId] as const,
     async ([org, doc]) => fetchVersions(org, doc),
@@ -22,6 +23,7 @@ export function DriveDocumentCapabilities(props: {
     const scope = `${props.organizationId}:${props.documentId}`;
     if (scope) {
       setFile(undefined);
+      if (replacementInput) replacementInput.value = '';
       setProgress(undefined);
       setError(undefined);
     }
@@ -40,6 +42,7 @@ export function DriveDocumentCapabilities(props: {
         await refetch();
         props.onChanged?.();
         setFile(undefined);
+        if (replacementInput) replacementInput.value = '';
       }
     } catch (failure) {
       setError(failure);
@@ -63,15 +66,31 @@ export function DriveDocumentCapabilities(props: {
               void changeVersion();
             }}
           >
-            <label class="block text-sm font-medium">
-              Replacement file
+            <div class="space-y-2">
+              <p class="text-sm font-medium">Replacement file</p>
               <input
-                class="mt-2 block w-full text-sm"
+                ref={(element) => {
+                  replacementInput = element;
+                }}
+                class="sr-only"
                 type="file"
+                aria-label="Choose replacement file"
                 disabled={busy()}
                 onChange={(event) => setFile(event.currentTarget.files?.[0])}
               />
-            </label>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busy()}
+                onClick={() => replacementInput?.click()}
+              >
+                <span class="i-tabler-file-upload mr-2" />
+                Choose replacement file
+              </Button>
+              <p class="text-sm break-all" role="status">
+                {file()?.name || 'No file selected. Choose a file to enable Upload replacement.'}
+              </p>
+            </div>
             <Button type="submit" isLoading={busy()} disabled={!file()}>
               Upload replacement
             </Button>

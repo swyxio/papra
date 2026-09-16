@@ -60,8 +60,13 @@ export const semanticSearch = async (organizationId: string, query: string) =>
     path: `${base(organizationId)}/search/semantic`,
     body: { query },
   });
+export type DriveTextStatus = 'ready' | 'processing' | 'failed' | 'empty' | 'no_matches';
+export const fetchDocumentSearchStatus = async (organizationId: string, documentId: string) =>
+  apiClient<{ status: DriveTextStatus }>({
+    path: `${documentBase(organizationId, documentId)}/search-status`,
+  });
 export const askDocuments = async (organizationId: string, question: string, documentId?: string) =>
-  apiClient<{ answer: string; sources: DriveSource[] }>({
+  apiClient<{ answer: string; sources: DriveSource[]; status: DriveTextStatus }>({
     method: 'POST',
     path: `${base(organizationId)}/chat`,
     body: { question, documentId },

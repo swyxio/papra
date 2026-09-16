@@ -3,6 +3,7 @@ import type { AsDto } from '../shared/http/http-client.types';
 import { apiClient } from '../shared/http/api-client';
 import { isHttpErrorWithStatusCode } from '../shared/http/http-errors';
 import { coerceDates } from '../shared/http/http-client.models';
+
 export type TransferProgress = {
   bytes: number;
   total: number;
@@ -31,10 +32,10 @@ export async function multipartUpload(
   file: File,
   organizationId: string,
   onProgress?: (progress: TransferProgress) => void,
-  options: { folderId?: string; documentId?: string } = {},
+  options: { folderId?: string; documentId?: string; fileName?: string } = {},
 ) {
   const fingerprint = await fileFingerprint(file);
-  const key = `drive-upload:${organizationId}:${options.documentId || options.folderId || 'home'}:${fingerprint}`;
+  const key = `drive-upload:${organizationId}:${options.documentId || options.folderId || 'home'}:${options.fileName || file.name}:${fingerprint}`;
   const base = `/api/organizations/${organizationId}/uploads`;
   let saved: Saved | undefined;
   try {
@@ -130,7 +131,7 @@ export async function multipartUpload(
   let next = 1;
   let stopped = false;
   const controllers = new Set<XMLHttpRequest>();
-  const send = (url: string, blob: Blob, n: number) =>
+  const send = async (url: string, blob: Blob, n: number) =>
     new Promise<void>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       controllers.add(xhr);

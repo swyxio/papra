@@ -5,6 +5,7 @@ import { httpClient } from '../shared/http/http-client';
 
 // Wire shape returned by the server: dates are ISO strings (or null).
 type ShareLinkDto = {
+  canManage: boolean;
   id: string;
   documentId: string;
   organizationId: string;
@@ -59,12 +60,15 @@ export async function fetchDocumentShareLinks({
   organizationId: string;
   documentId: string;
 }) {
-  const { shareLinks } = await apiClient<{ shareLinks: ShareLinkDto[] }>({
+  const { shareLinks, canManage } = await apiClient<{
+    shareLinks: ShareLinkDto[];
+    canManage: boolean;
+  }>({
     method: 'GET',
     path: `/api/organizations/${organizationId}/documents/${documentId}/share-links`,
   });
 
-  return { shareLinks: shareLinks.map(toShareLink) };
+  return { canManage, shareLinks: shareLinks.map(toShareLink) };
 }
 
 export async function fetchOrganizationShareLinks({ organizationId }: { organizationId: string }) {
@@ -175,6 +179,20 @@ export async function fetchSharedDocumentFile({
   return { blob };
 }
 
-export async function fetchSharedDocumentDirect({token,accessToken,mode}: {token:string;accessToken?:string;mode:'download'|'preview'}) {
- return httpClient<{url:string|null;status?:string}>({method:'GET',baseUrl:buildTimeConfig.baseApiUrl,url:`/api/share-links/${token}/document/file`,query:{direct:mode},headers:getAuthorizationHeaders({accessToken})});
+export async function fetchSharedDocumentDirect({
+  token,
+  accessToken,
+  mode,
+}: {
+  token: string;
+  accessToken?: string;
+  mode: 'download' | 'preview';
+}) {
+  return httpClient<{ url: string | null; status?: string }>({
+    method: 'GET',
+    baseUrl: buildTimeConfig.baseApiUrl,
+    url: `/api/share-links/${token}/document/file`,
+    query: { direct: mode },
+    headers: getAuthorizationHeaders({ accessToken }),
+  });
 }

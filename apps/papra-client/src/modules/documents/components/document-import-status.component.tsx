@@ -1,11 +1,21 @@
 import { apiClient } from '@/modules/shared/http/api-client';
 import type { ParentComponent } from 'solid-js';
 import type { Document } from '../documents.types';
+import type { TransferProgress } from '../drive-multipart.services';
 import { safely } from '@corentinth/chisels';
 import { A, useSearchParams } from '@solidjs/router';
 import { useQuery } from '@tanstack/solid-query';
 import pLimit from 'p-limit';
-import { createContext, createSignal, Index, Match, Show, Switch, useContext } from 'solid-js';
+import {
+  createContext,
+  createSignal,
+  Index,
+  Match,
+  onCleanup,
+  Show,
+  Switch,
+  useContext,
+} from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { useI18n } from '@/modules/i18n/i18n.provider';
 import { promptUploadFiles } from '@/modules/shared/files/upload';
@@ -13,6 +23,15 @@ import { useI18nApiErrors } from '@/modules/shared/http/composables/i18n-api-err
 import { cn } from '@/modules/shared/style/cn';
 import { throttle } from '@/modules/shared/utils/timing';
 import { fetchOrganizationSubscription } from '@/modules/subscriptions/subscriptions.services';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/modules/ui/components/dialog';
+import { getHttpErrorMessage, isHttpErrorWithStatusCode } from '@/modules/shared/http/http-errors';
 import { Button } from '@/modules/ui/components/button';
 import { invalidateOrganizationDocumentsQuery } from '../documents.composables';
 import { uploadDocument } from '../documents.services';
@@ -60,7 +79,7 @@ type TaskError = {
   error: Error;
 };
 
-type Task = { progress?: import('../drive-multipart.services').TransferProgress } & (
+type Task = { progress?: TransferProgress } & (
   | TaskSuccess
   | TaskError
   | {
@@ -80,6 +99,25 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
 
   const [getState, setState] = createSignal<'open' | 'closed' | 'collapsed'>('closed');
   const [getTasks, setTasks] = createSignal<Task[]>([]);
+  type DuplicateDecision = { action: 'replace' } | { action: 'rename'; name: string } | undefined;
+  const [duplicate, setDuplicate] = createSignal<{
+    name: string;
+    canReplace: boolean;
+    resolve: (decision: DuplicateDecision) => void;
+  }>();
+  const uploadLimit = pLimit(1);
+  const [newName, setNewName] = createSignal('');
+  const resolveDuplicate = async (conflict: { name: string; canReplace: boolean }) =>
+    new Promise<DuplicateDecision>((resolve) => {
+      setNewName(conflict.name.replace(/(\.[^.]+)?$/, ' (new)$1'));
+      setDuplicate({ ...conflict, resolve });
+    });
+  const decideDuplicate = (decision: DuplicateDecision) => {
+    duplicate()?.resolve(decision);
+    setDuplicate(undefined);
+  };
+
+  onCleanup(() => decideDuplicate(undefined));
 
   const updateTaskStatus = (
     args:
@@ -100,7 +138,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
 
   const interruptedQuery = useQuery(() => ({
     queryKey: ['organizations', props.organizationId, 'uploads'],
-    queryFn: () =>
+    queryFn: async () =>
       apiClient<{ uploads: { id: string; fileName: string }[] }>({
         method: 'GET',
         path: `/api/organizations/${props.organizationId}/uploads`,
@@ -128,8 +166,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
     // Optimistic prevent upload if file is too large, the server will still validate it
     const maxUploadSize = organizationLimitsQuery.data?.plan.limits.maxFileSize;
 
-    // Limit concurrent uploads to 3 to avoid overwhelming browser/server
-    const limit = pLimit(1);
+    // Serialize imports across drop areas so duplicate decisions never overwrite one another.
     const folders = new Map<string, string>();
     if (folderImport) {
       const list = await apiClient<{
@@ -174,13 +211,14 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
           return;
         }
 
-        await limit(async () => {
+        await uploadLimit(async () => {
           updateTaskStatus({ file, status: 'uploading' });
 
           const [result, error] = await safely(
             uploadDocument({
               file,
               organizationId,
+              resolveDuplicate,
               folderId: folderImport
                 ? folders.get(file.webkitRelativePath.split('/').slice(0, -1).join('/'))
                 : folderId,
@@ -234,6 +272,56 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
   return (
     <DocumentUploadContext.Provider value={{ uploadDocuments }}>
       {props.children}
+      <Dialog
+        open={!!duplicate()}
+        onOpenChange={(open) => {
+          if (!open) decideDuplicate(undefined);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>A file with this name already exists</DialogTitle>
+            <DialogDescription>
+              “{duplicate()?.name}” is already in this folder. Replace it to keep its link and
+              version history, or rename the new file.
+            </DialogDescription>
+          </DialogHeader>
+          <label class="block space-y-2 text-sm font-medium">
+            Name for the new file
+            <input
+              class="w-full rounded-md border bg-background px-3 py-2"
+              value={newName()}
+              onInput={(event) => setNewName(event.currentTarget.value)}
+            />
+          </label>
+          <DialogFooter class="flex-wrap gap-2">
+            <Button variant="ghost" onClick={() => decideDuplicate(undefined)}>
+              Cancel upload
+            </Button>
+            <Button
+              variant="outline"
+              disabled={!duplicate()?.canReplace}
+              onClick={() => decideDuplicate({ action: 'replace' })}
+            >
+              Replace existing
+            </Button>
+            <Button
+              disabled={
+                !newName().trim() ||
+                newName().trim().toLowerCase() === duplicate()?.name.toLowerCase()
+              }
+              onClick={() => decideDuplicate({ action: 'rename', name: newName() })}
+            >
+              Rename and upload
+            </Button>
+          </DialogFooter>
+          <Show when={duplicate() && !duplicate()?.canReplace}>
+            <p class="text-sm text-muted-foreground">
+              You can rename the new file. Replacing the existing file requires edit access.
+            </p>
+          </Show>
+        </DialogContent>
+      </Dialog>
       <Show when={interruptedQuery.data?.uploads.length}>
         <div class="fixed bottom-2 left-2 max-w-sm bg-card border rounded-lg p-3 text-sm shadow-lg">
           Interrupted uploads:{' '}
@@ -290,7 +378,12 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
                             <div class="flex-1 truncate">{task().file.name}</div>
 
                             <div class="text-xs text-muted-foreground truncate text-red-500">
-                              {getErrorMessage({ error: (task() as TaskError).error })}
+                              {isHttpErrorWithStatusCode({
+                                error: (task() as TaskError).error,
+                                statusCode: 409,
+                              })
+                                ? getHttpErrorMessage((task() as TaskError).error)
+                                : getErrorMessage({ error: (task() as TaskError).error })}
                             </div>
                           </div>
 

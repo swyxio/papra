@@ -523,3 +523,86 @@ describe('D1 collaboration authorization and actual routes', () => {
     });
   });
 });
+
+test('Activity includes historical upload versions with real actors, stable pagination and no duplicates', async () => {
+  const f = await fixture();
+  await f.DB.exec(
+    "INSERT INTO versions(id,document_id,storage_key,original_name,size,created_by,created_at) VALUES('replacement','doc_public','replacement-key','new.pdf',5,'writer',10),('unknown-actor','doc_public','unknown-key','unknown.pdf',5,'removed-user',20); INSERT INTO document_activity(id,document_id,user_id,event,created_at) VALUES('act_replacement','doc_public','writer','replaced',10);",
+  );
+  await f.DB.exec(
+    "INSERT INTO versions(id,document_id,storage_key,original_name,size,created_by,created_at) VALUES('authored','doc_public','authored-key','created.pdf',5,'writer',30); INSERT INTO authored_versions VALUES('authored','doc_public','{}',30);",
+  );
+  const path = `${f.base}/documents/doc_public/activity`;
+  const first = await f.request(`${path}?pageSize=2&pageIndex=0`, 'GET', undefined, 'reader');
+  expect(first.status).toBe(200);
+  expect(((await first.json()) as any).activities).toMatchObject([
+    { id: 'act_unknown-actor', event: 'replaced', user: null },
+    { id: 'act_replacement', event: 'replaced', user: { id: 'writer', name: 'writer' } },
+  ]);
+  const second = await f.request(`${path}?pageSize=2&pageIndex=1`, 'GET', undefined, 'reader');
+  expect(((await second.json()) as any).activities).toMatchObject([
+    { id: 'act_version:doc_public', event: 'uploaded', user: { id: 'owner' } },
+  ]);
+  expect(
+    (await f.request(`${f.base}/documents/doc_secret/activity`, 'GET', undefined, 'blocked'))
+      .status,
+  ).toBe(404);
+});
+
+test('passage comments retain version anchors and inherit them in replies, with document access enforced', async () => {
+  const { request, DB } = await fixture();
+  const path = '/api/organizations/org_team/documents/doc_public/comments';
+  const anchor = { versionId: 'version:doc_public', quote: 'Please type TEST ONLY', page: 2 };
+  const created = await request(path, 'POST', { body: 'Checking this instruction', anchor });
+  expect(created.status).toBe(201);
+  const comments = (await (await request(path)).json()) as {
+    comments: { id: string; anchor: typeof anchor }[];
+  };
+  const parent = comments.comments[0]!;
+  expect(parent.anchor).toEqual(anchor);
+  expect(
+    (
+      await request(path, 'POST', {
+        body: 'Foreign version',
+        anchor: { ...anchor, versionId: 'version:doc_secret' },
+      })
+    ).status,
+  ).toBe(404);
+  expect(
+    (
+      await request(path, 'POST', {
+        body: 'Invalid position',
+        anchor: { ...anchor, start: 8, end: 1 },
+      })
+    ).status,
+  ).toBe(400);
+  expect(
+    (
+      await request(path, 'POST', {
+        body: 'Reply',
+        parentId: parent.id,
+        anchor: { ...anchor, quote: 'Override' },
+      })
+    ).status,
+  ).toBe(201);
+  await DB.prepare(
+    "INSERT INTO versions(id,document_id,storage_key,original_name,size,created_by,created_at) VALUES ('new-public','doc_public','new-public','new.pdf',1,'owner',2)",
+  ).run();
+  await DB.prepare(
+    "UPDATE documents SET current_version_id='new-public' WHERE id='doc_public'",
+  ).run();
+  const retained = (await (await request(path)).json()) as {
+    comments: { anchor: typeof anchor }[];
+  };
+  expect(retained.comments.map((item) => item.anchor)).toEqual([anchor, anchor]);
+  expect(
+    (
+      await request(
+        '/api/organizations/org_team/documents/doc_secret/comments',
+        'POST',
+        { body: 'No access', anchor },
+        'blocked',
+      )
+    ).status,
+  ).toBe(404);
+});

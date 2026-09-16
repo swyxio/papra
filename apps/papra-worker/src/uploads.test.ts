@@ -7,6 +7,8 @@ import { afterEach, expect, test, vi } from 'vitest';
 import type { AppEnv, Env, Identity } from './types';
 import { registerUploadRoutes } from './uploads';
 import { semanticSources } from './search';
+import { keywordPredicate } from './keyword';
+import { formatDocument } from './db';
 
 const mocks = vi.hoisted(() => ({
   parts: vi.fn(),
@@ -55,6 +57,7 @@ async function fixture() {
       FILES: {
         head: async (key: string) => objects.get(key) || null,
         put: async (key: string) => objects.set(key, { size: 0 }),
+        delete: async (key: string) => objects.delete(key),
       },
       INDEX: { query: vi.fn(async () => ({ matches: [] })) },
       AI: { run: vi.fn(async () => ({ data: [Array(768).fill(0)] })) },
@@ -168,4 +171,78 @@ test('semantic query never sends inaccessible namespace and excludes stale versi
   expect(await semanticSources(f.env, f.user, 'org', 'secret')).toHaveLength(1);
   await f.DB.prepare("UPDATE documents SET current_version_id='new' WHERE id='d'").run();
   expect(await semanticSources(f.env, f.user, 'org', 'secret')).toEqual([]);
+});
+
+test('duplicate names require an explicit replacement or rename, within the same folder', async () => {
+  const f = await fixture();
+  const create = async (fileName: string, options: Record<string, string> = {}) =>
+    f.call('', 'POST', { fileName, size: 0, fingerprint: 'c'.repeat(64), ...options });
+  const original = ((await (await create('Contract.pdf')).json()) as any).session;
+  // Reserve the name while bytes are in flight, so parallel imports cannot silently duplicate it.
+  expect((await create('CONTRACT.PDF')).status).toBe(409);
+  await f.call(`/${original.id}/complete`, 'POST', {});
+  const conflict = await create('contract.pdf');
+  expect(conflict.status).toBe(409);
+  expect(await conflict.json()).toMatchObject({
+    code: 'duplicate_file_name',
+    existingDocument: { id: original.documentId },
+    canReplace: true,
+  });
+  expect((await create('Contract (new).pdf')).status).toBe(201);
+  expect((await create('Contract.pdf', { folderId: 'private' })).status).toBe(201);
+  expect((await create('Contract.pdf', { documentId: original.documentId })).status).toBe(201);
+});
+test('upload and replacement Activity records survive accepted-response replays without duplicates', async () => {
+  const f = await fixture();
+  const create = async (documentId?: string) =>
+    (
+      (await (
+        await f.call('', 'POST', {
+          fileName: 'history.pdf',
+          size: 0,
+          fingerprint: 'd'.repeat(64),
+          documentId,
+        })
+      ).json()) as any
+    ).session;
+  const original = await create();
+  await f.call(`/${original.id}/complete`, 'POST', {});
+  await f.call(`/${original.id}/complete`, 'POST', {});
+  const replacement = await create(original.documentId);
+  await f.call(`/${replacement.id}/complete`, 'POST', {});
+  await f.call(`/${replacement.id}/complete`, 'POST', {});
+  expect(
+    (
+      await f.DB.prepare('SELECT event FROM document_activity ORDER BY created_at').all()
+    ).results.map((r) => r.event),
+  ).toEqual(['uploaded', 'replaced']);
+});
+test('property values and selected labels are visible and searchable without wildcard or numeric coercion surprises', async () => {
+  const f = await fixture();
+  await f.DB.exec(
+    "INSERT INTO documents(id,organization_id,created_by,name,mime_type,home_folder_id,created_at,updated_at) VALUES('metadata','org','writer','Contract','text/plain','fld_home_org',1,1); INSERT INTO custom_properties(id,organization_id,name,type,options,created_at,updated_at) VALUES('status','org','Status','select','[{\"id\":\"approved\",\"name\":\"Approved\"}]',1,1),('budget','org','Budget','number',NULL,1,1),('text','org','Project','text',NULL,1,1); INSERT INTO document_custom_properties VALUES('metadata','status','\"approved\"'),('metadata','budget','1200'),('metadata','text','\"100% delivered\"');",
+  );
+  const results = async (query: string) => {
+    const predicate = keywordPredicate(query);
+    return (
+      await f.DB.prepare(`SELECT d.id FROM documents d WHERE ${predicate.sql}`)
+        .bind(...predicate.bindings)
+        .all()
+    ).results;
+  };
+  expect(await results('Approved')).toEqual([{ id: 'metadata' }]);
+  expect(await results('property.status:Approved')).toEqual([{ id: 'metadata' }]);
+  expect(await results('property.budget:>1000')).toEqual([{ id: 'metadata' }]);
+  expect(await results('property.text:>1000')).toEqual([]);
+  expect(await results('property.status:Declined')).toEqual([]);
+  expect(await results('"100%"')).toEqual([{ id: 'metadata' }]);
+  expect(await results('"100_"')).toEqual([]);
+  const formatted = await formatDocument(
+    f.env,
+    (await f.DB.prepare("SELECT * FROM documents WHERE id='metadata'").first())!,
+  );
+  expect(formatted.customProperties.find((p: any) => p.key === 'status')?.value).toEqual({
+    optionId: 'approved',
+    name: 'Approved',
+  });
 });

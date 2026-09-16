@@ -1,3 +1,4 @@
+import type { DocumentSelectionAnchor } from '../documents/components/document-preview.component';
 import { apiClient } from '../shared/http/api-client';
 
 export type DriveFolder = {
@@ -17,6 +18,7 @@ export type DriveComment = {
   deletedAt: string | null;
   authorId: string | null;
   authorName: string | null;
+  anchor: DocumentSelectionAnchor | null;
   mentions: { id: string; name: string }[];
 };
 export const driveBase = (organizationId: string) => `/api/organizations/${organizationId}`;

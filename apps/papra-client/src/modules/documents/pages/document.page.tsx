@@ -49,6 +49,7 @@ import { TextArea } from '@/modules/ui/components/textarea';
 import { TextFieldLabel, TextFieldRoot } from '@/modules/ui/components/textfield';
 import { DocumentContentEditionPanel } from '../components/document-content-edition-panel.component';
 import { DocumentDatePicker } from '../components/document-date-picker.component';
+import type { DocumentSelectionAnchor } from '../components/document-preview.component';
 import { DocumentPreview } from '../components/document-preview.component';
 import { DocumentOpenWithDropdownItems } from '../components/open-with.component';
 import { useRenameDocumentDialog } from '../components/rename-document-button.component';
@@ -177,6 +178,9 @@ const driveActivityLabels: Record<string, string> = {
   'commented': 'Added a comment',
   'replied': 'Replied to a comment',
   'comment-edited': 'Edited a comment',
+  'uploaded': 'Uploaded document',
+  'replaced': 'Uploaded replacement',
+  'version-restored': 'Restored a previous version',
   'comment-deleted': 'Deleted a comment',
   'shortcut-created': 'Added a shortcut',
   'shortcut-deleted': 'Removed a shortcut',
@@ -321,6 +325,14 @@ export const DocumentPage: Component = () => {
   };
 
   const [getTab, setTab] = createSignal<Tab>(getInitialTab());
+  const [selectedAnchor, setSelectedAnchor] = createSignal<DocumentSelectionAnchor>();
+  const [focusAnchor, setFocusAnchor] = createSignal<DocumentSelectionAnchor>();
+  createEffect(() => {
+    void params.organizationId;
+    void params.documentId;
+    setSelectedAnchor(undefined);
+    setFocusAnchor(undefined);
+  });
 
   createEffect(() => {
     setSearchParams({ tab: getTab() }, { replace: true });
@@ -463,9 +475,22 @@ export const DocumentPage: Component = () => {
                   </div>
                   <Separator class="my-3" />
 
-                  <Show when={!getDocument().isDeleted}><DocumentReviews organizationId={params.organizationId} documentId={params.documentId} /></Show>
-                  <NativeDocumentAction organizationId={params.organizationId} documentId={params.documentId} />
-                  <DocumentSigning organizationId={params.organizationId} documentId={params.documentId} mimeType={getDocument().mimeType} isDeleted={!!getDocument().isDeleted} />
+                  <Show when={!getDocument().isDeleted}>
+                    <DocumentReviews
+                      organizationId={params.organizationId}
+                      documentId={params.documentId}
+                    />
+                  </Show>
+                  <NativeDocumentAction
+                    organizationId={params.organizationId}
+                    documentId={params.documentId}
+                  />
+                  <DocumentSigning
+                    organizationId={params.organizationId}
+                    documentId={params.documentId}
+                    mimeType={getDocument().mimeType}
+                    isDeleted={!!getDocument().isDeleted}
+                  />
 
                   <DocumentFolderPicker
                     documentId={params.documentId}
@@ -610,6 +635,10 @@ export const DocumentPage: Component = () => {
                     </TabsContent>
                     <TabsContent value="comments">
                       <DocumentComments
+                        currentVersionId={documentQuery.data?.document.currentVersionId}
+                        selectionAnchor={selectedAnchor()}
+                        onClearSelection={() => setSelectedAnchor(undefined)}
+                        onActivateAnchor={(anchor) => setFocusAnchor({ ...anchor })}
                         documentId={params.documentId}
                         organizationId={params.organizationId}
                       />
@@ -656,7 +685,16 @@ export const DocumentPage: Component = () => {
 
         <div class="flex-1 min-h-50vh">
           <Show when={documentQuery.data?.document}>
-            {(getDocument) => <DocumentPreview document={getDocument()} />}
+            {(getDocument) => (
+              <DocumentPreview
+                document={getDocument()}
+                focusAnchor={focusAnchor()}
+                onTextSelected={(anchor) => {
+                  setSelectedAnchor(anchor);
+                  setTab('comments');
+                }}
+              />
+            )}
           </Show>
         </div>
       </Suspense>

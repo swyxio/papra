@@ -720,7 +720,7 @@ function registerCommentRoutes(app: App) {
     }
     const page = pageIndex(context.req.query('pageIndex'));
     const { results } = await context.env.DB.prepare(
-      'SELECT c.*,u.name AS author_name FROM comments c LEFT JOIN users u ON u.id=c.author_id WHERE c.document_id=? ORDER BY c.created_at,c.id LIMIT 101 OFFSET ?',
+      'SELECT c.*,u.name AS author_name,a.version_id AS anchor_version,a.quote AS anchor_quote,a.page AS anchor_page,a.start_offset AS anchor_start,a.end_offset AS anchor_end FROM comments c LEFT JOIN users u ON u.id=c.author_id LEFT JOIN comment_anchors a ON a.comment_id=c.id WHERE c.document_id=? ORDER BY c.created_at,c.id LIMIT 101 OFFSET ?',
     )
       .bind(document.id, page * 100)
       .all<{
@@ -732,6 +732,11 @@ function registerCommentRoutes(app: App) {
         deleted_at: number | null;
         author_id: string | null;
         author_name: string | null;
+        anchor_version: string | null;
+        anchor_quote: string | null;
+        anchor_page: number | null;
+        anchor_start: number | null;
+        anchor_end: number | null;
       }>();
     const visible = results.slice(0, 100);
     const visibleIds = visible.map((comment) => comment.id);
@@ -754,6 +759,15 @@ function registerCommentRoutes(app: App) {
         deletedAt: iso(comment.deleted_at),
         authorId: comment.author_id,
         authorName: comment.author_name,
+        anchor: comment.anchor_version
+          ? {
+              versionId: comment.anchor_version,
+              quote: comment.anchor_quote,
+              page: comment.anchor_page ?? undefined,
+              start: comment.anchor_start ?? undefined,
+              end: comment.anchor_end ?? undefined,
+            }
+          : null,
         mentions: mentions
           .filter((mention) => mention.comment_id === comment.id)
           .map(({ id: userId, name }) => ({ id: userId, name })),
@@ -784,6 +798,66 @@ function registerCommentRoutes(app: App) {
       if (!parent) fail(404, 'Comment not found');
       if (parent.parent_id) fail(409, 'Reply to the main comment to keep one thread');
     }
+    let anchor: {
+      versionId: string;
+      quote: string;
+      page?: number;
+      start?: number;
+      end?: number;
+    } | null = null;
+    if (parentId) {
+      const inherited = await context.env.DB.prepare(
+        'SELECT version_id,quote,page,start_offset,end_offset FROM comment_anchors WHERE comment_id=?',
+      )
+        .bind(parentId)
+        .first<{
+          version_id: string;
+          quote: string;
+          page: number | null;
+          start_offset: number | null;
+          end_offset: number | null;
+        }>();
+      if (inherited)
+        anchor = {
+          versionId: inherited.version_id,
+          quote: inherited.quote,
+          page: inherited.page ?? undefined,
+          start: inherited.start_offset ?? undefined,
+          end: inherited.end_offset ?? undefined,
+        };
+    } else if (body.anchor != null) {
+      if (typeof body.anchor !== 'object' || Array.isArray(body.anchor))
+        fail(400, 'Invalid passage');
+      const value = body.anchor as Record<string, unknown>;
+      const versionId = stringValue(value.versionId, 'passage version');
+      const quote = stringValue(value.quote, 'selected passage', 1000);
+      const version = await context.env.DB.prepare(
+        'SELECT id FROM versions WHERE id=? AND document_id=?',
+      )
+        .bind(versionId, document.id)
+        .first();
+      if (!version) fail(404, 'Document version not found');
+      const page = value.page;
+      if (page != null && (!Number.isSafeInteger(page) || Number(page) < 1 || Number(page) > 10000))
+        fail(400, 'Invalid passage page');
+      const start = value.start,
+        end = value.end;
+      if (
+        (start != null || end != null) &&
+        (!Number.isSafeInteger(start) ||
+          !Number.isSafeInteger(end) ||
+          Number(start) < 0 ||
+          Number(end) <= Number(start) ||
+          Number(end) > 10000000)
+      )
+        fail(400, 'Invalid passage offsets');
+      anchor = {
+        versionId,
+        quote,
+        ...(page != null ? { page: Number(page) } : {}),
+        ...(start != null ? { start: Number(start), end: Number(end) } : {}),
+      };
+    }
     const recipients = await recipientsForBody(
       context.env,
       identity,
@@ -797,6 +871,20 @@ function registerCommentRoutes(app: App) {
       context.env.DB.prepare(
         'INSERT INTO comments (id,document_id,author_id,parent_id,body,created_at,updated_at) VALUES (?,?,?,?,?,?,?)',
       ).bind(commentId, document.id, identity.userId, parentId, text, timestamp, timestamp),
+      ...(anchor
+        ? [
+            context.env.DB.prepare(
+              'INSERT INTO comment_anchors (comment_id,version_id,quote,page,start_offset,end_offset) VALUES (?,?,?,?,?,?)',
+            ).bind(
+              commentId,
+              anchor.versionId,
+              anchor.quote,
+              anchor.page ?? null,
+              anchor.start ?? null,
+              anchor.end ?? null,
+            ),
+          ]
+        : []),
       ...recipients.map((userId) =>
         context.env.DB.prepare(
           'INSERT INTO comment_mentions (comment_id,user_id) VALUES (?,?)',
@@ -918,9 +1006,20 @@ function registerActivityRoutes(app: App) {
     const pageSize = Math.max(1, Math.min(100, Number(context.req.query('pageSize') ?? 100)));
     if (!Number.isSafeInteger(pageSize)) fail(400, 'Invalid page size');
     const { results } = await context.env.DB.prepare(
-      'SELECT a.id,a.event,a.created_at,u.id AS user_id,u.name AS user_name FROM document_activity a LEFT JOIN users u ON u.id=a.user_id WHERE a.document_id=? ORDER BY a.created_at DESC,a.id DESC LIMIT ? OFFSET ?',
+      `SELECT * FROM (
+        SELECT a.id,a.event,a.created_at,u.id AS user_id,u.name AS user_name
+        FROM document_activity a LEFT JOIN users u ON u.id=a.user_id WHERE a.document_id=?
+        UNION ALL
+        SELECT 'act_'||v.id AS id,
+          CASE WHEN v.id=(SELECT first.id FROM versions first WHERE first.document_id=v.document_id ORDER BY first.created_at,first.id LIMIT 1) THEN 'uploaded' ELSE 'replaced' END AS event,
+          v.created_at,u.id AS user_id,u.name AS user_name
+        FROM versions v LEFT JOIN users u ON u.id=v.created_by
+        WHERE v.document_id=? AND NOT EXISTS(SELECT 1 FROM document_activity a WHERE a.id='act_'||v.id)
+          AND NOT EXISTS(SELECT 1 FROM authored_versions av WHERE av.version_id=v.id)
+          AND NOT EXISTS(SELECT 1 FROM signing_requests sr WHERE sr.signed_version_id=v.id)
+      ) ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?`,
     )
-      .bind(document.id, pageSize, page * pageSize)
+      .bind(document.id, document.id, pageSize, page * pageSize)
       .all<{
         id: string;
         event: string;
