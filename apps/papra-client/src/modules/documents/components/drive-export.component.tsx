@@ -1,9 +1,10 @@
-import { ZipWriter, HttpReader, TextReader } from '@zip.js/zip.js';
+import { ZipWriter, TextReader } from '@zip.js/zip.js';
 import { createSignal } from 'solid-js';
 import { getHttpErrorMessage } from '@/modules/shared/http/http-errors';
 import { apiClient } from '@/modules/shared/http/api-client';
 import { Button } from '@/modules/ui/components/button';
 import { fetchOrganizationDocuments } from '../documents.services';
+import { fetchExportStream } from './drive-export.services';
 
 type SaveWindow = Window & {
   showSaveFilePicker?: (options: Record<string, unknown>) => Promise<{
@@ -50,11 +51,7 @@ export function DriveExport(props: { organizationId: string }) {
           let name = document.name.replace(/[\\/\x00-\x1f]/g, '_') || document.id;
           if (names.has(name)) name = `${document.id}-${name}`;
           names.add(name);
-          await writer.add(
-            `files/${name}`,
-            new HttpReader(entry.url, { preventHeadRequest: true, useRangeHeader: true }),
-            { level: 0 },
-          );
+          await writer.add(`files/${name}`, await fetchExportStream(entry.url), { level: 0 });
           manifest.push(entry.document);
           done++;
         }
