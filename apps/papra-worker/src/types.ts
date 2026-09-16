@@ -24,6 +24,10 @@ export type Env = {
   R2_BUCKET: string;
   VERSION: string;
   SOURCE_SHA: string;
+  SIGNING_P12: string;
+  SIGNING_PASSPHRASE: string;
+  RESEND_API_KEY: string;
+  SIGNING_FROM: string;
 };
 export type Identity = {
   userId: string;

@@ -46,6 +46,13 @@ async function deletePrefix(bucket: R2Bucket, prefix: string) {
 }
 async function purge(env: Env, d: Record<string, any>) {
   await run(env, 'UPDATE documents SET is_deleted=2 WHERE id=? AND is_deleted<>0', d.id);
+  const signing = await all(env, 'SELECT id FROM signing_requests WHERE document_id=?', d.id);
+  await run(env, "UPDATE signing_requests SET status='cancelled',lease_token=NULL WHERE document_id=?", d.id);
+  for (const request of signing) {
+    await deletePrefix(env.FILES, `signing/${request.id}/`);
+    await deletePrefix(env.BACKUPS, `signing/${request.id}/`);
+  }
+  await run(env, 'DELETE FROM signing_requests WHERE document_id=?', d.id);
   const running = await all<{ id: string; generation: number }>(
     env,
     "SELECT j.id,j.generation FROM jobs j JOIN versions v ON v.id=j.version_id WHERE v.document_id=? AND j.status IN ('processing','cancelled') AND j.kind IN ('process','hash','backup-hash')",

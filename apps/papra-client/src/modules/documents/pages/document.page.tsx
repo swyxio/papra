@@ -16,6 +16,7 @@ import {
 } from 'solid-js';
 import { DriveDocumentCapabilities } from '@/modules/drive-capabilities';
 import { DocumentComments } from '@/modules/drive-collaboration/document-comments.component';
+import { DocumentSigning } from '@/modules/drive-signing/signing.pages';
 import { DocumentFolderPicker } from '@/modules/drive-collaboration/drive-folders.component';
 import { useConfig } from '@/modules/config/config.provider';
 import { DocumentCustomPropertiesPanel } from '@/modules/custom-properties/components/document-custom-properties-panel.component';
@@ -459,6 +460,8 @@ export const DocumentPage: Component = () => {
                     )}
                   </div>
                   <Separator class="my-3" />
+
+                  <DocumentSigning organizationId={params.organizationId} documentId={params.documentId} mimeType={getDocument().mimeType} isDeleted={!!getDocument().isDeleted} />
 
                   <DocumentFolderPicker
                     documentId={params.documentId}

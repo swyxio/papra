@@ -11,6 +11,7 @@ import { registerCollaborationRoutes } from './collaboration';
 import { registerShareRoutes } from './shares';
 import { registerSearchRoutes } from './search';
 import { consumeJobs, housekeeping } from './jobs';
+import { registerSigningRoutes, processSigning, repairSigning } from './signing';
 
 export { ImageProcessorContainer, ContainerProxy } from '../native/container';
 export { MetadataBackupWorkflow } from './backup-workflow';
@@ -69,7 +70,7 @@ app.get('/api/config', (c) =>
 );
 registerAuthRoutes(app);
 app.use('/api/*', async (c, next) => {
-  if (c.req.path.startsWith('/api/share-links/')) return next();
+  if (c.req.path.startsWith('/api/share-links/') || c.req.path.startsWith('/api/signing/')) return next();
   const identity =
     (await getIdentity(c.req.raw, c.env)) || (await serviceIdentity(c.req.raw, c.env));
   if (!identity) throw new HTTPException(401, { message: 'Google sign-in required' });
@@ -99,6 +100,7 @@ registerCollaborationRoutes(app);
 registerShareRoutes(app);
 registerAutomationRoutes(app);
 registerSearchRoutes(app);
+registerSigningRoutes(app);
 app.all('/api/*', (c) => c.json({ message: 'API route not found' }, 404));
 app.all('*', async (c) => c.env.ASSETS.fetch(c.req.raw));
 app.onError((err, c) => {
@@ -109,9 +111,18 @@ app.onError((err, c) => {
 });
 export default {
   fetch: app.fetch,
-  queue: consumeJobs,
+  queue: async (batch: MessageBatch, env: Env) => {
+    const ordinary = [];
+    for (const message of batch.messages) {
+      const body = message.body as { signingId?: string };
+      if (typeof body?.signingId !== 'string') { ordinary.push(message); continue; }
+      try { await processSigning(env, body.signingId); message.ack(); }
+      catch { message.retry({delaySeconds:60}); }
+    }
+    if (ordinary.length) await consumeJobs({...batch,messages:ordinary},env);
+  },
   scheduled: async (_event: ScheduledController, env: Env, ctx: ExecutionContext) => {
-    ctx.waitUntil(Promise.all([housekeeping(env), purgeExpiredTrash(env)]));
+    ctx.waitUntil(Promise.all([housekeeping(env), purgeExpiredTrash(env), repairSigning(env)]));
   },
 };
 export { app };
