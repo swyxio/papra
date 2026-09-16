@@ -143,6 +143,9 @@ if(mode==='revoke'){
   receipt.metadata_verified=true;receipt.all_uploads_verified=records.reduce((total,record)=>total+record.files.length,0)===selection.files.length&&Object.keys(receipt.archives).length===records.length;await save(receiptPath,receipt);
   // Receipt upload is performed by finish after concurrent primary transfers stop.
   console.log(JSON.stringify({all_uploads_verified:receipt.all_uploads_verified}));
+ }else if(mode==='status'){
+  const rows=await d1('SELECT j.kind,j.status,j.error,count(*) AS count FROM jobs j JOIN versions v ON v.id=j.version_id JOIN documents d ON d.id=v.document_id WHERE d.organization_id=? AND d.home_folder_id IN (SELECT id FROM folders WHERE parent_id=? OR id=?) GROUP BY j.kind,j.status,j.error ORDER BY j.kind,j.status',[ORG,auth.folderId,auth.folderId]);
+  console.log(JSON.stringify({jobs:rows}));
  }else if(mode==='audit'){
   const target=await folder('Manifests and restore instructions');
   for(const name of ['deletion-receipt.json','local-audit.json'])await upload(path.join(stage,name),'application/json',target);

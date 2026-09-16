@@ -44,7 +44,8 @@ type Enrichment = {
   model: string;
 };
 const MAX_TEXT = 200_000,
-  LEASE_MS = 20 * 60_000;
+  LEASE_MS = 20 * 60_000,
+  WORKER_OBJECT_BYTES = 1024 ** 2;
 const WHISPER = '@cf/openai/whisper-large-v3-turbo' as const;
 const VISION = '@cf/google/gemma-4-26b-a4b-it' as const;
 const EMBEDDING = '@cf/baai/bge-base-en-v1.5' as const;
@@ -205,6 +206,24 @@ async function callNative<T>(env: Env, j: Job, path: string, payload: unknown): 
     await container.destroy().catch(() => {});
   }
 }
+// Web Crypto receives only bounded objects. Native tools stream larger files.
+async function smallObjectBytes(bucket: R2Bucket, key: string, size: number) {
+  const object = await bucket.get(key);
+  if (!object) throw new JobError('original_object_missing');
+  if (object.size !== size || object.size > WORKER_OBJECT_BYTES)
+    throw new JobError('original_size_mismatch', true);
+  const bytes = await object.arrayBuffer();
+  if (bytes.byteLength !== size) throw new JobError('original_size_mismatch', true);
+  return bytes;
+}
+async function smallObjectHash(bucket: R2Bucket, key: string, size: number, jobId: string) {
+  const bytes = await smallObjectBytes(bucket, key, size);
+  const sha256 = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (x) =>
+    x.toString(16).padStart(2, '0'),
+  ).join('');
+  return { jobId, byteSize: bytes.byteLength, sha256 };
+}
+
 async function processVersion(env: Env, j: Job, v: Version) {
   let m = await readManifest(env, v.id, j.generation);
   if (!m) {
@@ -233,7 +252,21 @@ async function processVersion(env: Env, j: Job, v: Version) {
           'Automatic extraction is unavailable for this file type. The original remains available.',
         ],
       };
-    else {
+    else if (
+      v.size <= WORKER_OBJECT_BYTES &&
+      (v.mime_type.startsWith('text/') ||
+        ['application/json', 'application/xml', 'application/xhtml+xml'].includes(v.mime_type))
+    ) {
+      const bytes = await smallObjectBytes(env.FILES, v.storage_key, v.size);
+      result = {
+        jobId: j.id,
+        text: new TextDecoder().decode(bytes).slice(0, MAX_TEXT),
+        chunks: [],
+        outputs: [],
+        metadata: {},
+        warnings: [],
+      };
+    } else {
       const storage = s3(env),
         target = async (suffix: string) => {
           const key = `derived/${v.id}/g${j.generation}/${suffix}`;
@@ -640,20 +673,17 @@ async function indexVersion(env: Env, j: Job, initial: Version) {
 }
 async function hashVersion(env: Env, j: Job, v: Version) {
   if (v.sha256) return;
-  const payload = {
-    jobId: j.id,
-    source: {
-      url: await s3(env).getPresignedUrl('GET', v.storage_key, 1800),
-      contentType: v.mime_type,
-      byteSize: v.size,
-    },
-  };
-  const value = await callNative<{ sha256: string; byteSize: number; jobId: string }>(
-    env,
-    j,
-    '/hash',
-    payload,
-  );
+  const value =
+    v.size <= WORKER_OBJECT_BYTES
+      ? await smallObjectHash(env.FILES, v.storage_key, v.size, j.id)
+      : await callNative<{ sha256: string; byteSize: number; jobId: string }>(env, j, '/hash', {
+          jobId: j.id,
+          source: {
+            url: await s3(env).getPresignedUrl('GET', v.storage_key, 1800),
+            contentType: v.mime_type,
+            byteSize: v.size,
+          },
+        });
   if (value.jobId !== j.id || value.byteSize !== v.size || !/^[a-f0-9]{64}$/.test(value.sha256))
     throw new JobError('original_hash_receipt_invalid', true);
   if (!(await owned(env, j))) return;
@@ -694,15 +724,13 @@ async function verifyBackup(env: Env, j: Job, v: Version) {
     throw new JobError('original_hash_pending');
   }
   const key = backupKey(v);
-  const receipt = await callNative<{ jobId: string; sha256: string; byteSize: number }>(
-    env,
-    j,
-    '/hash',
-    {
-      jobId: j.id,
-      source: { url: await backupS3(env).getPresignedUrl('GET', key, 1800), byteSize: v.size },
-    },
-  );
+  const receipt =
+    v.size <= WORKER_OBJECT_BYTES
+      ? await smallObjectHash(env.BACKUPS, key, v.size, j.id)
+      : await callNative<{ jobId: string; sha256: string; byteSize: number }>(env, j, '/hash', {
+          jobId: j.id,
+          source: { url: await backupS3(env).getPresignedUrl('GET', key, 1800), byteSize: v.size },
+        });
   if (receipt.jobId !== j.id || receipt.sha256 !== v.sha256 || receipt.byteSize !== v.size)
     throw new JobError('backup_checksum_mismatch', true);
   if (!(await owned(env, j))) return;

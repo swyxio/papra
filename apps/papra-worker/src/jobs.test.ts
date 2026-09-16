@@ -1,5 +1,6 @@
 import { Miniflare } from 'miniflare';
 import { S3mini } from 's3mini';
+import { getContainer } from '@cloudflare/containers';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, test, vi } from 'vitest';
@@ -232,6 +233,9 @@ test('native capacity waits preserve attempt budget and release the exact job co
   await DB.prepare(
     "INSERT INTO jobs(id,version_id,kind,status,attempts,generation,created_at,updated_at) VALUES('native-job','v','hash','pending',2,4,1,1)",
   ).run();
+  await DB.prepare('UPDATE versions SET size=? WHERE id=?')
+    .bind(1024 ** 2 + 1, 'v')
+    .run();
   const messages = batch({ jobId: 'native-job', generation: 4 });
   const retry = vi.fn();
   messages.messages[0]!.retry = retry;
@@ -375,4 +379,68 @@ test('indexing incorporates cached media scenes in numeric order without rerunni
   });
   expect(embed).toHaveBeenCalledTimes(1);
   expect(embed.mock.calls[0][0]).toBe('@cf/baai/bge-base-en-v1.5');
+});
+
+test('small Markdown extraction and independent primary/backup hashes stay in Workers', async () => {
+  const { env, DB, send } = await fixture();
+  const text = '# TEST ONLY\n\nA searchable bounded Markdown conversation.';
+  const bytes = new TextEncoder().encode(text);
+  const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (x) =>
+    x.toString(16).padStart(2, '0'),
+  ).join('');
+  await DB.batch([
+    DB.prepare("UPDATE documents SET content='' WHERE id='d'"),
+    DB.prepare(
+      "UPDATE versions SET size=?,mime_type='text/markdown',extracted_text='' WHERE id='v'",
+    ).bind(bytes.byteLength),
+  ]);
+  const primary = new Map<string, string>();
+  const backups = new Map<string, string>();
+  const object = { size: bytes.byteLength, arrayBuffer: async () => bytes.buffer };
+  env.FILES = {
+    get: vi.fn(async (key: string) => (key === 'originals/v' ? object : null)),
+    put: vi.fn(async (key: string, value: string) => primary.set(key, value)),
+  } as unknown as R2Bucket;
+  env.BACKUPS = {
+    get: vi.fn(async (key: string) => (key === 'originals/v/original' ? object : null)),
+    put: vi.fn(async (key: string, value: string) => backups.set(key, value)),
+  } as unknown as R2Bucket;
+  vi.mocked(getContainer).mockClear();
+  await enqueueVersion(env, 'v');
+  const row = await DB.prepare("SELECT id FROM jobs WHERE kind='process'").first<{ id: string }>();
+  await consumeJobs(batch({ jobId: row!.id, generation: 0 }), env);
+  expect(
+    (await DB.prepare("SELECT content FROM documents WHERE id='d'").first<{ content: string }>())!
+      .content,
+  ).toBe(text);
+  const hash = await DB.prepare("SELECT id FROM jobs WHERE kind='hash'").first<{ id: string }>();
+  await consumeJobs(batch({ jobId: hash!.id, generation: 0 }), env);
+  expect(
+    (await DB.prepare("SELECT sha256 FROM versions WHERE id='v'").first<{ sha256: string }>())!
+      .sha256,
+  ).toBe(digest);
+  await DB.prepare(
+    "INSERT INTO jobs(id,version_id,kind,status,generation,created_at,updated_at) VALUES('verify','v','backup-hash','pending',0,1,1)",
+  ).run();
+  await consumeJobs(batch({ jobId: 'verify', generation: 0 }), env);
+  expect(
+    JSON.parse(backups.get('versions/v/original-backup.json')!).independentBackupHashVerified,
+  ).toBe(true);
+  expect(env.BACKUPS.get).toHaveBeenCalledWith('originals/v/original');
+  expect(getContainer).not.toHaveBeenCalled();
+});
+
+test('small-object hashing refuses an oversized stored body before buffering it', async () => {
+  const { env, DB } = await fixture();
+  const arrayBuffer = vi.fn();
+  env.FILES = { get: async () => ({ size: 1024 ** 2 + 1, arrayBuffer }) } as unknown as R2Bucket;
+  await DB.prepare(
+    "INSERT INTO jobs(id,version_id,kind,status,generation,created_at,updated_at) VALUES('bounded','v','hash','pending',0,1,1)",
+  ).run();
+  await consumeJobs(batch({ jobId: 'bounded', generation: 0 }), env);
+  expect(arrayBuffer).not.toHaveBeenCalled();
+  expect(await DB.prepare("SELECT status,error FROM jobs WHERE id='bounded'").first()).toEqual({
+    status: 'failed',
+    error: 'original_size_mismatch',
+  });
 });
