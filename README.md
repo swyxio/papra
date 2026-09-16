@@ -2,6 +2,8 @@
 
 This maintained Papra fork powers the authorized team-drive deployment at https://drive.swyx.io for swyx, AI Engineer, Latent Space and Smol. Based on stable `@papra/app@26.6.2`. Modified source is public under AGPL-3.0-or-later; upstream notices are retained. See [operations](infra/cloudflare/README.md) and [executed verification](infra/cloudflare/VERIFICATION.md) for architecture, release, backup/recovery and material limitations.
 
+Colleagues can create their account at [Drive signup](https://drive.swyx.io/register) using a verified `@ai.engineer`, `@latent.space` or `@smol.ai` Google account. No invitation is needed: first sign-in creates a private Personal space and adds ordinary member access to the matching team. Choose the team in the space menu and upload into its Home folder for team files. Restricted folders require their own permission.
+
 <p align="center">
 <picture>
     <source srcset="./.github/icon-dark.png" media="(prefers-color-scheme: light)">

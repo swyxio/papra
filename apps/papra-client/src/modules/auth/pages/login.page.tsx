@@ -21,7 +21,7 @@ export const LoginPage: Component = () => {
     <AuthLayout>
       <div class="flex items-center justify-center h-full p-6 sm:pb-32">
         <div class="max-w-sm w-full">
-          <h1 class="text-xl font-bold">Sign in to Drive</h1>
+          <h1 class="text-xl font-bold">Sign in or create your Drive account</h1>
           <p class="text-muted-foreground mt-1 mb-4">
             Your personal files and separate team spaces.
           </p>
@@ -38,7 +38,10 @@ export const LoginPage: Component = () => {
           />
           <p class="text-muted-foreground text-sm mt-4">
             Use your ai.engineer, latent.space or smol.ai Google account. Your team space is added
-            automatically.
+            automatically on your first sign-in. No invitation is needed.
+          </p>
+          <p class="text-muted-foreground text-sm mt-2">
+            Start in your private Personal space. Choose your team in the space menu to collaborate.
           </p>
           <p class="text-muted-foreground text-xs mt-4">
             Powered by{' '}

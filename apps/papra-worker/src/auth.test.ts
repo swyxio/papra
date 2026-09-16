@@ -223,6 +223,39 @@ describe('Worker Google admission', () => {
     await Promise.all([provisionUser(env, profile), provisionUser(env, profile)]);
     expect((await DB.prepare('SELECT * FROM organization_members').all()).results).toHaveLength(4);
   });
+  test.each(['ai.engineer', 'latent.space', 'smol.ai'])(
+    'first Google sign-in self-enrolls a colleague at %s without an invitation',
+    async (domain) => {
+      const { app, env, DB } = await fixture();
+      const email = `colleague@${domain}`;
+      const login = await begin(app, env);
+      googleResponses(login.url.searchParams.get('nonce')!, { email }, { email });
+      const response = await app.request(
+        `${env.APP_URL}/api/auth/callback/google?state=${login.url.searchParams.get('state')}&code=code`,
+        { headers: { cookie: login.cookie } },
+        env,
+      );
+      expect(response.headers.get('location')).toBe(env.APP_URL + '/files');
+      const identity = await getIdentity(
+        new Request(env.APP_URL, { headers: { cookie: cookieFrom(response, 'session') } }),
+        env,
+      );
+      expect(identity?.email).toBe(email);
+      expect(identity?.isOwner).toBe(false);
+      const personalId = await getDrivePersonalOrganizationId(identity!.userId);
+      expect(identity?.organizations).toEqual(
+        expect.arrayContaining([
+          { id: personalId, name: 'Personal', role: 'owner' },
+          expect.objectContaining({ id: getDriveTeamOrganizationId(domain), role: 'member' }),
+        ]),
+      );
+      expect(identity?.organizations).toHaveLength(2);
+      expect((await DB.prepare('SELECT * FROM folders WHERE is_home=1').all()).results).toHaveLength(2);
+      await provisionUser(env, { sub: 'google-sub', email, name: 'Colleague', image: null });
+      expect((await DB.prepare('SELECT * FROM users').all()).results).toHaveLength(1);
+      expect((await DB.prepare('SELECT * FROM organization_members').all()).results).toHaveLength(2);
+    },
+  );
   test('OAuth uses browser-bound single-use state, nonce and PKCE; session revocation survives signed cookie reuse', async () => {
     const { app, env, DB } = await fixture();
     const login = await begin(app, env);
