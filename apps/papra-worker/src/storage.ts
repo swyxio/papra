@@ -1,4 +1,5 @@
 import { S3mini } from 's3mini';
+import { AwsClient } from 'aws4fetch';
 import type { Env } from './types';
 
 export const s3 = (env: Env) =>
@@ -8,11 +9,24 @@ export const s3 = (env: Env) =>
     region: 'auto',
     endpoint: `${env.R2_ENDPOINT.replace(/\/$/, '')}/${env.R2_BUCKET}`,
   });
-export const signedDownload = async (env: Env, key: string, name: string, seconds = 300) =>
-  s3(env).getPresignedUrl('GET', key, seconds, {
-    'response-content-type': 'application/octet-stream',
-    'response-content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
+export async function signedDownload(env: Env, key: string, name: string, seconds = 300) {
+  const url = new URL(
+    `${env.R2_ENDPOINT.replace(/\/$/, '')}/${env.R2_BUCKET}/${key.split('/').map(encodeURIComponent).join('/')}`,
+  );
+  url.searchParams.set('X-Amz-Expires', String(seconds));
+  url.searchParams.set('response-content-type', 'application/octet-stream');
+  url.searchParams.set(
+    'response-content-disposition',
+    `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
+  );
+  const signer = new AwsClient({
+    accessKeyId: env.R2_ACCESS_KEY_ID,
+    secretAccessKey: env.R2_SECRET_ACCESS_KEY,
+    service: 's3',
+    region: 'auto',
   });
+  return (await signer.sign(url, { method: 'GET', aws: { signQuery: true } })).url;
+}
 export async function parts(env: Env, key: string, uploadId: string) {
   const out: { partNumber: number; etag: string; size: number }[] = [];
   let marker = '0';

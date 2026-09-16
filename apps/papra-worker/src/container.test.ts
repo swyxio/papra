@@ -72,3 +72,16 @@ test('a purge while R2 PUT is in flight deletes only the exact late derived obje
   expect((await f.handler(f.request(), f.env, f.context)).status).toBe(403);
   expect(f.remove).toHaveBeenCalledExactlyOnceWith('derived/v/g0/preview.jpg');
 });
+
+test('outbound forwarding uses the edge-supported manual redirect policy and rejects redirects', async () => {
+  const f = await fixture();
+  f.forward.mockImplementation(
+    async () =>
+      new Response(null, { status: 302, headers: { Location: 'https://example.com/private' } }),
+  );
+  const response = await f.handler(f.request(), f.env, f.context);
+  expect(f.forward).toHaveBeenCalledWith(expect.any(Request), { redirect: 'manual' });
+  expect(response.status).toBe(403);
+  expect(response.headers.get('Location')).toBeNull();
+  expect(f.forward).toHaveBeenCalledOnce();
+});

@@ -57,7 +57,10 @@ ImageProcessorContainer.outboundByHost = {
     };
     if (key && !(await active())) return new Response('Job capability revoked', { status: 403 });
     url.protocol = 'https:';
-    const response = await fetch(new Request(url, request), { redirect: 'error' });
+    const response = await fetch(new Request(url, request), { redirect: 'manual' });
+    if (response.status >= 300 && response.status < 400) {
+      return new Response('Object redirects are disallowed', { status: 403 });
+    }
     if (key && !(await active())) {
       await env.FILES.delete(key);
       return new Response('Job capability revoked', { status: 403 });
