@@ -181,7 +181,7 @@ export const routes: RouteDefinition[] = [
     ],
   },
   {
-    path: authPagesPaths.login,
+    path: [authPagesPaths.login, authPagesPaths.register],
     component: () => <PublicOnlyPage children={<LoginPage />} />,
   },
   {
