@@ -29,11 +29,13 @@
       { "binding": "JOBS", "queue": "papra-drive-jobs" },
       { "binding": "TRANSFER_JOBS", "queue": "papra-drive-transfers" },
       { "binding": "SEARCH_JOBS", "queue": "papra-drive-search" },
+      { "binding": "TEXT_JOBS", "queue": "papra-drive-text" },
     ],
     "consumers": [
       { "queue": "papra-drive-jobs", "max_batch_size": 1, "max_retries": 3, "max_concurrency": 2 },
       { "queue": "papra-drive-transfers", "max_batch_size": 1, "max_retries": 3, "max_concurrency": 4 },
       { "queue": "papra-drive-search", "max_batch_size": 1, "max_retries": 3, "max_concurrency": 4 },
+      { "queue": "papra-drive-text", "max_batch_size": 1, "max_retries": 3, "max_concurrency": 8 },
     ],
   },
   "ai": { "binding": "AI" },

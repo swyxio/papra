@@ -59,6 +59,12 @@ async function fixture() {
         for (const m of messages) await send(m.body);
       }),
     },
+    TEXT_JOBS: {
+      send,
+      sendBatch: vi.fn(async (messages) => {
+        for (const m of messages) await send(m.body);
+      }),
+    },
     SEARCH_JOBS: {
       send,
       sendBatch: vi.fn(async (messages) => {
@@ -468,16 +474,17 @@ test('small-object hashing refuses an oversized stored body before buffering it'
   });
 });
 
-test('bulk job delivery separates transfers from search and extraction queues without double dispatch', async () => {
+test('bulk job delivery separates transfers, text extraction, semantic and native queues without double dispatch', async () => {
   const { env, DB } = await fixture();
   await enqueueVersion(env, 'v');
   expect(env.TRANSFER_JOBS.sendBatch).toHaveBeenCalledOnce();
-  expect(env.SEARCH_JOBS.sendBatch).toHaveBeenCalledOnce();
+  expect(env.TEXT_JOBS.sendBatch).toHaveBeenCalledOnce();
+  expect(env.SEARCH_JOBS.sendBatch).not.toHaveBeenCalled();
   expect(env.JOBS.sendBatch).not.toHaveBeenCalled();
   const transferIds = Array.from(vi.mocked(env.TRANSFER_JOBS.sendBatch).mock.calls[0][0]);
   const transferJobIds = transferIds.map((x: any) => x.body.jobId);
   expect(transferJobIds).toHaveLength(2);
-  expect(vi.mocked(env.SEARCH_JOBS.sendBatch).mock.calls[0][0]).toHaveLength(1);
+  expect(vi.mocked(env.TEXT_JOBS.sendBatch).mock.calls[0][0]).toHaveLength(1);
   await DB.prepare("UPDATE versions SET size=? WHERE id='v'")
     .bind(2 * 1024 ** 2)
     .run();

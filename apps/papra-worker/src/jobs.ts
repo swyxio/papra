@@ -107,15 +107,14 @@ function jobQueue(env: Env, j: Job) {
   if (['hash', 'backup', 'backup-hash'].includes(j.kind))
     return { name: 'papra-drive-transfers', binding: env.TRANSFER_JOBS };
   if (
-    j.kind !== 'process' ||
-    (j.object_size !== undefined &&
-      j.object_size <= WORKER_OBJECT_BYTES &&
-      (j.mime_type?.startsWith('text/') ||
-        ['application/json', 'application/xml', 'application/xhtml+xml'].includes(
-          j.mime_type || '',
-        )))
+    j.kind === 'process' &&
+    j.object_size !== undefined &&
+    j.object_size <= WORKER_OBJECT_BYTES &&
+    (j.mime_type?.startsWith('text/') ||
+      ['application/json', 'application/xml', 'application/xhtml+xml'].includes(j.mime_type || ''))
   )
-    return { name: 'papra-drive-search', binding: env.SEARCH_JOBS };
+    return { name: 'papra-drive-text', binding: env.TEXT_JOBS };
+  if (j.kind !== 'process') return { name: 'papra-drive-search', binding: env.SEARCH_JOBS };
   return { name: 'papra-drive-jobs', binding: env.JOBS };
 }
 async function dispatchJobs(env: Env, jobs: Job[]) {
