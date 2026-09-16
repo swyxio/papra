@@ -57,11 +57,11 @@ const UserEmailCard: Component<{ email: string }> = (props) => {
         </CardDescription>
       </CardHeader>
       <CardContent class="pt-6">
-        <TextFieldRoot>
+        <TextFieldRoot value={props.email}>
           <TextFieldLabel for="email" class="sr-only">
             {t('user.settings.email.label')}
           </TextFieldLabel>
-          <TextField id="email" value={props.email} disabled readOnly />
+          <TextField id="email" disabled readOnly />
         </TextFieldRoot>
       </CardContent>
     </Card>

@@ -61,18 +61,42 @@ const enrichmentKey = (v: string, k: string) => `derived/${v}/${k.replaceAll(':'
 async function version(env: Env, v: string) {
   return first<Version>(
     env,
-    `SELECT v.*,d.organization_id,d.home_folder_id,d.current_version_id,d.is_deleted,d.content document_content,d.updated_at document_updated_at FROM versions v JOIN documents d ON d.id=v.document_id WHERE v.id=?`,
+    `SELECT v.*,d.organization_id,d.home_folder_id,d.current_version_id,d.is_deleted,d.content document_content,d.updated_at document_updated_at FROM versions v JOIN documents d ON d.id=v.document_id WHERE v.id=? AND d.is_deleted<>2`,
     v,
   );
 }
 async function owned(env: Env, j: Job) {
   return !!(await first(
     env,
-    "SELECT id FROM jobs WHERE id=? AND generation=? AND lease_token=? AND status='processing'",
+    "SELECT j.id FROM jobs j JOIN versions v ON v.id=j.version_id JOIN documents d ON d.id=v.document_id WHERE j.id=? AND j.generation=? AND j.lease_token=? AND j.status='processing' AND d.is_deleted<>2",
     j.id,
     j.generation,
     j.lease_token,
   ));
+}
+async function purging(env: Env, versionId: string) {
+  const row = await first<{ is_deleted: number }>(
+    env,
+    'SELECT d.is_deleted FROM versions v JOIN documents d ON d.id=v.document_id WHERE v.id=?',
+    versionId,
+  );
+  return !row || row.is_deleted === 2;
+}
+async function fencedPut(
+  env: Env,
+  j: Job,
+  bucket: R2Bucket,
+  key: string,
+  value: string,
+  options?: R2PutOptions,
+) {
+  if (!(await owned(env, j))) return false;
+  await bucket.put(key, value, options);
+  if (!(await owned(env, j))) {
+    if (await purging(env, j.version_id)) await bucket.delete(key);
+    return false;
+  }
+  return true;
 }
 async function dispatch(env: Env, j: Job) {
   if (j.status !== 'pending') return;
@@ -93,12 +117,13 @@ export async function enqueueVersion(env: Env, v: string, kind = 'process') {
   const now = Date.now();
   await run(
     env,
-    `INSERT INTO jobs(id,version_id,kind,status,created_at,updated_at,generation) VALUES(?,?,?,'pending',?,?,0) ON CONFLICT(version_id,kind) DO UPDATE SET status='pending',generation=jobs.generation+1,lease_token=NULL,error=NULL,attempts=0,updated_at=excluded.updated_at`,
+    `INSERT INTO jobs(id,version_id,kind,status,created_at,updated_at,generation) SELECT ?,?,?,'pending',?,?,0 WHERE EXISTS(SELECT 1 FROM versions v JOIN documents d ON d.id=v.document_id WHERE v.id=? AND d.is_deleted<>2) ON CONFLICT(version_id,kind) DO UPDATE SET status='pending',generation=jobs.generation+1,lease_token=NULL,error=NULL,attempts=0,updated_at=excluded.updated_at`,
     id('job'),
     v,
     kind,
     now,
     now,
+    v,
   );
   const j = await first<Job>(env, 'SELECT * FROM jobs WHERE version_id=? AND kind=?', v, kind);
   if (j) await dispatch(env, j);
@@ -110,8 +135,8 @@ async function ensureJobs(env: Env, v: string, kinds: string[]) {
     await env.DB.batch(
       kinds.map((kind) =>
         env.DB.prepare(
-          "INSERT OR IGNORE INTO jobs(id,version_id,kind,status,created_at,updated_at,generation) VALUES(?,?,?,'pending',?,?,0)",
-        ).bind(id('job'), v, kind, now, now),
+          "INSERT OR IGNORE INTO jobs(id,version_id,kind,status,created_at,updated_at,generation) SELECT ?,?,?,'pending',?,?,0 WHERE EXISTS(SELECT 1 FROM versions v JOIN documents d ON d.id=v.document_id WHERE v.id=? AND d.is_deleted<>2)",
+        ).bind(id('job'), v, kind, now, now, v),
       ),
     );
   for (const j of await all<Job>(
@@ -130,8 +155,11 @@ async function readManifest(env: Env, v: string, g: number) {
     throw new JobError('invalid_native_manifest', true);
   return value;
 }
-async function backupManifest(env: Env, v: Version, m: Manifest) {
-  await env.BACKUPS.put(
+async function backupManifest(env: Env, j: Job, v: Version, m: Manifest) {
+  return fencedPut(
+    env,
+    j,
+    env.BACKUPS,
     `versions/${v.id}/native-g${m.generation}.json`,
     JSON.stringify({
       format: 1,
@@ -260,12 +288,12 @@ async function processVersion(env: Env, j: Job, v: Version) {
       result,
       original: { key: v.storage_key, size: v.size, sha256: v.sha256 },
     };
-    await env.FILES.put(manifestKey(v.id, j.generation), JSON.stringify(m), {
+    await fencedPut(env, j, env.FILES, manifestKey(v.id, j.generation), JSON.stringify(m), {
       httpMetadata: { contentType: 'application/json' },
     });
   }
   if (!(await owned(env, j))) return;
-  await backupManifest(env, v, m);
+  if (!(await backupManifest(env, j, v, m))) return;
   const preview = m.result.outputs.find((x) => x.kind === 'preview'),
     text = m.result.text.slice(0, MAX_TEXT);
   await env.DB.batch([
@@ -431,10 +459,13 @@ async function enrichVersion(env: Env, j: Job, v: Version) {
     };
   }
   if (!(await owned(env, j))) return;
-  await env.FILES.put(key, JSON.stringify(result), {
+  await fencedPut(env, j, env.FILES, key, JSON.stringify(result), {
     httpMetadata: { contentType: 'application/json' },
   });
-  await env.BACKUPS.put(
+  await fencedPut(
+    env,
+    j,
+    env.BACKUPS,
     `enrichment/${v.id}/${j.kind.replaceAll(':', '-')}.json`,
     JSON.stringify(result),
     { httpMetadata: { contentType: 'application/json' } },
@@ -618,13 +649,16 @@ async function hashVersion(env: Env, j: Job, v: Version) {
     j.generation,
     j.lease_token,
   );
-  await env.BACKUPS.put(
+  await fencedPut(
+    env,
+    j,
+    env.BACKUPS,
     `versions/${v.id}/original-hash.json`,
     JSON.stringify({ versionId: v.id, sourceBucket: env.R2_BUCKET, key: v.storage_key, ...value }),
     { httpMetadata: { contentType: 'application/json' } },
   );
 }
-const backupKey = (v: Version) => `originals/${v.id}/${v.original_name.replaceAll('/', '_')}`;
+const backupKey = (v: Version) => `originals/${v.id}/original`;
 const backupS3 = (env: Env) =>
   new S3mini({
     accessKeyId: env.R2_ACCESS_KEY_ID,
@@ -659,7 +693,10 @@ async function verifyBackup(env: Env, j: Job, v: Version) {
   if (receipt.jobId !== j.id || receipt.sha256 !== v.sha256 || receipt.byteSize !== v.size)
     throw new JobError('backup_checksum_mismatch', true);
   if (!(await owned(env, j))) return;
-  await env.BACKUPS.put(
+  await fencedPut(
+    env,
+    j,
+    env.BACKUPS,
     `versions/${v.id}/original-backup.json`,
     JSON.stringify({
       versionId: v.id,
@@ -709,11 +746,22 @@ async function backupOriginal(env: Env, j: Job, v: Version) {
         throw new JobError('backup_copy_part_failed');
       parts.push({ partNumber, etag });
     }
+    if (!(await owned(env, j))) throw new JobError('processing_lease_lost');
     await backup.completeMultipartUpload(key, uploadId, parts);
+    if (!(await owned(env, j))) {
+      if (await purging(env, v.id)) await env.BACKUPS.delete(key);
+      return;
+    }
     const actual = await env.BACKUPS.head(key);
     if (!actual || actual.size !== v.size) throw new JobError('backup_size_mismatch', true);
-    if (!(await owned(env, j))) return;
-    await env.BACKUPS.put(
+    if (!(await owned(env, j))) {
+      if (await purging(env, v.id)) await env.BACKUPS.delete(key);
+      return;
+    }
+    await fencedPut(
+      env,
+      j,
+      env.BACKUPS,
       `versions/${v.id}/original-backup.json`,
       JSON.stringify({
         versionId: v.id,
@@ -727,6 +775,13 @@ async function backupOriginal(env: Env, j: Job, v: Version) {
       }),
       { httpMetadata: { contentType: 'application/json' } },
     );
+    if (!(await owned(env, j))) {
+      if (await purging(env, v.id)) {
+        await env.BACKUPS.delete(key);
+        await env.BACKUPS.delete(`versions/${v.id}/original-backup.json`);
+      }
+      return;
+    }
     await ensureJobs(env, v.id, ['backup-hash']);
   } catch (error) {
     await backup.abortMultipartUpload(key, uploadId).catch(() => {});

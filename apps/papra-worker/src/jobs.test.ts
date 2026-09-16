@@ -1,4 +1,5 @@
 import { Miniflare } from 'miniflare';
+import { S3mini } from 's3mini';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, test, vi } from 'vitest';
@@ -9,6 +10,8 @@ vi.mock('@cloudflare/containers', () => ({ getContainer: vi.fn() }));
 
 const instances: Miniflare[] = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   for (const instance of instances.splice(0)) await instance.dispose();
 });
 async function fixture() {
@@ -63,10 +66,12 @@ test('daily AI budget is atomic across concurrent reservations', async () => {
     (await DB.prepare('SELECT audio_seconds FROM ai_usage').first<{ audio_seconds: number }>())!
       .audio_seconds,
   ).toBe(21000);
-  const images = await Promise.all(
-    Array.from({ length: 110 }, async () => reserveDailyAI(env, 'vision', 1)),
-  );
-  expect(images.filter(Boolean)).toHaveLength(100);
+  expect(await reserveDailyAI(env, 'vision', 99)).toBe(true);
+  const images = await Promise.all([
+    reserveDailyAI(env, 'vision', 1),
+    reserveDailyAI(env, 'vision', 1),
+  ]);
+  expect(images.filter(Boolean)).toHaveLength(1);
 });
 test('failed queue delivery remains recoverable; processing also queues hashing and backups', async () => {
   const { env, DB, send } = await fixture();
@@ -112,4 +117,100 @@ test('version switch during embedding prevents stale vectors and chunks', async 
   await consumeJobs(batch(send.mock.calls[0][0]), env);
   expect(upsert).not.toHaveBeenCalled();
   expect((await DB.prepare('SELECT count(*) n FROM chunks').first<{ n: number }>())!.n).toBe(0);
+});
+
+test('purging versions cannot create or requeue work', async () => {
+  const { env, DB, send } = await fixture();
+  await DB.prepare("UPDATE documents SET is_deleted=2 WHERE id='d'").run();
+  await expect(enqueueVersion(env, 'v')).rejects.toThrow('version_missing');
+  expect(send).not.toHaveBeenCalled();
+  expect((await DB.prepare('SELECT count(*) n FROM jobs').first<{ n: number }>())!.n).toBe(0);
+});
+async function backupFixture() {
+  const f = await fixture(),
+    deleteObject = vi.fn(async () => {}),
+    put = vi.fn(async () => {}),
+    head = vi.fn().mockResolvedValueOnce(null).mockResolvedValue({ size: 10 });
+  Object.assign(f.env, {
+    R2_ENDPOINT: 'https://r2-canary.example',
+    R2_BUCKET: 'papra-drive',
+    R2_ACCESS_KEY_ID: 'synthetic',
+    R2_SECRET_ACCESS_KEY: 'synthetic',
+    BACKUPS: { head, put, delete: deleteObject },
+  });
+  await f.DB.prepare(
+    "INSERT INTO jobs(id,version_id,kind,status,created_at,updated_at) VALUES('backup-job','v','backup','pending',1,1)",
+  ).run();
+  vi.spyOn(S3mini.prototype, 'getMultipartUploadId').mockResolvedValue('synthetic-upload');
+  vi.spyOn(S3mini.prototype, 'getPresignedUrl').mockResolvedValue('https://r2-canary.example/copy');
+  const complete = vi.spyOn(S3mini.prototype, 'completeMultipartUpload').mockResolvedValue({
+      location: '',
+      bucket: 'papra-drive-backups',
+      key: 'originals/v/original',
+      etag: 'test',
+      eTag: 'test',
+      ETag: 'test',
+    }),
+    abort = vi.spyOn(S3mini.prototype, 'abortMultipartUpload').mockResolvedValue({});
+  const cancel = async () => {
+    await f.DB.prepare("UPDATE documents SET is_deleted=2 WHERE id='d'").run();
+    await f.DB.prepare(
+      "UPDATE jobs SET status='cancelled',lease_token=NULL WHERE id='backup-job'",
+    ).run();
+  };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response('<CopyPartResult><ETag>test</ETag></CopyPartResult>')),
+  );
+  return {
+    ...f,
+    deleteObject,
+    put,
+    head,
+    complete,
+    abort,
+    cancel,
+    body: { jobId: 'backup-job', generation: 0 },
+  };
+}
+test('cancellation before multipart completion aborts and never recreates the backup', async () => {
+  const f = await backupFixture();
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => {
+      await f.cancel();
+      return new Response('<CopyPartResult><ETag>test</ETag></CopyPartResult>');
+    }),
+  );
+  await consumeJobs(batch(f.body), f.env);
+  expect(f.abort).toHaveBeenCalledOnce();
+  expect(f.complete).not.toHaveBeenCalled();
+  expect(f.put).not.toHaveBeenCalled();
+});
+test('cancellation during multipart completion removes the late original copy', async () => {
+  const f = await backupFixture();
+  f.complete.mockImplementation(async () => {
+    await f.cancel();
+    return {
+      location: '',
+      bucket: 'papra-drive-backups',
+      key: 'originals/v/original',
+      etag: 'test',
+      eTag: 'test',
+      ETag: 'test',
+    };
+  });
+  await consumeJobs(batch(f.body), f.env);
+  expect(f.deleteObject).toHaveBeenCalledWith('originals/v/original');
+  expect(f.put).not.toHaveBeenCalled();
+});
+test('cancellation during receipt write removes late receipt and original, without successor jobs', async () => {
+  const f = await backupFixture();
+  f.put.mockImplementation(async () => {
+    await f.cancel();
+  });
+  await consumeJobs(batch(f.body), f.env);
+  expect(f.deleteObject).toHaveBeenCalledWith('versions/v/original-backup.json');
+  expect(f.deleteObject).toHaveBeenCalledWith('originals/v/original');
+  expect((await f.DB.prepare('SELECT count(*) n FROM jobs').first<{ n: number }>())!.n).toBe(1);
 });

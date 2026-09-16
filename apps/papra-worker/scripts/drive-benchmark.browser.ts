@@ -32,6 +32,7 @@ declare global {
   }
 }
 const input = document.querySelector<HTMLInputElement>('#file')!;
+const display = document.querySelector<HTMLOutputElement>('#progress')!;
 window.driveBenchmark = {
   status: 'idle',
   documentId: null,
@@ -49,6 +50,7 @@ input.addEventListener('change', () => {
     : null;
 });
 async function hashStream(stream: ReadableStream<Uint8Array>): Promise<HashResult> {
+  display.textContent = 'Reading stream for SHA-256';
   const started = performance.now(),
     hasher = sha256.create(),
     reader = stream.getReader();
@@ -61,10 +63,13 @@ async function hashStream(stream: ReadableStream<Uint8Array>): Promise<HashResul
       bytes += chunk.value.byteLength;
       maxChunkBytes = Math.max(maxChunkBytes, chunk.value.byteLength);
       hasher.update(chunk.value);
+      if (bytes % (16 * 1024 ** 2) < chunk.value.byteLength)
+        display.textContent = `SHA-256: read ${(bytes / 1024 ** 2).toFixed(1)} MiB`;
     }
   } finally {
     reader.releaseLock();
   }
+  display.textContent = `SHA-256: verified stream length ${(bytes / 1024 ** 2).toFixed(1)} MiB`;
   return {
     bytes,
     sha256: bytesToHex(hasher.digest()),
@@ -102,6 +107,7 @@ window.startDriveBenchmark = async () => {
       file,
       document.body.dataset.organizationId!,
       (progress) => {
+        display.textContent = `Uploaded ${(progress.bytes / 1024 ** 2).toFixed(1)} / ${(progress.total / 1024 ** 2).toFixed(1)} MiB · ${(progress.speed / 1024 ** 2).toFixed(2)} MiB/s · ETA ${Math.ceil(progress.eta)}s · resumed ${progress.resumedParts} parts`;
         state.lastProgress = progress;
         state.progressCount++;
         if (
@@ -120,8 +126,10 @@ window.startDriveBenchmark = async () => {
     );
     state.documentId = uploaded.id;
     state.status = 'complete';
+    display.textContent += ' · complete';
   } catch (error) {
     state.error = error instanceof Error ? error.message : 'Transfer failed';
     state.status = 'failed';
+    display.textContent = 'Transfer failed; receipt preserves details';
   }
 };

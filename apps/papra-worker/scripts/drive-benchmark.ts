@@ -275,7 +275,7 @@ try {
     await page.route(`${origin}/bench`, async (route) =>
       route.fulfill({
         contentType: 'text/html',
-        body: `<!doctype html><meta charset="utf-8"><title>Disposable Drive benchmark</title><body data-organization-id="${org}" data-folder-id="${folderId}"><p>Disposable synthetic transfer benchmark</p><input id="file" type="file"><script type="module" src="/bench/entry.js"></script>`,
+        body: `<!doctype html><meta charset="utf-8"><title>Disposable Drive benchmark</title><body data-organization-id="${org}" data-folder-id="${folderId}"><p>Disposable synthetic transfer benchmark</p><input id="file" type="file"><output id="progress" style="display:block;margin-top:1rem">Ready</output><script type="module" src="/bench/entry.js"></script>`,
       }),
     );
     await page.route(`${origin}/api/organizations/${org}/uploads/**`, async (route) => {

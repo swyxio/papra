@@ -1,4 +1,5 @@
 import type { App, Env, Identity } from './types';
+import { getContainer } from '@cloudflare/containers';
 import { all, first, run, error, camel, formatDocument, getDocument } from './db';
 import { ensureDocumentAccess, permittedDocumentPredicateSQL } from './collaboration';
 import { signedDownload, s3 } from './storage';
@@ -45,12 +46,24 @@ async function deletePrefix(bucket: R2Bucket, prefix: string) {
 }
 async function purge(env: Env, d: Record<string, any>) {
   await run(env, 'UPDATE documents SET is_deleted=2 WHERE id=? AND is_deleted<>0', d.id);
+  const running = await all<{ id: string; generation: number }>(
+    env,
+    "SELECT j.id,j.generation FROM jobs j JOIN versions v ON v.id=j.version_id WHERE v.document_id=? AND j.status IN ('processing','cancelled') AND j.kind IN ('process','hash','backup-hash')",
+    d.id,
+  );
+  await run(
+    env,
+    "UPDATE jobs SET status='cancelled',lease_token=NULL WHERE version_id IN (SELECT id FROM versions WHERE document_id=?)",
+    d.id,
+  );
+  for (const j of running) await getContainer(env.PROCESSOR, `${j.id}-${j.generation}`).destroy();
   const versions = await all(env, 'SELECT * FROM versions WHERE document_id=?', d.id);
   for (const v of versions) {
     await env.FILES.delete(v.storage_key);
     await deletePrefix(env.FILES, `derived/${v.id}/`);
     await deletePrefix(env.BACKUPS, `originals/${v.id}/`);
     await deletePrefix(env.BACKUPS, `versions/${v.id}/`);
+    await deletePrefix(env.BACKUPS, `enrichment/${v.id}/`);
     const vectors = await all(env, 'SELECT id FROM chunks WHERE version_id=?', v.id);
     if (vectors.length) await env.INDEX.deleteByIds(vectors.map((x) => x.id));
     await run(env, 'DELETE FROM versions WHERE id=?', v.id);
@@ -62,7 +75,7 @@ async function purge(env: Env, d: Record<string, any>) {
 export async function purgeExpiredTrash(env: Env) {
   const docs = await all(
     env,
-    'SELECT * FROM documents WHERE is_deleted<>0 AND deleted_at<? LIMIT 20',
+    'SELECT * FROM documents WHERE is_deleted=2 OR (is_deleted=1 AND deleted_at<?) LIMIT 20',
     Date.now() - 90 * 86400000,
   );
   for (const d of docs) await purge(env, d);
@@ -259,6 +272,8 @@ export function registerDocumentRoutes(app: App) {
         'Content-Length': String(object.size),
         'Cache-Control': 'private, no-store',
         'X-Content-Type-Options': 'nosniff',
+        'Content-Disposition': 'attachment',
+        'Content-Security-Policy': "sandbox; default-src 'none'",
       },
     });
   });

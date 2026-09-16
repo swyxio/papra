@@ -17,7 +17,7 @@ export const AboutContent: Component = () => {
     if (config.gitCommitSha === 'unknown') {
       return null;
     }
-    return `https://github.com/papra-hq/papra/commit/${config.gitCommitSha}`;
+    return `https://github.com/swyxio/papra/commit/${config.gitCommitSha}`;
   };
 
   const getVersionDetails = () => [
@@ -51,7 +51,7 @@ export const AboutContent: Component = () => {
     },
     {
       label: t('about.links.github'),
-      href: 'https://github.com/papra-hq/papra',
+      href: 'https://github.com/swyxio/papra',
       icon: 'i-tabler-brand-github',
       description: t('about.links.github-description'),
     },
