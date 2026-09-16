@@ -197,7 +197,7 @@ export async function provisionUser(
   const now = Date.now();
   const personalId = await getDrivePersonalOrganizationId(userId);
   const spaces = [
-    { id: personalId, name: 'Personal', role: 'owner' },
+    { id: personalId, name: email === OWNER_EMAIL ? 'swyx' : 'Personal', role: 'owner' },
     ...TEAMS.filter((team) => email === OWNER_EMAIL || team.domain === email.split('@')[1]).map(
       (team) => ({ ...team, role: email === OWNER_EMAIL ? 'owner' : 'member' }),
     ),

@@ -6,6 +6,7 @@ describe('organization UI URLs', () => {
     ['AIE', 'org_419f9b6ce7fbbb7147a63378'],
     ['LS', 'org_42b6b2a0d04c28134c4d1e22'],
     ['Smol', 'org_cb7a9094c1b013a08dafb6d8'],
+    ['swyx', 'org_acdec956f4565812fe82e70a'],
   ])('%s resolves to immutable organization identity and has one canonical URL', (name, id) => {
     for (const suffix of ['', '/', '/documents/doc_123', '/settings/members?sort=name#role']) {
       const readable = `/orgs/${name}${suffix}`;

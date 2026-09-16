@@ -222,6 +222,13 @@ describe('Worker Google admission', () => {
     const profile = { sub: 'owner', email: 'shawnthe1@gmail.com', name: 'Owner', image: null };
     await Promise.all([provisionUser(env, profile), provisionUser(env, profile)]);
     expect((await DB.prepare('SELECT * FROM organization_members').all()).results).toHaveLength(4);
+    const user = await DB.prepare('SELECT id FROM users WHERE email=?').bind(profile.email).first<{id:string}>();
+    const personalId = await getDrivePersonalOrganizationId(user!.id);
+    expect(await DB.prepare('SELECT name,personal_owner_id FROM organizations WHERE id=?').bind(personalId).first())
+      .toEqual({name:'swyx',personal_owner_id:user!.id});
+    expect((await DB.prepare('SELECT user_id,role FROM organization_members WHERE organization_id=?').bind(personalId).all()).results)
+      .toEqual([{user_id:user!.id,role:'owner'}]);
+
   });
   test.each(['ai.engineer', 'latent.space', 'smol.ai'])(
     'first Google sign-in self-enrolls a colleague at %s without an invitation',
