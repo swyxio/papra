@@ -1,5 +1,4 @@
 import { DriveSpaceCapabilities } from '@/modules/drive-capabilities';
-import { GoogleDocsImport } from '@/modules/google-docs/google-docs-import.component';
 import { DriveFolders } from '@/modules/drive-collaboration/drive-folders.component';
 import { DriveExport } from '../components/drive-export.component';
 import type { RowSelectionState, SortingState } from '@tanstack/solid-table';
@@ -320,7 +319,6 @@ export const DocumentsPage: Component = () => {
           Create document
         </Button>
         <DriveExport organizationId={params.organizationId} />
-        <GoogleDocsImport organizationId={params.organizationId} />
       </div>
       <details class="my-4">
         <summary class="cursor-pointer text-sm font-medium">

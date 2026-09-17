@@ -10,6 +10,13 @@ import {
   DocumentUploadProvider,
   useDocumentUpload,
 } from '@/modules/documents/components/document-import-status.component';
+import { GoogleDocsImport } from '@/modules/google-docs/google-docs-import.component';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '../components/dropdown-menu';
 import { useI18n } from '@/modules/i18n/i18n.provider';
 import {
   fetchOrganization,
@@ -265,16 +272,29 @@ export const OrganizationLayout: ParentComponent = (props) => {
 };
 
 const OrganizationLayoutImportButton: Component = () => {
+  const params = useParams();
   const { uploadDocuments, promptImport } = useDocumentUpload();
   const { t } = useI18n();
 
   return (
     <>
       <GlobalDropArea onFilesDrop={uploadDocuments} />
-      <Button onClick={promptImport} class="px-2.5 sm:px-4">
-        <div class="i-tabler-upload size-4" />
-        <span class="hidden sm:inline ml-2">{t('layout.menu.import-document')}</span>
-      </Button>
+      <GoogleDocsImport
+        organizationId={params.organizationId}
+        trigger={(openGoogleImport) => (
+          <DropdownMenu>
+            <DropdownMenuTrigger as={Button} class="px-2.5 sm:px-4" aria-label="Import a document">
+              <div class="i-tabler-upload size-4" />
+              <span class="hidden sm:inline ml-2">{t('layout.menu.import-document')}</span>
+              <div class="i-tabler-chevron-down size-4 ml-2" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem onSelect={promptImport}>Upload files or folders</DropdownMenuItem>
+              <DropdownMenuItem onSelect={openGoogleImport}>Import Google Doc URL</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      />
     </>
   );
 };

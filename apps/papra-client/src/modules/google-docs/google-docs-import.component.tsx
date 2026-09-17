@@ -1,6 +1,6 @@
 import { useNavigate, useSearchParams } from '@solidjs/router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/solid-query';
-import { createSignal, For, Show } from 'solid-js';
+import { createSignal, For, Show, type JSX } from 'solid-js';
 import {
   fetchFolders,
   folderPath,
@@ -17,7 +17,10 @@ import {
 import { TextField, TextFieldLabel, TextFieldRoot } from '@/modules/ui/components/textfield';
 import { importGoogleDocument, operationKey, parseGoogleDocUrl } from './google-docs.services';
 
-export function GoogleDocsImport(props: { organizationId: string }) {
+export function GoogleDocsImport(props: {
+  organizationId: string;
+  trigger?: (open: () => void) => JSX.Element;
+}) {
   const navigate = useNavigate();
   const client = useQueryClient();
   const [search] = useSearchParams();
@@ -57,18 +60,20 @@ export function GoogleDocsImport(props: { organizationId: string }) {
       navigate(`/organizations/${props.organizationId}/documents/${result.documentId}`);
     },
   }));
+  const openImport = () => {
+    setFolderId(typeof search.folder === 'string' ? search.folder : '');
+    importMutation.reset();
+    setOpen(true);
+  };
   return (
     <>
-      <Button
-        variant="outline"
-        onClick={() => {
-          setFolderId(typeof search.folder === 'string' ? search.folder : '');
-          importMutation.reset();
-          setOpen(true);
-        }}
-      >
-        Import Google Doc URL
-      </Button>
+      {props.trigger ? (
+        props.trigger(openImport)
+      ) : (
+        <Button variant="outline" onClick={openImport}>
+          Import Google Doc URL
+        </Button>
+      )}
       <Dialog
         open={open()}
         onOpenChange={(value) => {
