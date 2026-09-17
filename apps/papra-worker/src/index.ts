@@ -14,6 +14,7 @@ import { registerSearchRoutes } from './search';
 import { consumeJobs, housekeeping } from './jobs';
 import { registerReviewRoutes } from './reviews';
 import { registerAuthoringRoutes } from './authoring';
+import { registerGoogleDocumentRoutes } from './google-docs';
 import { registerSigningRoutes, processSigning, repairSigning } from './signing';
 
 export { ImageProcessorContainer, ContainerProxy } from '../native/container';
@@ -106,6 +107,7 @@ registerAutomationRoutes(app);
 registerSearchRoutes(app);
 registerSigningRoutes(app);
 registerAuthoringRoutes(app);
+registerGoogleDocumentRoutes(app);
 registerReviewRoutes(app);
 app.all('/api/*', (c) => c.json({ message: 'API route not found' }, 404));
 app.all('*', async (c) => {const response=await c.env.ASSETS.fetch(c.req.raw);if(/^\/(sign|review)\//.test(c.req.path)){const headers=new Headers(response.headers);headers.set('Referrer-Policy','no-referrer');headers.set('X-Robots-Tag','noindex, noarchive');return new Response(response.body,{status:response.status,headers});}return response;});

@@ -311,6 +311,7 @@ export function registerShareRoutes(app: App) {
     const identity = context.get('identity');
     const document = await documentScope(env, identity, org, doc, true);
     if (document.is_deleted) return fail(410, 'File is deleted');
+    if (!document.current_version_id) return fail(400, 'Convert this document to PDF before sharing');
     const body = await jsonBody(context.req.raw);
     const row: ShareRow = {
       id: `dsl_${randomHex(12)}`,

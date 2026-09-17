@@ -1,4 +1,6 @@
 import { DocumentReviews } from '@/modules/drive-signing/review.pages';
+import { GoogleDocsSource } from '@/modules/google-docs/google-docs-source.component';
+import { googleDocMimeType } from '@/modules/google-docs/google-docs.services';
 import { NativeDocumentAction } from '@/modules/drive-signing/editor.pages';
 import type { DropdownMenuTriggerProps } from '@kobalte/core/dropdown-menu';
 import type { Component, JSX } from 'solid-js';
@@ -177,6 +179,8 @@ const KeyValues: Component<{ data?: KeyValueItem[] }> = (props) => {
 
 const driveActivityLabels: Record<string, string> = {
   'moved': 'Moved this file',
+  'google-source-imported': 'Imported Google Docs source',
+  'google-pdf-converted': 'Converted Google source to PDF',
   'commented': 'Added a comment',
   'replied': 'Replied to a comment',
   'comment-edited': 'Edited a comment',
@@ -421,33 +425,43 @@ export const DocumentPage: Component = () => {
                   <div class="i-tabler-pencil size-4 text-muted-foreground group-hover:text-foreground transition-colors flex-shrink-0" />
                 </Button>
                 <p class="text-sm text-muted-foreground mb-2">{getDocument().id}</p>
-                <Suspense
-                  fallback={
-                    <p class="text-xs text-muted-foreground mb-4">
-                      Checking backup and search status…
-                    </p>
-                  }
-                >
-                  <DocumentProcessingStatus
+                <Suspense>
+                  <GoogleDocsSource
                     organizationId={params.organizationId}
                     documentId={getDocument().id}
                   />
                 </Suspense>
+                <Show when={getDocument().mimeType !== googleDocMimeType}>
+                  <Suspense
+                    fallback={
+                      <p class="text-xs text-muted-foreground mb-4">
+                        Checking backup and search status…
+                      </p>
+                    }
+                  >
+                    <DocumentProcessingStatus
+                      organizationId={params.organizationId}
+                      documentId={getDocument().id}
+                    />
+                  </Suspense>
+                </Show>
 
                 <div class="flex gap-2 mb-2">
-                  <Button
-                    onClick={async () =>
-                      downloadDocument({
-                        organizationId: getDocument().organizationId,
-                        documentId: getDocument().id,
-                      })
-                    }
-                    variant="outline"
-                    size="sm"
-                  >
-                    <div class="i-tabler-download size-4 mr-2" />
-                    {t('documents.actions.download.title')}
-                  </Button>
+                  <Show when={getDocument().mimeType !== googleDocMimeType}>
+                    <Button
+                      onClick={async () =>
+                        downloadDocument({
+                          organizationId: getDocument().organizationId,
+                          documentId: getDocument().id,
+                        })
+                      }
+                      variant="outline"
+                      size="sm"
+                    >
+                      <div class="i-tabler-download size-4 mr-2" />
+                      {t('documents.actions.download.title')}
+                    </Button>
+                  </Show>
 
                   <Suspense
                     fallback={
@@ -797,14 +811,24 @@ export const DocumentPage: Component = () => {
         >
           <Show when={documentQuery.data?.document}>
             {(getDocument) => (
-              <DocumentPreview
-                document={getDocument()}
-                focusAnchor={focusAnchor()}
-                onTextSelected={(anchor) => {
-                  setSelectedAnchor(anchor);
-                  setTab('comments');
-                }}
-              />
+              <Show
+                when={getDocument().mimeType !== googleDocMimeType}
+                fallback={
+                  <div class="rounded-md border bg-muted p-6 text-sm text-muted-foreground">
+                    This document is linked to Google Docs. Use Convert to PDF to create a preview
+                    and prepare it for signing.
+                  </div>
+                }
+              >
+                <DocumentPreview
+                  document={getDocument()}
+                  focusAnchor={focusAnchor()}
+                  onTextSelected={(anchor) => {
+                    setSelectedAnchor(anchor);
+                    setTab('comments');
+                  }}
+                />
+              </Show>
             )}
           </Show>
         </Suspense>

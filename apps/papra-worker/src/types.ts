@@ -20,6 +20,7 @@ export type Env = {
   AUTH_SECRET: string;
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
+  GOOGLE_PICKER_API_KEY?: string;
   APP_URL: string;
   R2_ACCESS_KEY_ID: string;
   R2_SECRET_ACCESS_KEY: string;

@@ -119,7 +119,7 @@ export function registerDocumentRoutes(app: App) {
         direction = q.sortOrder === 'asc' ? 'ASC' : 'DESC';
       const rows = await all(
         c.env,
-        `SELECT d.*,v.size original_size FROM documents d JOIN versions v ON v.id=d.current_version_id WHERE ${f.sql} ORDER BY ${sort} ${direction},d.id LIMIT ? OFFSET ?`,
+        `SELECT d.*,coalesce(v.size,0) original_size FROM documents d LEFT JOIN versions v ON v.id=d.current_version_id WHERE ${f.sql} ORDER BY ${sort} ${direction},d.id LIMIT ? OFFSET ?`,
         ...f.bindings,
         size,
         page * size,
@@ -140,12 +140,12 @@ export function registerDocumentRoutes(app: App) {
     const [active, deleted] = await Promise.all([
       first(
         c.env,
-        `SELECT count(*) n,coalesce(sum(v.size),0) size FROM documents d JOIN versions v ON v.id=d.current_version_id WHERE ${f.sql}`,
+        `SELECT count(*) n,coalesce(sum(v.size),0) size FROM documents d LEFT JOIN versions v ON v.id=d.current_version_id WHERE ${f.sql}`,
         ...f.bindings,
       ),
       first(
         c.env,
-        `SELECT count(*) n,coalesce(sum(v.size),0) size FROM documents d JOIN versions v ON v.id=d.current_version_id WHERE ${del.sql}`,
+        `SELECT count(*) n,coalesce(sum(v.size),0) size FROM documents d LEFT JOIN versions v ON v.id=d.current_version_id WHERE ${del.sql}`,
         ...del.bindings,
       ),
     ]);
@@ -206,7 +206,7 @@ export function registerDocumentRoutes(app: App) {
         Date.now(),
         d.id,
       );
-      await enqueueVersion(c.env, d.current_version_id, 'index');
+      if (d.current_version_id) await enqueueVersion(c.env, d.current_version_id, 'index');
     }
     return c.json({ document: await formatDocument(c.env, (await getDocument(c.env, d.id))!) });
   });
@@ -271,11 +271,13 @@ export function registerDocumentRoutes(app: App) {
   app.get(`${base}/:doc/download`, async (c) => {
     const d = await document(c.env, c.get('identity'), c.req.param('org'), c.req.param('doc'));
     if (d.is_deleted) throw error(404, 'Document is in trash');
+    if (!d.current_version_id) throw error(409, 'Convert this Google document to PDF first');
     return c.redirect(await signedDownload(c.env, d.original_storage_key, d.original_name), 302);
   });
   app.get(`${base}/:doc/file`, async (c) => {
     const d = await document(c.env, c.get('identity'), c.req.param('org'), c.req.param('doc'));
     if (d.is_deleted) throw error(404, 'Document is in trash');
+    if (!d.current_version_id) throw error(409, 'Convert this Google document to PDF first');
     if (d.original_size > 32 * 1024 ** 2) throw error(413, 'Use a direct download for large files');
     const object = await c.env.FILES.get(d.original_storage_key);
     if (!object) throw error(404, 'File not found');
@@ -346,7 +348,7 @@ export function registerDocumentRoutes(app: App) {
     if (d.is_deleted) throw error(404, 'Document is in trash');
     return c.json({
       document: await formatDocument(c.env, d),
-      url: await signedDownload(c.env, d.original_storage_key, d.original_name, 3600),
+      url: d.current_version_id ? await signedDownload(c.env, d.original_storage_key, d.original_name, 3600) : null,
     });
   });
   app.get(`${base}/:doc/versions/:version/download`, async (c) => {

@@ -519,9 +519,9 @@ export function registerCollaborationRoutes(app: App) {
     const predicate = await permittedDocumentPredicateSQL(context.env, identity, org);
     const page = pageIndex(context.req.query('pageIndex'));
     const { results } =
-      await context.env.DB.prepare(`SELECT d.id,d.name,d.mime_type,v.size AS original_size,CASE WHEN d.home_folder_id=? THEN 0 ELSE 1 END AS is_shortcut,
+      await context.env.DB.prepare(`SELECT d.id,d.name,d.mime_type,coalesce(v.size,0) AS original_size,CASE WHEN d.home_folder_id=? THEN 0 ELSE 1 END AS is_shortcut,
       (SELECT s.id FROM document_shortcuts s WHERE s.document_id=d.id AND s.folder_id=?) AS shortcut_id
-      FROM documents d JOIN versions v ON v.id=d.current_version_id WHERE d.organization_id=? AND d.is_deleted=0 AND (d.home_folder_id=? OR EXISTS(SELECT 1 FROM document_shortcuts s WHERE s.document_id=d.id AND s.folder_id=?)) AND (${predicate.sql})
+      FROM documents d LEFT JOIN versions v ON v.id=d.current_version_id WHERE d.organization_id=? AND d.is_deleted=0 AND (d.home_folder_id=? OR EXISTS(SELECT 1 FROM document_shortcuts s WHERE s.document_id=d.id AND s.folder_id=?)) AND (${predicate.sql})
       ORDER BY d.name COLLATE NOCASE,d.id LIMIT 101 OFFSET ?`)
         .bind(folder.id, folder.id, org, folder.id, folder.id, ...predicate.bindings, page * 100)
         .all<{

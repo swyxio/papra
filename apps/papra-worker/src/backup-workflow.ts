@@ -33,6 +33,8 @@ export const SNAPSHOT_TABLES = [
   'signing_recipients',
   'signing_mail',
   'authored_versions',
+  'google_document_sources',
+  'google_document_exports',
   'document_edit_locks',
   'document_reviews',
   'review_proposals',

@@ -46,7 +46,7 @@ export const camel = (row: Record<string, any>) =>
 export async function getDocument(env: Env, documentId: string) {
   return first(
     env,
-    'SELECT d.*, v.storage_key original_storage_key, v.original_name, v.size original_size, v.sha256 original_sha256_hash, v.preview_key, v.processing_status,v.processing_error FROM documents d JOIN versions v ON v.id=d.current_version_id WHERE d.id=?',
+    'SELECT d.*, v.storage_key original_storage_key, v.original_name, coalesce(v.size,0) original_size, v.sha256 original_sha256_hash, v.preview_key, v.processing_status,v.processing_error FROM documents d LEFT JOIN versions v ON v.id=d.current_version_id WHERE d.id=?',
     documentId,
   );
 }
