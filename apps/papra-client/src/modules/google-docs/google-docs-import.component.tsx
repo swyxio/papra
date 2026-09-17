@@ -1,10 +1,11 @@
 import { useNavigate, useSearchParams } from '@solidjs/router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/solid-query';
-import { createSignal, For, Show, type JSX } from 'solid-js';
+import type { JSX } from 'solid-js';
+import type { DriveFolder } from '@/modules/drive-collaboration/drive-collaboration.services';
+import { createSignal, For, Show } from 'solid-js';
 import {
   fetchFolders,
   driveBase,
-  type DriveFolder,
   folderPath,
 } from '@/modules/drive-collaboration/drive-collaboration.services';
 import { apiClient } from '@/modules/shared/http/api-client';
