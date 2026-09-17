@@ -3,8 +3,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/solid-query';
 import { createSignal, For, Show, type JSX } from 'solid-js';
 import {
   fetchFolders,
+  driveBase,
+  type DriveFolder,
   folderPath,
 } from '@/modules/drive-collaboration/drive-collaboration.services';
+import { apiClient } from '@/modules/shared/http/api-client';
 import { getHttpErrorMessage } from '@/modules/shared/http/http-errors';
 import { Button } from '@/modules/ui/components/button';
 import {
@@ -28,12 +31,38 @@ export function GoogleDocsImport(props: {
   const [url, setUrl] = createSignal('');
   const [name, setName] = createSignal('');
   const [folderId, setFolderId] = createSignal('');
+  const [showNewFolder, setShowNewFolder] = createSignal(false);
+  const [newFolderName, setNewFolderName] = createSignal('');
   let requestKey = operationKey();
   let requestFingerprint = '';
   const folders = useQuery(() => ({
     queryKey: ['organizations', props.organizationId, 'folders'],
     queryFn: async () => fetchFolders(props.organizationId),
     enabled: open(),
+  }));
+  const createFolderMutation = useMutation(() => ({
+    mutationFn: async () =>
+      apiClient<{ folder: Omit<DriveFolder, 'canWrite'> }>({
+        method: 'POST',
+        path: `${driveBase(props.organizationId)}/folders`,
+        body: { name: newFolderName().trim(), parentId: folderId() || undefined },
+        retry: 0,
+      }),
+    onSuccess: async ({ folder }) => {
+      client.setQueryData<Awaited<ReturnType<typeof fetchFolders>>>(
+        ['organizations', props.organizationId, 'folders'],
+        (current) =>
+          current
+            ? { ...current, folders: [...current.folders, { ...folder, canWrite: true }] }
+            : current,
+      );
+      setFolderId(folder.id);
+      setNewFolderName('');
+      setShowNewFolder(false);
+      await client.invalidateQueries({
+        queryKey: ['organizations', props.organizationId, 'folders'],
+      });
+    },
   }));
   const importMutation = useMutation(() => ({
     mutationFn: async () => {
@@ -63,6 +92,8 @@ export function GoogleDocsImport(props: {
   const openImport = () => {
     setFolderId(typeof search.folder === 'string' ? search.folder : '');
     importMutation.reset();
+    createFolderMutation.reset();
+    setShowNewFolder(false);
     setOpen(true);
   };
   return (
@@ -77,7 +108,7 @@ export function GoogleDocsImport(props: {
       <Dialog
         open={open()}
         onOpenChange={(value) => {
-          if (!importMutation.isPending) setOpen(value);
+          if (!importMutation.isPending && !createFolderMutation.isPending) setOpen(value);
         }}
       >
         <DialogContent>
@@ -92,7 +123,7 @@ export function GoogleDocsImport(props: {
             class="space-y-4"
             onSubmit={(event) => {
               event.preventDefault();
-              importMutation.mutate();
+              if (!createFolderMutation.isPending) importMutation.mutate();
             }}
           >
             <TextFieldRoot>
@@ -126,12 +157,16 @@ export function GoogleDocsImport(props: {
                 class="w-full rounded-md border bg-background px-3 py-2 text-sm"
                 value={folderId()}
                 onChange={(event) => setFolderId(event.currentTarget.value)}
-                disabled={importMutation.isPending || folders.isPending}
+                disabled={
+                  importMutation.isPending || createFolderMutation.isPending || folders.isPending
+                }
               >
                 <option value="" selected={folderId() === ''}>
                   Home
                 </option>
-                <For each={folders.data?.folders.filter((folder) => folder.canWrite)}>
+                <For
+                  each={folders.data?.folders.filter((folder) => folder.canWrite && !folder.isHome)}
+                >
                   {(folder) => (
                     <option value={folder.id} selected={folderId() === folder.id}>
                       {folderPath(folder, folders.data?.folders ?? [])}
@@ -139,6 +174,58 @@ export function GoogleDocsImport(props: {
                   )}
                 </For>
               </select>
+              <Button
+                type="button"
+                variant="ghost"
+                class="mt-2"
+                disabled={
+                  importMutation.isPending || createFolderMutation.isPending || !folders.data
+                }
+                onClick={() => {
+                  createFolderMutation.reset();
+                  setShowNewFolder(!showNewFolder());
+                }}
+              >
+                + New folder
+              </Button>
+              <Show when={showNewFolder()}>
+                <div class="mt-2 space-y-2">
+                  <p class="text-xs text-muted-foreground">
+                    Creates a subfolder in the selected destination.
+                  </p>
+                  <TextFieldRoot>
+                    <TextFieldLabel for="google-doc-new-folder">New folder name</TextFieldLabel>
+                    <TextField
+                      id="google-doc-new-folder"
+                      value={newFolderName()}
+                      maxLength={200}
+                      onInput={(event) => setNewFolderName(event.currentTarget.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          if (newFolderName().trim() && !createFolderMutation.isPending)
+                            createFolderMutation.mutate();
+                        }
+                      }}
+                      disabled={createFolderMutation.isPending}
+                    />
+                  </TextFieldRoot>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    isLoading={createFolderMutation.isPending}
+                    disabled={!newFolderName().trim() || importMutation.isPending}
+                    onClick={() => createFolderMutation.mutate()}
+                  >
+                    Create folder
+                  </Button>
+                </div>
+              </Show>
+              <Show when={createFolderMutation.error}>
+                <p class="text-sm text-red-500" role="alert">
+                  {getHttpErrorMessage(createFolderMutation.error)}
+                </p>
+              </Show>
               <Show when={folders.isError}>
                 <p class="text-sm text-red-500">
                   Could not load folders. Close and reopen to try again.
@@ -158,7 +245,7 @@ export function GoogleDocsImport(props: {
               <Button
                 type="button"
                 variant="secondary"
-                disabled={importMutation.isPending}
+                disabled={importMutation.isPending || createFolderMutation.isPending}
                 onClick={() => setOpen(false)}
               >
                 Cancel
@@ -166,7 +253,11 @@ export function GoogleDocsImport(props: {
               <Button
                 type="submit"
                 isLoading={importMutation.isPending}
-                disabled={!parseGoogleDocUrl(url()) || name().trim().length > 200}
+                disabled={
+                  !parseGoogleDocUrl(url()) ||
+                  name().trim().length > 200 ||
+                  createFolderMutation.isPending
+                }
               >
                 Import source link
               </Button>
