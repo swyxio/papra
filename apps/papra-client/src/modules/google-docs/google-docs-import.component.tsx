@@ -107,7 +107,7 @@ export function GoogleDocsImport(props: { organizationId: string }) {
               <TextField
                 id="google-doc-name"
                 value={name()}
-                maxLength={250}
+                maxLength={200}
                 onInput={(event) => setName(event.currentTarget.value)}
                 disabled={importMutation.isPending}
               />
@@ -123,10 +123,12 @@ export function GoogleDocsImport(props: { organizationId: string }) {
                 onChange={(event) => setFolderId(event.currentTarget.value)}
                 disabled={importMutation.isPending || folders.isPending}
               >
-                <option value="">Home</option>
+                <option value="" selected={folderId() === ''}>
+                  Home
+                </option>
                 <For each={folders.data?.folders.filter((folder) => folder.canWrite)}>
                   {(folder) => (
-                    <option value={folder.id}>
+                    <option value={folder.id} selected={folderId() === folder.id}>
                       {folderPath(folder, folders.data?.folders ?? [])}
                     </option>
                   )}
@@ -159,7 +161,7 @@ export function GoogleDocsImport(props: { organizationId: string }) {
               <Button
                 type="submit"
                 isLoading={importMutation.isPending}
-                disabled={!parseGoogleDocUrl(url()) || name().trim().length > 250}
+                disabled={!parseGoogleDocUrl(url()) || name().trim().length > 200}
               >
                 Import source link
               </Button>
