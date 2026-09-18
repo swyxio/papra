@@ -6,7 +6,7 @@ export function TranscriptionProgress(props: { state: TranscriptionStatus }) {
   return (
     <div class="space-y-1 text-xs" role="status">
       <p>{transcriptionLabel(props.state)}</p>
-      <Show when={props.state.total > 0}>
+      <Show when={props.state.total > 0 && props.state.status !== 'ready'}>
         <progress
           class="w-full h-2 accent-primary"
           aria-label="Transcription progress"

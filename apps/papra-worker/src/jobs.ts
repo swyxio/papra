@@ -60,7 +60,8 @@ class JobError extends Error {
   }
 }
 const manifestKey = (v: string, g: number) => `derived/${v}/native-g${g}.json`;
-const enrichmentKey = (v: string, k: string) => `derived/${v}/${k.replaceAll(':', '-')}.json`;
+export const enrichmentKey = (v: string, k: string) =>
+  `derived/${v}/${k.replaceAll(':', '-')}.json`;
 async function version(env: Env, v: string) {
   return first<Version>(
     env,

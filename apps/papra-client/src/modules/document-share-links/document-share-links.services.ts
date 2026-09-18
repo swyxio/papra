@@ -189,13 +189,32 @@ export async function fetchSharedDocumentDirect({
 }: {
   token: string;
   accessToken?: string;
-  mode: 'download' | 'preview';
+  mode: 'download' | 'preview' | 'media';
 }) {
   return httpClient<{ url: string | null; status?: string }>({
     method: 'GET',
     baseUrl: buildTimeConfig.baseApiUrl,
     url: `/api/share-links/${token}/document/file`,
     query: { direct: mode },
+    headers: getAuthorizationHeaders({ accessToken }),
+  });
+}
+
+export type SharedTranscript = {
+  text: string;
+  segments: { text: string; startSeconds: number | null }[];
+};
+export async function fetchSharedTranscript({
+  token,
+  accessToken,
+}: {
+  token: string;
+  accessToken?: string;
+}) {
+  return httpClient<{ transcript: SharedTranscript }>({
+    method: 'GET',
+    baseUrl: buildTimeConfig.baseApiUrl,
+    url: `/api/share-links/${token}/document/transcript`,
     headers: getAuthorizationHeaders({ accessToken }),
   });
 }

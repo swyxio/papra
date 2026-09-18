@@ -457,3 +457,89 @@ test('shared video progress is anonymous for permissive links and remains protec
   });
   expect((await request(`/api/share-links/${shareLink.token}/document`)).status).toBe(401);
 });
+
+test('shared transcript requires existing delegation and returns only current-generation speech with timestamps', async () => {
+  const { DB, env, request, create } = await fixture();
+  await DB.prepare("UPDATE documents SET mime_type='video/mp4' WHERE id='open'").run();
+  await DB.exec(
+    "INSERT INTO jobs(id,version_id,kind,status,generation,created_at,updated_at) VALUES('p','v-open','process','done',1,1,1),('old','v-open','transcribe:0:0','done',0,1,1),('a','v-open','transcribe:1:0','done',0,1,1),('b','v-open','transcribe:1:1','done',0,1,1),('vision','v-open','vision:1:0','done',0,1,1);",
+  );
+  const get = vi.fn(async (key: string) => ({
+    size: 200,
+    json: async () =>
+      key.endsWith('transcribe-1-0.json')
+        ? {
+            text: 'Hello world.',
+            chunks: [
+              { text: 'Hello', startSeconds: 0 },
+              { text: ' world.', startSeconds: 2.5 },
+            ],
+          }
+        : { text: 'Second part.', chunks: [{ text: 'Second part.', startSeconds: 300 }] },
+  }));
+  env.FILES = { get } as any;
+  const share = await create('open', 'password');
+  const path = `/api/share-links/${share.token}/document/transcript`;
+  expect((await request(path)).status).toBe(401);
+  expect(get).not.toHaveBeenCalled();
+  const unlocked = await request(`/api/share-links/${share.token}/verify`, 'POST', {
+    password: 'password',
+  });
+  const { accessToken } = (await unlocked.json()) as any;
+  const response = await request(path, 'GET', undefined, 'owner', accessToken);
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({
+    transcript: {
+      text: 'Hello world.\n\nSecond part.',
+      segments: [
+        { text: 'Hello', startSeconds: 0 },
+        { text: 'world.', startSeconds: 2.5 },
+        { text: 'Second part.', startSeconds: 300 },
+      ],
+    },
+  });
+  expect(get.mock.calls.map(([key]) => key)).toEqual([
+    'derived/v-open/transcribe-1-0.json',
+    'derived/v-open/transcribe-1-1.json',
+  ]);
+  expect((await request(`/api/share-links/${share.token}/document/file?direct=media`)).status).toBe(
+    401,
+  );
+  const media = await request(
+    `/api/share-links/${share.token}/document/file?direct=media`,
+    'GET',
+    undefined,
+    'owner',
+    accessToken,
+  );
+  expect(media.status).toBe(200);
+  expect(new URL(((await media.json()) as any).url).searchParams.get('X-Amz-Expires')).toBe('900');
+  await request(`/api/organizations/team/share-links/${share.id}`, 'PATCH', { isEnabled: false });
+  expect((await request(path, 'GET', undefined, 'owner', accessToken)).status).toBe(410);
+});
+test('transcript preserves full text from truncated legacy segments and retries missing result objects', async () => {
+  const { DB, env, request, create } = await fixture();
+  await DB.prepare("UPDATE documents SET mime_type='audio/wav' WHERE id='open'").run();
+  await DB.exec(
+    "INSERT INTO jobs(id,version_id,kind,status,generation,created_at,updated_at) VALUES('p','v-open','process','done',0,1,1),('a','v-open','transcribe:0:0','done',0,1,1);",
+  );
+  env.FILES = {
+    get: async () => ({
+      size: 200,
+      json: async () => ({
+        text: 'The entire transcript including the ending.',
+        chunks: [{ text: 'The entire transcript', startSeconds: 17 }],
+      }),
+    }),
+  } as any;
+  const share = await create();
+  const path = `/api/share-links/${share.token}/document/transcript`;
+  expect(await (await request(path)).json()).toEqual({
+    transcript: {
+      text: 'The entire transcript including the ending.',
+      segments: [{ text: 'The entire transcript including the ending.', startSeconds: 17 }],
+    },
+  });
+  env.FILES = { get: async () => null } as any;
+  expect((await request(path)).status).toBe(503);
+});

@@ -6,6 +6,7 @@ import { ensureDocumentAccess, ensureOrganizationMember } from './collaboration'
 import { getDocument } from './db';
 import { shareUrl, newShareId, validShareId } from './share-urls';
 import { pendingUploadShare } from './upload-shares';
+import { fetchTranscript } from './transcripts';
 import { fetchTranscriptionStatus } from './processing';
 import { s3, signedDownload } from './storage';
 
@@ -477,6 +478,19 @@ export function registerShareRoutes(app: App) {
       },
     });
   });
+  app.get('/api/share-links/:token/document/transcript', async (context) => {
+    const row = await authorizedPublicShare(
+      context.env,
+      context.req.param('token'),
+      context.req.header('Authorization'),
+    );
+    const doc = await getDocument(context.env, row.document_id);
+    if (!doc || doc.is_deleted) return fail(410, 'Share link unavailable');
+    if (!/^(audio|video)\//.test(doc.mime_type)) return fail(404, 'No transcript for this file');
+    const transcript = await fetchTranscript(context.env, doc.current_version_id);
+    if (!transcript) throw new HTTPException(503, { message: 'Transcript is not available yet' });
+    return context.json({ transcript });
+  });
   app.get('/api/share-links/:token/document/file', async (context) => {
     const row = await authorizedPublicShare(
       context.env,
@@ -485,6 +499,13 @@ export function registerShareRoutes(app: App) {
     );
     const doc = await getDocument(context.env, row.document_id);
     if (!doc || doc.is_deleted) return fail(410, 'Share link unavailable');
+    if (context.req.query('direct') === 'media') {
+      if (!/^(audio|video)\//.test(doc.mime_type))
+        return fail(400, 'This file is not audio or video');
+      return context.json({
+        url: await s3(context.env).getPresignedUrl('GET', doc.original_storage_key, 900),
+      });
+    }
     if (context.req.query('direct') === 'preview') {
       return context.json({
         url: doc.preview_key
