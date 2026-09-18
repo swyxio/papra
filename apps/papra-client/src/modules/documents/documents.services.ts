@@ -13,9 +13,11 @@ export async function uploadDocument({
   folderId,
   resolveDuplicate,
   completeUpload,
+  onShareReady,
 }: {
   file: File;
   completeUpload?: CompleteUpload;
+  onShareReady?: (url: string) => void;
   organizationId: string;
   folderId?: string;
   resolveDuplicate?: (conflict: {
@@ -30,6 +32,7 @@ export async function uploadDocument({
       return await multipartUpload(file, organizationId, onProgress, {
         ...options,
         completeUpload,
+        onShareReady,
       });
     } catch (error) {
       const conflict = error as {

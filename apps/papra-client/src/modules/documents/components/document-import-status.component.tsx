@@ -168,6 +168,57 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
     refetchOnWindowFocus: true,
   }));
 
+  const UploadShareLink = (props: { task: () => Task }) => {
+    const task = props.task;
+    return (
+      <>
+        <Show when={task().shareUrl}>
+          {(url) => (
+            <div class="space-y-1">
+              <p class="text-xs text-muted-foreground">
+                Anyone with this link can view and download.
+              </p>
+              <a
+                href={url()}
+                target="_blank"
+                rel="noopener noreferrer"
+                class="text-xs block break-all underline"
+              >
+                {url()}
+              </a>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(url());
+                    setTasks((tasks) =>
+                      tasks.map((item) =>
+                        item.file === task().file ? { ...item, copied: true } : item,
+                      ),
+                    );
+                  } catch {
+                    setTasks((tasks) =>
+                      tasks.map((item) =>
+                        item.file === task().file
+                          ? {
+                              ...item,
+                              shareError: 'Could not copy. Select the link above to copy it.',
+                            }
+                          : item,
+                      ),
+                    );
+                  }
+                }}
+              >
+                {task().copied ? 'Copied!' : 'Copy share link'}
+              </Button>
+            </div>
+          )}
+        </Show>
+      </>
+    );
+  };
   const shareLimit = pLimit(4);
   const createUploadShare = async (file: File, document: Document) => {
     const update = (changes: Partial<Task>) =>
@@ -268,6 +319,10 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
               folderId: folderImport
                 ? folders.get(file.webkitRelativePath.split('/').slice(0, -1).join('/'))
                 : folderId,
+              onShareReady: (url) =>
+                setTasks((tasks) =>
+                  tasks.map((task) => (task.file === file ? { ...task, shareUrl: url } : task)),
+                ),
               onProgress: (progress) =>
                 setTasks((tasks) =>
                   tasks.map((task) => (task.file === file ? { ...task, progress } : task)),
@@ -281,7 +336,8 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
             const { document } = result;
 
             updateTaskStatus({ file, status: 'success', document });
-            void createUploadShare(file, document);
+            if (!getTasks().find((task) => task.file === file)?.shareUrl)
+              void createUploadShare(file, document);
           }
 
           throttledInvalidateOrganizationDocumentsQuery({ organizationId });
@@ -460,53 +516,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
                           <Show when={task().processing?.transcription}>
                             {(state) => <TranscriptionProgress state={state()} />}
                           </Show>
-                          <Show when={task().shareUrl}>
-                            {(url) => (
-                              <div class="space-y-1">
-                                <p class="text-xs text-muted-foreground">
-                                  Anyone with this link can view and download.
-                                </p>
-                                <a
-                                  href={url()}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  class="text-xs block break-all underline"
-                                >
-                                  {url()}
-                                </a>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={async () => {
-                                    try {
-                                      await navigator.clipboard.writeText(url());
-                                      setTasks((tasks) =>
-                                        tasks.map((item) =>
-                                          item.file === task().file
-                                            ? { ...item, copied: true }
-                                            : item,
-                                        ),
-                                      );
-                                    } catch {
-                                      setTasks((tasks) =>
-                                        tasks.map((item) =>
-                                          item.file === task().file
-                                            ? {
-                                                ...item,
-                                                shareError:
-                                                  'Could not copy. Select the link above to copy it.',
-                                              }
-                                            : item,
-                                        ),
-                                      );
-                                    }
-                                  }}
-                                >
-                                  {task().copied ? 'Copied!' : 'Copy share link'}
-                                </Button>
-                              </div>
-                            )}
-                          </Show>
+                          <UploadShareLink task={task} />
                           <Show when={task().sharing}>
                             <p class="text-xs">Creating share link…</p>
                           </Show>
@@ -555,9 +565,10 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
                       </Match>
 
                       <Match when={['pending', 'uploading'].includes(task().status)}>
-                        <div class="text-sm truncate min-w-0 flex items-center gap-4 min-h-48px px-6 border-b border-border/80">
-                          <div class="flex-1 truncate">
-                            <div>{task().file.name}</div>
+                        <div class="text-sm min-w-0 flex items-center gap-4 min-h-48px px-6 py-3 border-b border-border/80">
+                          <div class="flex-1 min-w-0 space-y-2">
+                            <div class="truncate">{task().file.name}</div>
+                            <UploadShareLink task={task} />
                             <Show when={task().progress}>
                               {(progress) => (
                                 <div class="text-xs text-muted-foreground">

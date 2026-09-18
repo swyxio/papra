@@ -271,3 +271,63 @@ test('empty single uploads finalize the server-created object without requiring 
   expect(xhr).not.toHaveBeenCalled();
   expect(store.size).toBe(0);
 });
+
+test('publishes the reserved link before transfer and reports progress without blocking upload', async () => {
+  const store = new Map<string, string>();
+  vi.stubGlobal('localStorage', {
+    getItem: (k: string) => store.get(k) || null,
+    setItem: (k: string, v: string) => store.set(k, v),
+    removeItem: (k: string) => store.delete(k),
+  });
+  let xhr: any;
+  let sent = false;
+  const url = 'https://drive.example/s/abcdefghijklmnop/test';
+  api.mockImplementation(async ({ method, path, body }) => {
+    if (method === 'POST' && path.endsWith('/uploads')) {
+      expect(body.share).toBe(true);
+      return {
+        session: {
+          id: 'early',
+          documentId: 'doc',
+          mode: 'single',
+          partSize: 32 * 1024 ** 2,
+          uploadUrl: 'https://r2.invalid',
+          shareUrl: url,
+        },
+      };
+    }
+    if (path.endsWith('/progress')) return;
+    if (path.endsWith('/complete'))
+      return { document: { id: 'doc', organizationId: 'org', createdAt: 0, updatedAt: 0 } };
+    throw new Error('Unexpected request');
+  });
+  class Xhr {
+    upload: { onprogress?: Function } = {};
+    status = 200;
+    onload?: Function;
+    open() {}
+    setRequestHeader() {}
+    send() {
+      sent = true;
+      xhr = this;
+    }
+  }
+  vi.stubGlobal('XMLHttpRequest', Xhr);
+  const share = vi.fn((link: string) => {
+    expect(link).toBe(url);
+    expect(sent).toBe(false);
+  });
+  const upload = multipartUpload(new File(['hello'], 'test.txt'), 'org', undefined, {
+    onShareReady: share,
+  });
+  await vi.waitFor(() => expect(sent).toBe(true));
+  expect(share).toHaveBeenCalledOnce();
+  xhr.upload.onprogress({ loaded: 5 });
+  xhr.onload();
+  expect((await upload).document.id).toBe('doc');
+  await vi.waitFor(() =>
+    expect(
+      api.mock.calls.some(([args]) => args.path.endsWith('/progress') && args.body.bytes === 5),
+    ).toBe(true),
+  );
+});

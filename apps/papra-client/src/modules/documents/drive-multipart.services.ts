@@ -12,6 +12,7 @@ export type TransferProgress = {
   resumedParts: number;
 };
 type Session = {
+  shareUrl?: string;
   id: string;
   partSize: number;
   documentId: string;
@@ -46,6 +47,7 @@ export async function multipartUpload(
     documentId?: string;
     fileName?: string;
     completeUpload?: CompleteUpload;
+    onShareReady?: (url: string) => void;
   } = {},
 ) {
   const fingerprint = await fileFingerprint(file);
@@ -57,7 +59,7 @@ export async function multipartUpload(
   } catch {
     localStorage.removeItem(key);
   }
-  const { completeUpload, ...uploadOptions } = options;
+  const { completeUpload, onShareReady, ...uploadOptions } = options;
   let created = false;
   if (!saved) {
     const { session } = await apiClient<{ session: Session }>({
@@ -68,6 +70,7 @@ export async function multipartUpload(
         mimeType: file.type || 'application/octet-stream',
         size: file.size,
         fingerprint,
+        share: !!onShareReady,
         ...uploadOptions,
       },
     });
@@ -88,6 +91,27 @@ export async function multipartUpload(
     if (isHttpErrorWithStatusCode({ error, statusCode: 410 })) localStorage.removeItem(key);
     throw error;
   }
+  if (state.session.shareUrl) onShareReady?.(state.session.shareUrl);
+  let lastPublished = 0;
+  let reportedBytes = 0;
+  let publishing = Promise.resolve();
+  const publish = (interrupted = false) => {
+    if (!state.session.shareUrl) return;
+    const now = performance.now();
+    if (!interrupted && now - lastPublished < 3000 && reportedBytes < file.size) return;
+    lastPublished = now;
+    const bytes = reportedBytes;
+    publishing = publishing
+      .then(async () => {
+        await apiClient({
+          method: 'PUT',
+          path: `${path}/progress`,
+          body: { bytes, interrupted },
+          retry: 0,
+        });
+      })
+      .catch(() => {});
+  };
   const complete = async () => {
     for (let attempt = 0; ; attempt++) {
       try {
@@ -155,6 +179,8 @@ export async function multipartUpload(
   const active = new Map<number, number>();
   const report = () => {
     const bytes = finished + Array.from(active.values()).reduce((a, b) => a + b, 0);
+    reportedBytes = Math.min(file.size, bytes);
+    publish();
     const elapsed = (performance.now() - started) / 1000;
     const speed = (bytes - initial) / Math.max(elapsed, 0.1);
     onProgress?.({
@@ -248,7 +274,10 @@ export async function multipartUpload(
       } catch (error) {
         active.delete(1);
         report();
-        if (attempt >= 3) throw error;
+        if (attempt >= 3) {
+          publish(true);
+          throw error;
+        }
         await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
       }
     }
@@ -292,6 +321,7 @@ export async function multipartUpload(
   try {
     await Promise.all(Array.from({ length: 4 }, worker));
   } catch (error) {
+    publish(true);
     stopped = true;
     for (const xhr of controllers) xhr.abort();
     throw error;

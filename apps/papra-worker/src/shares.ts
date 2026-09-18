@@ -4,6 +4,8 @@ import { HTTPException } from 'hono/http-exception';
 import { isApprovedEmail, OWNER_EMAIL } from './auth';
 import { ensureDocumentAccess, ensureOrganizationMember } from './collaboration';
 import { getDocument } from './db';
+import { shareUrl, newShareId, validShareId } from './share-urls';
+import { pendingUploadShare } from './upload-shares';
 import { fetchTranscriptionStatus } from './processing';
 import { s3, signedDownload } from './storage';
 
@@ -31,9 +33,6 @@ function hex(value: Uint8Array) {
 }
 function bytes(value: string) {
   return new Uint8Array(value.match(/.{2}/g)!.map((part) => parseInt(part, 16)));
-}
-function randomHex(size: number) {
-  return hex(crypto.getRandomValues(new Uint8Array(size)));
 }
 async function sha(value: string) {
   return hex(
@@ -116,14 +115,19 @@ function expiry(value: unknown): number | null {
   return timestamp;
 }
 const iso = (value: number | null) => (value === null ? null : new Date(value).toISOString());
-function dto(env: Env, row: ShareRow, canManage = true) {
+function dto(
+  env: Env,
+  row: ShareRow & { document_name?: string },
+  canManage = true,
+  title?: string,
+) {
   return {
     canManage,
     id: row.id,
     documentId: row.document_id,
     organizationId: row.organization_id,
     token: row.token,
-    url: `${env.APP_URL.replace(/\/$/, '')}/s/${row.token}`,
+    url: shareUrl(env, row.token, title ?? row.document_name),
     isPasswordProtected: !!row.password_hash,
     isEnabled: row.is_enabled === 1,
     expiresAt: iso(row.expires_at),
@@ -173,7 +177,7 @@ function available(row: ShareRow) {
     return fail(410, 'Share link unavailable');
 }
 async function publicShare(env: Env, token: string) {
-  if (!/^[a-z0-9]{64}$/i.test(token)) return fail(404, 'Share link not found');
+  if (!validShareId(token)) return fail(404, 'Share link not found');
   const row = await env.DB.prepare('SELECT * FROM share_links WHERE token=?')
     .bind(token)
     .first<ShareRow>();
@@ -268,7 +272,7 @@ export function registerShareRoutes(app: App) {
     const env = context.env;
     const org = context.req.param('organizationId');
     const doc = context.req.param('documentId');
-    await documentScope(env, context.get('identity'), org, doc);
+    const document = await documentScope(env, context.get('identity'), org, doc);
     const rows = await env.DB.prepare(
       'SELECT * FROM share_links WHERE organization_id=? AND document_id=? ORDER BY created_at DESC',
     )
@@ -277,7 +281,7 @@ export function registerShareRoutes(app: App) {
     const canManage = await canManageSharing(env, context.get('identity'), org, doc);
     return context.json({
       canManage,
-      shareLinks: rows.results.map((row) => dto(env, row, canManage)),
+      shareLinks: rows.results.map((row) => dto(env, row, canManage, document.name)),
     });
   });
   app.get(`${base}/share-links`, async (context) => {
@@ -321,12 +325,13 @@ export function registerShareRoutes(app: App) {
       body.automatic === true
         ? `dsl_upload_${await sha(`${identity.userId}:${document.current_version_id}`)}`
         : null;
+    const token = newShareId();
     const row: ShareRow = {
-      id: automaticId ?? `dsl_${randomHex(12)}`,
+      id: automaticId ?? token,
       document_id: doc,
       organization_id: org,
       created_by: identity.userId,
-      token: randomHex(32),
+      token,
       password_hash:
         body.password === undefined || body.password === null
           ? null
@@ -337,22 +342,39 @@ export function registerShareRoutes(app: App) {
       updated_at: Date.now(),
       last_accessed_at: null,
     };
-    await env.DB.prepare(
-      'INSERT OR IGNORE INTO share_links (id,document_id,organization_id,created_by,token,password_hash,is_enabled,expires_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
-    )
-      .bind(
-        row.id,
-        doc,
-        org,
-        identity.userId,
-        row.token,
-        row.password_hash,
-        1,
-        row.expires_at,
-        row.created_at,
-        row.updated_at,
+    let accepted = false;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      if (attempt) {
+        row.token = newShareId(attempt);
+        if (!automaticId) row.id = row.token;
+      }
+      const inserted = await env.DB.prepare(
+        'INSERT OR IGNORE INTO share_links (id,document_id,organization_id,created_by,token,password_hash,is_enabled,expires_at,created_at,updated_at) SELECT ?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM upload_shares WHERE token=?)',
       )
-      .run();
+        .bind(
+          row.id,
+          doc,
+          org,
+          identity.userId,
+          row.token,
+          row.password_hash,
+          1,
+          row.expires_at,
+          row.created_at,
+          row.updated_at,
+          row.token,
+        )
+        .run();
+      if (
+        inserted.meta.changes ||
+        (automaticId &&
+          (await env.DB.prepare('SELECT id FROM share_links WHERE id=?').bind(automaticId).first()))
+      ) {
+        accepted = true;
+        break;
+      }
+    }
+    if (!accepted) throw new HTTPException(503, { message: 'Could not reserve a unique share ID' });
     const saved = automaticId
       ? await env.DB.prepare('SELECT * FROM share_links WHERE id=?')
           .bind(automaticId)
@@ -364,7 +386,7 @@ export function registerShareRoutes(app: App) {
       throw new HTTPException(409, {
         message: 'This upload link was restricted. Use Share to manage access.',
       });
-    return context.json({ shareLink: dto(env, saved) }, 201);
+    return context.json({ shareLink: dto(env, saved, true, document.name) }, 201);
   });
   app.patch(`${base}/share-links/:shareId`, async (context) => {
     const env = context.env;
@@ -403,7 +425,8 @@ export function registerShareRoutes(app: App) {
       .run();
     if (result.meta.changes !== 1)
       throw new HTTPException(409, { message: 'Share link changed; reload and try again' });
-    return context.json({ shareLink: dto(env, next) });
+    const document = await getDocument(env, row.document_id);
+    return context.json({ shareLink: dto(env, next, true, document?.name) });
   });
   app.delete(`${base}/share-links/:shareId`, async (context) => {
     const row = await managedShare(
@@ -432,6 +455,8 @@ export function registerShareRoutes(app: App) {
     return context.json({ accessToken: await unlock(context.env, row) });
   });
   app.get('/api/share-links/:token/document', async (context) => {
+    const pending = await pendingUploadShare(context.env, context.req.param('token'));
+    if (pending) return context.json({ document: pending });
     const row = await authorizedPublicShare(
       context.env,
       context.req.param('token'),

@@ -125,7 +125,10 @@ const SharedDocumentCard: Component<{
     queryKey: ['share-link', props.token, 'file', props.accessToken],
     queryFn: async () =>
       fetchSharedDocumentFile({ token: props.token, accessToken: props.accessToken }),
-    enabled: props.document.size <= 32 * 1024 ** 2 && isPreviewable(props.document.mimeType),
+    enabled:
+      !props.document.upload &&
+      props.document.size <= 32 * 1024 ** 2 &&
+      isPreviewable(props.document.mimeType),
     retry: false,
     refetchOnWindowFocus: false,
   }));
@@ -138,7 +141,7 @@ const SharedDocumentCard: Component<{
         accessToken: props.accessToken,
         mode: 'preview',
       }),
-    enabled: props.document.size > 32 * 1024 ** 2,
+    enabled: !props.document.upload && props.document.size > 32 * 1024 ** 2,
     retry: false,
     refetchInterval: 5000,
   }));
@@ -157,13 +160,49 @@ const SharedDocumentCard: Component<{
         </div>
 
         <div class="md:ml-auto">
-          <Button onClick={() => downloadMutation.mutate()} isLoading={downloadMutation.isPending}>
+          <Button
+            disabled={!!props.document.upload}
+            onClick={() => downloadMutation.mutate()}
+            isLoading={downloadMutation.isPending}
+          >
             <div class="i-tabler-download size-4 mr-2" />
             {t('document-share-links.public.download')}
           </Button>
         </div>
       </div>
 
+      <Show when={props.document.upload}>
+        {(upload) => (
+          <div class="max-w-lg mx-auto px-6 py-12 space-y-4 text-center" role="status">
+            <div class="i-tabler-cloud-upload size-10 text-primary mx-auto" />
+            <h2 class="text-xl font-semibold">Upload in progress</h2>
+            <p class="text-muted-foreground">
+              This file is still uploading. It will become available here automatically.
+            </p>
+            <p>
+              {upload().total
+                ? `${Math.floor((upload().bytes / upload().total) * 100)}% uploaded`
+                : 'Finalizing upload…'}
+            </p>
+            <progress
+              class="w-full accent-primary"
+              aria-label="Upload progress"
+              max={Math.max(1, upload().total)}
+              value={upload().bytes}
+            />
+            <Show
+              when={upload().interrupted || Date.now() - Date.parse(upload().updatedAt) > 30000}
+            >
+              <p class="text-sm text-muted-foreground">
+                Waiting for the uploader to reconnect. Progress is the last reported amount.
+              </p>
+            </Show>
+            <Show when={upload().total > 0 && upload().bytes >= upload().total}>
+              <p class="text-sm text-muted-foreground">Finalizing the file…</p>
+            </Show>
+          </div>
+        )}
+      </Show>
       <Show when={props.document.transcription}>
         {(state) => (
           <div class="max-w-5xl mx-auto px-6 pt-6">
@@ -204,7 +243,10 @@ export const SharedDocumentPage: Component = () => {
   const documentQuery = useQuery(() => ({
     queryKey: ['share-link', params.token, 'document', getAccessToken()],
     refetchInterval: (query) =>
-      transcriptionActive(query.state.data?.document.transcription) ? 5000 : false,
+      query.state.data?.document.upload ||
+      transcriptionActive(query.state.data?.document.transcription)
+        ? 3000
+        : false,
     queryFn: async () =>
       fetchSharedDocument({ token: params.token, accessToken: getAccessToken() }),
     retry: false,

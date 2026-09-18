@@ -6,6 +6,8 @@ import { Miniflare } from 'miniflare';
 import { afterEach, expect, test, vi } from 'vitest';
 import type { AppEnv, Env, Identity } from './types';
 import type * as JobModule from './jobs';
+import { registerShareRoutes } from './shares';
+import { reserveUploadShare, shareUrl } from './share-urls';
 import { registerUploadRoutes } from './uploads';
 import { registerProcessingRoutes } from './processing';
 import { semanticSources } from './search';
@@ -66,6 +68,8 @@ async function fixture() {
   const objects = new Map<string, { size: number }>(),
     env = {
       DB,
+      APP_URL: 'https://drive.example',
+      AUTH_SECRET: 'x'.repeat(32),
       FILES: {
         head: async (key: string) => objects.get(key) || null,
         put: async (key: string) => objects.set(key, { size: 0 }),
@@ -88,6 +92,7 @@ async function fixture() {
     await next();
   });
   registerUploadRoutes(app);
+  registerShareRoutes(app);
   registerProcessingRoutes(app);
   app.onError((e, c) =>
     c.json({ message: e.message }, e instanceof HTTPException ? e.status : 500),
@@ -102,7 +107,16 @@ async function fixture() {
       },
       env,
     );
-  return { DB, env, user, objects, call };
+  return {
+    DB,
+    env,
+    user,
+    objects,
+    call,
+    publicGet: async (token: string) => app.request(`/api/share-links/${token}/document`, {}, env),
+    publicFile: async (token: string) =>
+      app.request(`/api/share-links/${token}/document/file`, {}, env),
+  };
 }
 test('multipart sign/complete strictly validates owner, numbers and provider bytes; completion repairs lost response', async () => {
   const f = await fixture(),
@@ -354,4 +368,105 @@ test('processing readback enforces restricted-folder and service-token scope in 
     uploaded: true,
     backup: 'pending',
   });
+});
+
+test('reserved short ID exposes progress before bytes arrive, activates atomically and survives rename', async () => {
+  const f = await fixture();
+  await f.DB.prepare("UPDATE organization_members SET role='admin' WHERE user_id='writer'").run();
+  const response = await f.call('', 'POST', {
+    fileName: 'Résumé Contract.pdf',
+    size: 10,
+    mimeType: 'application/pdf',
+    fingerprint: '7'.repeat(64),
+    share: true,
+  });
+  expect(response.status).toBe(201);
+  const { session } = (await response.json()) as any;
+  const token = new URL(session.shareUrl).pathname.split('/')[2];
+  expect(token).toMatch(/^[A-Za-z0-9_-]{16}$/);
+  expect(session.shareUrl).toBe(`https://drive.example/s/${token}/resume-contract`);
+  expect((await f.publicGet(token)).status).toBe(200);
+  expect((await f.publicFile(token)).status).toBe(404);
+  expect(await (await f.publicGet(token)).json()).toMatchObject({
+    document: { upload: { bytes: 0, total: 10 } },
+  });
+  expect((await f.call(`/${session.id}/progress`, 'PUT', { bytes: 6 })).status).toBe(204);
+  expect(await (await f.publicGet(token)).json()).toMatchObject({
+    document: { upload: { bytes: 6, total: 10, interrupted: false } },
+  });
+  expect((await f.call(`/${session.id}/progress`, 'PUT', { bytes: 11 })).status).toBe(400);
+  f.user.userId = 'other';
+  expect((await f.call(`/${session.id}/progress`, 'PUT', { bytes: 9 })).status).toBe(404);
+  f.user.userId = 'writer';
+  const row = await f.DB.prepare('SELECT * FROM uploads WHERE id=?').bind(session.id).first<any>();
+  f.objects.set(row.storage_key, { size: 10 });
+  expect((await f.call(`/${session.id}/complete`, 'POST', {})).status).toBe(200);
+  expect(await f.DB.prepare('SELECT id,token FROM share_links').first<any>()).toEqual({
+    id: token,
+    token,
+  });
+  const shared = (await (await f.publicGet(token)).json()) as any;
+  expect(shared.document.upload).toBeUndefined();
+  await f.DB.prepare('UPDATE documents SET name=? WHERE id=?')
+    .bind('Renamed.pdf', session.documentId)
+    .run();
+  expect(await (await f.publicGet(token)).json()).toMatchObject({
+    document: { name: 'Renamed.pdf' },
+  });
+  expect((await f.call(`/${session.id}/complete`, 'POST', {})).status).toBe(200);
+  expect((await f.DB.prepare('SELECT count(*) n FROM share_links').first<any>()).n).toBe(1);
+});
+test('pending delegation is revoked with admin access and aborted links are unavailable', async () => {
+  const f = await fixture();
+  await f.DB.prepare("UPDATE organization_members SET role='admin' WHERE user_id='writer'").run();
+  const { session } = (await (
+    await f.call('', 'POST', {
+      fileName: 'pending.txt',
+      size: 9,
+      fingerprint: '8'.repeat(64),
+      share: true,
+    })
+  ).json()) as any;
+  const token = new URL(session.shareUrl).pathname.split('/')[2];
+  await f.call(`/${session.id}/progress`, 'PUT', { bytes: 4, interrupted: true });
+  expect(await (await f.publicGet(token)).json()).toMatchObject({
+    document: { upload: { interrupted: true } },
+  });
+  await f.DB.prepare("UPDATE organization_members SET role='member' WHERE user_id='writer'").run();
+  expect((await f.publicGet(token)).status).toBe(410);
+  const ordinary = (await (
+    await f.call('', 'POST', {
+      fileName: 'ordinary.txt',
+      size: 3,
+      fingerprint: '9'.repeat(64),
+      share: true,
+    })
+  ).json()) as any;
+  expect(ordinary.session.shareUrl).toBeUndefined();
+  await f.DB.prepare("UPDATE organization_members SET role='admin' WHERE user_id='writer'").run();
+  await f.call(`/${session.id}`, 'DELETE');
+  expect((await f.publicGet(token)).status).toBe(410);
+});
+test('ID collisions retry with a longer ID, and slug spelling never contributes identity', async () => {
+  const f = await fixture();
+  const a = (await (
+    await f.call('', 'POST', { fileName: 'a.txt', size: 1, fingerprint: 'a'.repeat(64) })
+  ).json()) as any;
+  const b = (await (
+    await f.call('', 'POST', { fileName: 'b.txt', size: 1, fingerprint: 'b'.repeat(64) })
+  ).json()) as any;
+  const random = vi.spyOn(crypto, 'getRandomValues').mockImplementation((array: any) => {
+    array.fill(0);
+    return array;
+  });
+  try {
+    const first = await reserveUploadShare(f.env, a.session.id);
+    const second = await reserveUploadShare(f.env, b.session.id);
+    expect(first).toHaveLength(16);
+    expect(second).toHaveLength(20);
+    expect(await reserveUploadShare(f.env, b.session.id)).toBe(second);
+    expect(shareUrl(f.env, first, 'Different title.pdf').split('/')[4]).toBe(first);
+  } finally {
+    random.mockRestore();
+  }
 });

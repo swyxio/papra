@@ -6,6 +6,7 @@ import {
   ensureOrganizationMember,
   organizationHomeFolderId,
 } from './collaboration';
+import { shareUrl, reserveUploadShare } from './share-urls';
 import { s3, parts } from './storage';
 import { initialVersionJobs, dispatchVersionJobs } from './jobs';
 import { HTTPException } from 'hono/http-exception';
@@ -25,7 +26,11 @@ const dto = (u: Record<string, any>) => ({
   createdAt: new Date(u.created_at).toISOString(),
 });
 async function uploadDto(env: Env, u: Record<string, any>) {
-  const session = dto(u);
+  const share = await first(env, 'SELECT token FROM upload_shares WHERE upload_id=?', u.id);
+  const session = {
+    ...dto(u),
+    ...(share ? { shareUrl: shareUrl(env, share.token, u.file_name) } : {}),
+  };
   if (u.upload_id !== 'single' || u.status !== 'uploading') return session;
   const uploadHeaders = { 'If-None-Match': '*', 'Content-Type': u.mime_type };
   return {
@@ -126,6 +131,12 @@ async function prepareCompletion(env: Env, user: Identity, u: Record<string, any
       u.id,
     ),
   );
+  // Completion and activation of the reserved link are atomic.
+  stmts.push(
+    env.DB.prepare(
+      'INSERT OR IGNORE INTO share_links(id,document_id,organization_id,created_by,token,created_at,updated_at) SELECT token,?,?,?,token,?,? FROM upload_shares WHERE upload_id=?',
+    ).bind(u.document_id, u.organization_id, user.userId, now, now, u.id),
+  );
   stmts.push(env.DB.prepare("UPDATE uploads SET status='complete' WHERE id=?").bind(u.id));
   stmts.push(...initialVersionJobs(env, u.version_id, now));
   return stmts;
@@ -151,7 +162,7 @@ export function registerUploadRoutes(app: App) {
   app.post(base, async (c) => {
     const user = c.get('identity'),
       org = c.req.param('org');
-    await ensureOrganizationMember(c.env, user, org);
+    const role = await ensureOrganizationMember(c.env, user, org);
     const b = await c.req.json();
     if (
       typeof b.fileName !== 'string' ||
@@ -259,6 +270,9 @@ export function registerUploadRoutes(app: App) {
       else await c.env.FILES.delete(key);
       throw e;
     }
+    if (b.share === true && ['owner', 'admin'].includes(role) && !user.serviceScope) {
+      await reserveUploadShare(c.env, uploadId);
+    }
     return c.json(
       {
         session: await uploadDto(
@@ -289,6 +303,24 @@ export function registerUploadRoutes(app: App) {
       }
     }
     return c.json({ session: await uploadDto(c.env, u), parts: list });
+  });
+  app.put(`${base}/:upload/progress`, async (c) => {
+    const u = await owned(c.env, c.get('identity'), c.req.param('org'), c.req.param('upload'));
+    const b = await c.req.json();
+    if (
+      !Number.isSafeInteger(b.bytes) ||
+      b.bytes < 0 ||
+      b.bytes > u.size ||
+      (b.interrupted !== undefined && typeof b.interrupted !== 'boolean')
+    )
+      throw error(400, 'Invalid upload progress');
+    if (u.status === 'uploading')
+      await c.env.DB.prepare(
+        'UPDATE upload_shares SET bytes=?,updated_at=?,interrupted=? WHERE upload_id=?',
+      )
+        .bind(b.bytes, Date.now(), b.interrupted ? 1 : 0, u.id)
+        .run();
+    return c.body(null, 204);
   });
   app.post(`${base}/:upload/parts`, async (c) => {
     const u = await owned(c.env, c.get('identity'), c.req.param('org'), c.req.param('upload'));
