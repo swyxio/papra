@@ -38,16 +38,19 @@ export async function createShareLink({
   documentId,
   expiresAt,
   password,
+  automatic,
 }: {
   organizationId: string;
   documentId: string;
   expiresAt?: Date | null;
   password?: string;
+  automatic?: boolean;
 }) {
   const { shareLink } = await apiClient<{ shareLink: ShareLinkDto }>({
     method: 'POST',
     path: `/api/organizations/${organizationId}/documents/${documentId}/share-links`,
-    body: { expiresAt: expiresAt ?? null, password },
+    body: { expiresAt: expiresAt ?? null, password, automatic },
+    retry: 0,
   });
 
   return { shareLink: toShareLink(shareLink) };

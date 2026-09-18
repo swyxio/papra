@@ -1,3 +1,6 @@
+import type { PublicSharedDocument } from '../document-share-links.types';
+import { TranscriptionProgress } from '@/modules/documents/components/transcription-progress.component';
+import { transcriptionActive } from '@/modules/documents/document-processing.services';
 import type { Component } from 'solid-js';
 import { formatBytes } from '@corentinth/chisels';
 import { A, useParams } from '@solidjs/router';
@@ -96,7 +99,7 @@ const PasswordGate: Component<{
 const SharedDocumentCard: Component<{
   token: string;
   accessToken: string | undefined;
-  document: { name: string; size: number; mimeType: string };
+  document: PublicSharedDocument;
 }> = (props) => {
   const { t } = useI18n();
 
@@ -161,6 +164,13 @@ const SharedDocumentCard: Component<{
         </div>
       </div>
 
+      <Show when={props.document.transcription}>
+        {(state) => (
+          <div class="max-w-5xl mx-auto px-6 pt-6">
+            <TranscriptionProgress state={state()} />
+          </div>
+        )}
+      </Show>
       <div class="p-6 flex justify-center max-w-5xl mx-auto w-full">
         <Show when={derivativeQuery.data?.url}>
           {(url) => <img src={url()} alt="File preview" class="max-w-full" />}
@@ -193,6 +203,8 @@ export const SharedDocumentPage: Component = () => {
 
   const documentQuery = useQuery(() => ({
     queryKey: ['share-link', params.token, 'document', getAccessToken()],
+    refetchInterval: (query) =>
+      transcriptionActive(query.state.data?.document.transcription) ? 5000 : false,
     queryFn: async () =>
       fetchSharedDocument({ token: params.token, accessToken: getAccessToken() }),
     retry: false,

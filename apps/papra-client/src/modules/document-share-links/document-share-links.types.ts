@@ -1,3 +1,5 @@
+import type { TranscriptionStatus } from '../documents/document-processing.services';
+
 export type ShareLink = {
   canManage: boolean;
   id: string;
@@ -19,6 +21,7 @@ export type ShareLink = {
 };
 
 export type PublicSharedDocument = {
+  transcription?: TranscriptionStatus | null;
   name: string;
   size: number;
   mimeType: string;

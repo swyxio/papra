@@ -8,8 +8,49 @@ type ProcessingDocument = {
   content: string;
   sha256: string | null;
   chunks: number;
+  mime_type?: string;
 };
-type ProcessingJob = { version_id: string; kind: string; status: string; error: string | null };
+type ProcessingJob = {
+  version_id: string;
+  kind: string;
+  status: string;
+  error: string | null;
+  generation?: number;
+};
+export function transcriptionStatus(mimeType: string, jobs: ProcessingJob[]) {
+  if (!/^(audio|video)\//i.test(mimeType)) return null;
+  const process = jobs.find((job) => job.kind === 'process');
+  const pieces = jobs.filter((job) =>
+    job.kind.startsWith(`transcribe:${process?.generation ?? 0}:`),
+  );
+  const completed = pieces.filter((job) => job.status === 'done').length;
+  const failed = pieces.filter((job) => job.status === 'failed').length;
+  const total = pieces.length;
+  const active = pieces.some((job) => ['pending', 'processing'].includes(job.status));
+  const status = total
+    ? active
+      ? 'transcribing'
+      : failed
+        ? 'failed'
+        : 'ready'
+    : process?.status === 'failed'
+      ? 'failed'
+      : process?.status === 'done'
+        ? 'unavailable'
+        : process?.status === 'processing'
+          ? 'preparing'
+          : 'queued';
+  return { status, completed, failed, total };
+}
+export async function fetchTranscriptionStatus(env: Env, versionId: string, mimeType: string) {
+  if (!/^(audio|video)\//i.test(mimeType)) return null;
+  const jobs = await all<ProcessingJob>(
+    env,
+    "SELECT version_id,kind,status,error,generation FROM jobs WHERE version_id=? AND (kind='process' OR kind LIKE 'transcribe:%')",
+    versionId,
+  );
+  return transcriptionStatus(mimeType, jobs);
+}
 export function processingStatus(d: ProcessingDocument, jobs: ProcessingJob[]) {
   const find = (kind: string) => jobs.find((j) => j.kind === kind);
   const backup = find('backup'),
@@ -49,6 +90,7 @@ export function processingStatus(d: ProcessingDocument, jobs: ProcessingJob[]) {
   return {
     versionId: d.version_id,
     uploaded: true as const,
+    transcription: transcriptionStatus(d.mime_type ?? '', jobs),
     backup: backupStage,
     keyword,
     semantic,
@@ -65,7 +107,7 @@ async function statuses(env: Env, user: Identity, org: string, ids: string[]) {
   const access = await permittedDocumentPredicateSQL(env, user, org);
   const docs = await all<ProcessingDocument>(
     env,
-    `SELECT d.id,d.content,v.id version_id,v.sha256,(SELECT count(*) FROM chunks c WHERE c.document_id=d.id AND c.version_id=v.id) chunks FROM documents d JOIN versions v ON v.id=d.current_version_id WHERE d.organization_id=? AND d.is_deleted=0 AND (${access.sql}) AND d.id IN (${ids.map(() => '?').join(',')})`,
+    `SELECT d.id,d.content,d.mime_type,v.id version_id,v.sha256,(SELECT count(*) FROM chunks c WHERE c.document_id=d.id AND c.version_id=v.id) chunks FROM documents d JOIN versions v ON v.id=d.current_version_id WHERE d.organization_id=? AND d.is_deleted=0 AND (${access.sql}) AND d.id IN (${ids.map(() => '?').join(',')})`,
     org,
     ...access.bindings,
     ...ids,
@@ -74,7 +116,7 @@ async function statuses(env: Env, user: Identity, org: string, ids: string[]) {
   const jobs = versions.length
     ? await all<ProcessingJob>(
         env,
-        `SELECT version_id,kind,status,error FROM jobs WHERE version_id IN (${versions.map(() => '?').join(',')}) AND kind IN ('process','index','hash','backup','backup-hash')`,
+        `SELECT version_id,kind,status,error,generation FROM jobs WHERE version_id IN (${versions.map(() => '?').join(',')}) AND (kind IN ('process','index','hash','backup','backup-hash') OR kind LIKE 'transcribe:%')`,
         ...versions,
       )
     : [];

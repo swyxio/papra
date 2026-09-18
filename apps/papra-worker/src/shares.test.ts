@@ -402,3 +402,58 @@ describe('Worker share link permission and revocation', () => {
     expect(fallback.headers.get('location')).toContain('original/open');
   });
 });
+
+test('automatic upload links are concurrent-safe, permissive, and preserve later restrictions', async () => {
+  const { request, DB } = await fixture();
+  const path = '/api/organizations/team/documents/open/share-links';
+  const responses = await Promise.all([
+    request(path, 'POST', { automatic: true }),
+    request(path, 'POST', { automatic: true }),
+  ]);
+  expect(responses.map((r) => r.status)).toEqual([201, 201]);
+  const [a, b] = await Promise.all(
+    responses.map(async (r) => r.json() as Promise<{ shareLink: ShareDto }>),
+  );
+  expect(a.shareLink.token).toBe(b.shareLink.token);
+  expect(a.shareLink.isPasswordProtected).toBe(false);
+  expect(a.shareLink.expiresAt).toBeNull();
+  expect((await request(`/api/share-links/${a.shareLink.token}/document`)).status).toBe(200);
+  expect((await request(path, 'POST', { automatic: true }, 'member')).status).toBe(403);
+  await request(`/api/organizations/team/share-links/${a.shareLink.id}`, 'PATCH', {
+    isEnabled: false,
+  });
+  expect((await request(path, 'POST', { automatic: true })).status).toBe(409);
+  expect(
+    (
+      await DB.prepare('SELECT count(*) n FROM share_links WHERE document_id=?')
+        .bind('open')
+        .first<{ n: number }>()
+    )?.n,
+  ).toBe(1);
+});
+test('shared video progress is anonymous for permissive links and remains protected by password access', async () => {
+  const { request, DB } = await fixture();
+  await DB.prepare("UPDATE documents SET mime_type='video/mp4' WHERE id='open'").run();
+  for (const [kind, status] of [
+    ['process', 'done'],
+    ['transcribe:0:0', 'done'],
+    ['transcribe:0:1', 'pending'],
+  ]) {
+    await DB.prepare(
+      'INSERT INTO jobs(id,version_id,kind,status,created_at,updated_at) VALUES(?,?,?,?,?,?)',
+    )
+      .bind(kind, 'v-open', kind, status, Date.now(), Date.now())
+      .run();
+  }
+  const response = await request('/api/organizations/team/documents/open/share-links', 'POST', {});
+  const { shareLink } = (await response.json()) as { shareLink: ShareDto };
+  const shared = await request(`/api/share-links/${shareLink.token}/document`);
+  expect(shared.status).toBe(200);
+  expect(await shared.json()).toMatchObject({
+    document: { transcription: { status: 'transcribing', total: 2, completed: 1, failed: 0 } },
+  });
+  await request(`/api/organizations/team/share-links/${shareLink.id}`, 'PATCH', {
+    password: 'test private',
+  });
+  expect((await request(`/api/share-links/${shareLink.token}/document`)).status).toBe(401);
+});

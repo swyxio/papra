@@ -1,3 +1,5 @@
+import { createShareLink } from '@/modules/document-share-links/document-share-links.services';
+import { TranscriptionProgress } from './transcription-progress.component';
 import { apiClient } from '@/modules/shared/http/api-client';
 import type { ParentComponent } from 'solid-js';
 import type { Document } from '../documents.types';
@@ -90,6 +92,10 @@ type Task = {
   progress?: TransferProgress;
   processing?: DocumentProcessing;
   processingError?: string;
+  shareUrl?: string;
+  shareError?: string;
+  sharing?: boolean;
+  copied?: boolean;
 } & (
   | TaskSuccess
   | TaskError
@@ -162,6 +168,28 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
     refetchOnWindowFocus: true,
   }));
 
+  const shareLimit = pLimit(4);
+  const createUploadShare = async (file: File, document: Document) => {
+    const update = (changes: Partial<Task>) =>
+      setTasks((tasks) =>
+        tasks.map((task) => (task.file === file ? ({ ...task, ...changes } as Task) : task)),
+      );
+    update({ sharing: true, shareError: undefined });
+    try {
+      const { shareLink } = await shareLimit(async () =>
+        createShareLink({
+          organizationId: document.organizationId,
+          documentId: document.id,
+          automatic: true,
+        }),
+      );
+      update({ shareUrl: shareLink.url });
+    } catch (error) {
+      update({ shareError: getHttpErrorMessage(error) });
+    } finally {
+      update({ sharing: false });
+    }
+  };
   const uploadDocuments = async ({
     files,
     folderImport,
@@ -253,6 +281,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
             const { document } = result;
 
             updateTaskStatus({ file, status: 'success', document });
+            void createUploadShare(file, document);
           }
 
           throttledInvalidateOrganizationDocumentsQuery({ organizationId });
@@ -413,27 +442,95 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
                   {(task) => (
                     <Switch>
                       <Match when={task().status === 'success'}>
-                        <A
-                          href={`/organizations/${(task() as TaskSuccess).document.organizationId}/documents/${(task() as TaskSuccess).document.id}`}
-                          class="text-sm truncate min-w-0 flex items-center gap-4 min-h-48px group hover:bg-muted/50 transition-colors px-6 border-b border-border/80"
-                        >
-                          <div class="flex-1 min-w-0">
-                            <div class="truncate">{task().file.name}</div>
-                            <div class="text-xs text-muted-foreground whitespace-normal">
-                              {task().processing
-                                ? processingLabel(task().processing!)
-                                : task().processingError ||
-                                  (processingQuery.isError
-                                    ? 'Uploaded · processing status unavailable'
-                                    : 'Uploaded · backup and search processing continue')}
-                            </div>
+                        <div class="text-sm min-w-0 px-6 py-3 border-b border-border/80 space-y-2">
+                          <A
+                            href={`/organizations/${(task() as TaskSuccess).document.organizationId}/documents/${(task() as TaskSuccess).document.id}`}
+                            class="block truncate hover:underline"
+                          >
+                            {task().file.name} ↗
+                          </A>
+                          <div class="text-xs text-muted-foreground whitespace-normal">
+                            {task().processing
+                              ? processingLabel(task().processing!)
+                              : task().processingError ||
+                                (processingQuery.isError
+                                  ? 'Uploaded · processing status unavailable'
+                                  : 'Uploaded · backup and search processing continue')}
                           </div>
-
-                          <div class="flex-none">
-                            <div class="i-tabler-circle-check text-primary size-5.5 group-hover:hidden" />
-                            <div class="i-tabler-arrow-right text-muted-foreground size-5.5 hidden group-hover:block" />
-                          </div>
-                        </A>
+                          <Show when={task().processing?.transcription}>
+                            {(state) => <TranscriptionProgress state={state()} />}
+                          </Show>
+                          <Show when={task().shareUrl}>
+                            {(url) => (
+                              <div class="space-y-1">
+                                <p class="text-xs text-muted-foreground">
+                                  Anyone with this link can view and download.
+                                </p>
+                                <a
+                                  href={url()}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  class="text-xs block break-all underline"
+                                >
+                                  {url()}
+                                </a>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={async () => {
+                                    try {
+                                      await navigator.clipboard.writeText(url());
+                                      setTasks((tasks) =>
+                                        tasks.map((item) =>
+                                          item.file === task().file
+                                            ? { ...item, copied: true }
+                                            : item,
+                                        ),
+                                      );
+                                    } catch {
+                                      setTasks((tasks) =>
+                                        tasks.map((item) =>
+                                          item.file === task().file
+                                            ? {
+                                                ...item,
+                                                shareError:
+                                                  'Could not copy. Select the link above to copy it.',
+                                              }
+                                            : item,
+                                        ),
+                                      );
+                                    }
+                                  }}
+                                >
+                                  {task().copied ? 'Copied!' : 'Copy share link'}
+                                </Button>
+                              </div>
+                            )}
+                          </Show>
+                          <Show when={task().sharing}>
+                            <p class="text-xs">Creating share link…</p>
+                          </Show>
+                          <Show when={task().shareError}>
+                            <p class="text-xs text-red-500" role="alert">
+                              {task().shareError}
+                            </p>
+                            <Show when={!task().shareUrl}>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={task().sharing}
+                                onClick={() =>
+                                  void createUploadShare(
+                                    task().file,
+                                    (task() as TaskSuccess).document,
+                                  )
+                                }
+                              >
+                                Retry share link
+                              </Button>
+                            </Show>
+                          </Show>
+                        </div>
                       </Match>
 
                       <Match when={task().status === 'error'}>

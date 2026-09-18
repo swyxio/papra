@@ -4,6 +4,7 @@ import { HTTPException } from 'hono/http-exception';
 import { isApprovedEmail, OWNER_EMAIL } from './auth';
 import { ensureDocumentAccess, ensureOrganizationMember } from './collaboration';
 import { getDocument } from './db';
+import { fetchTranscriptionStatus } from './processing';
 import { s3, signedDownload } from './storage';
 
 type ShareRow = {
@@ -311,10 +312,17 @@ export function registerShareRoutes(app: App) {
     const identity = context.get('identity');
     const document = await documentScope(env, identity, org, doc, true);
     if (document.is_deleted) return fail(410, 'File is deleted');
-    if (!document.current_version_id) return fail(400, 'Convert this document to PDF before sharing');
+    if (!document.current_version_id)
+      return fail(400, 'Convert this document to PDF before sharing');
     const body = await jsonBody(context.req.raw);
+    if (body.automatic === true && (body.password != null || body.expiresAt != null))
+      return fail(400, 'Automatic upload links must be password-free and have no expiration');
+    const automaticId =
+      body.automatic === true
+        ? `dsl_upload_${await sha(`${identity.userId}:${document.current_version_id}`)}`
+        : null;
     const row: ShareRow = {
-      id: `dsl_${randomHex(12)}`,
+      id: automaticId ?? `dsl_${randomHex(12)}`,
       document_id: doc,
       organization_id: org,
       created_by: identity.userId,
@@ -330,7 +338,7 @@ export function registerShareRoutes(app: App) {
       last_accessed_at: null,
     };
     await env.DB.prepare(
-      'INSERT INTO share_links (id,document_id,organization_id,created_by,token,password_hash,is_enabled,expires_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
+      'INSERT OR IGNORE INTO share_links (id,document_id,organization_id,created_by,token,password_hash,is_enabled,expires_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
     )
       .bind(
         row.id,
@@ -345,7 +353,18 @@ export function registerShareRoutes(app: App) {
         row.updated_at,
       )
       .run();
-    return context.json({ shareLink: dto(env, row) }, 201);
+    const saved = automaticId
+      ? await env.DB.prepare('SELECT * FROM share_links WHERE id=?')
+          .bind(automaticId)
+          .first<ShareRow>()
+      : row;
+    if (!saved)
+      throw new HTTPException(503, { message: 'Share link creation could not be verified' });
+    if (automaticId && (saved.password_hash || saved.expires_at !== null || saved.is_enabled !== 1))
+      throw new HTTPException(409, {
+        message: 'This upload link was restricted. Use Share to manage access.',
+      });
+    return context.json({ shareLink: dto(env, saved) }, 201);
   });
   app.patch(`${base}/share-links/:shareId`, async (context) => {
     const env = context.env;
@@ -421,7 +440,16 @@ export function registerShareRoutes(app: App) {
     const doc = await getDocument(context.env, row.document_id);
     if (!doc || doc.is_deleted) return fail(410, 'Share link unavailable');
     return context.json({
-      document: { name: doc.name, size: doc.original_size, mimeType: doc.mime_type },
+      document: {
+        name: doc.name,
+        size: doc.original_size,
+        mimeType: doc.mime_type,
+        transcription: await fetchTranscriptionStatus(
+          context.env,
+          doc.current_version_id,
+          doc.mime_type,
+        ),
+      },
     });
   });
   app.get('/api/share-links/:token/document/file', async (context) => {
