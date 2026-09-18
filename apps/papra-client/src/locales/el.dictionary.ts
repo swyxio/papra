@@ -30,7 +30,7 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'auth.email-provider.open': 'Άνοιγμα {{ provider }}',
 
-  'auth.login.title': 'Σύνδεση στο Papra',
+  'auth.login.title': 'Σύνδεση στο SwyxDrive',
   'auth.login.description':
     'Εισαγάγετε το email σας ή χρησιμοποιήστε κοινωνική σύνδεση για πρόσβαση στον λογαριασμό σας.',
   'auth.login.login-with-provider': 'Σύνδεση με {{ provider }}',
@@ -64,7 +64,7 @@ export const translations: Partial<TranslationsDictionary> = {
   'auth.login.two-factor.use-backup-code': 'Χρήση κωδικού ανάκτησης',
   'auth.login.two-factor.use-totp': 'Χρήση εφαρμογής αυθεντικοποίησης',
 
-  'auth.register.title': 'Εγγραφή στο Papra',
+  'auth.register.title': 'Εγγραφή στο SwyxDrive',
   'auth.register.description': 'Δημιουργήστε λογαριασμό για να ξεκινήσετε.',
   'auth.register.register-with-email': 'Εγγραφή με email',
   'auth.register.register-with-provider': 'Εγγραφή με {{ provider }}',
@@ -74,7 +74,7 @@ export const translations: Partial<TranslationsDictionary> = {
   'auth.register.login': 'Σύνδεση',
   'auth.register.registration-disabled.title': 'Η εγγραφή είναι απενεργοποιημένη',
   'auth.register.registration-disabled.description':
-    'Η δημιουργία νέων λογαριασμών είναι απενεργοποιημένη σε αυτήν την εγκατάσταση του Papra.',
+    'Η δημιουργία νέων λογαριασμών είναι απενεργοποιημένη σε αυτήν την εγκατάσταση του SwyxDrive.',
   'auth.register.form.email.label': 'Email',
   'auth.register.form.email.placeholder': 'Παράδειγμα: ada@papra.app',
   'auth.register.form.email.required': 'Παρακαλώ εισαγάγετε το email σας',
@@ -113,7 +113,7 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'auth.no-auth-provider.title': 'Δεν υπάρχει διαθέσιμος πάροχος αυθεντικοποίησης',
   'auth.no-auth-provider.description':
-    'Δεν έχουν ενεργοποιηθεί πάροχοι αυθεντικοποίησης σε αυτήν την εγκατάσταση του Papra.',
+    'Δεν έχουν ενεργοποιηθεί πάροχοι αυθεντικοποίησης σε αυτήν την εγκατάσταση του SwyxDrive.',
 
   // User settings
 
@@ -884,7 +884,7 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'intake-emails.title': 'Email εισαγωγής',
   'intake-emails.description':
-    'Τα email εισαγωγής χρησιμοποιούνται για αυτόματη προσθήκη συνημμένων στο Papra.',
+    'Τα email εισαγωγής χρησιμοποιούνται για αυτόματη προσθήκη συνημμένων στο SwyxDrive.',
   'intake-emails.disabled.title': 'Τα email εισαγωγής είναι απενεργοποιημένα',
   'intake-emails.disabled.description':
     'Παρακαλώ επικοινωνήστε με τον διαχειριστή. Δείτε τα {{ documentation }} για περισσότερες πληροφορίες.',
@@ -951,7 +951,7 @@ export const translations: Partial<TranslationsDictionary> = {
   'api-keys.permissions.custom-properties.custom-properties:delete':
     'Διαγραφή προσαρμοσμένων ιδιοτήτων',
   'api-keys.create.title': 'Δημιουργία API key',
-  'api-keys.create.description': 'Δημιουργήστε νέο API key για πρόσβαση στο Papra API.',
+  'api-keys.create.description': 'Δημιουργήστε νέο API key για πρόσβαση στο SwyxDrive API.',
   'api-keys.create.success': 'Το API key δημιουργήθηκε με επιτυχία.',
   'api-keys.create.back': 'Πίσω στα API keys',
   'api-keys.create.form.name.label': 'Όνομα',
@@ -1066,7 +1066,7 @@ export const translations: Partial<TranslationsDictionary> = {
   'user-menu.invitations': 'Προσκλήσεις',
   'user-menu.language': 'Γλώσσα',
   'user-menu.theme': 'Θέμα',
-  'user-menu.about': 'Σχετικά με το Papra',
+  'user-menu.about': 'Σχετικά με το SwyxDrive',
   'user-menu.logout': 'Αποσύνδεση',
 
   // Command palette
@@ -1231,14 +1231,14 @@ export const translations: Partial<TranslationsDictionary> = {
 
   // Admin
 
-  'admin.layout.header': 'Πίνακας διαχείρισης Papra',
+  'admin.layout.header': 'Πίνακας διαχείρισης SwyxDrive',
   'admin.layout.back-to-app': 'Πίσω στην εφαρμογή',
   'admin.layout.menu.analytics': 'Στατιστικά',
   'admin.layout.menu.users': 'Χρήστες',
   'admin.layout.menu.organizations': 'Οργανισμοί',
 
   'admin.analytics.title': 'Πίνακας ελέγχου',
-  'admin.analytics.description': 'Στατιστικά και αναλύσεις για τη χρήση του Papra.',
+  'admin.analytics.description': 'Στατιστικά και αναλύσεις για τη χρήση του SwyxDrive.',
   'admin.analytics.user-count': 'Αριθμός χρηστών',
   'admin.analytics.organization-count': 'Αριθμός οργανισμών',
   'admin.analytics.document-count': 'Αριθμός εγγράφων',
@@ -1398,12 +1398,12 @@ export const translations: Partial<TranslationsDictionary> = {
 
   // About page
 
-  'about.title': 'Σχετικά με το Papra',
+  'about.title': 'Σχετικά με το SwyxDrive',
   'about.version': 'Έκδοση',
   'about.git-commit': 'Git Commit',
   'about.commit-date': 'Ημερομηνία commit',
   'about.description':
-    'Το Papra είναι ένα open-source σύστημα διαχείρισης εγγράφων για αρχειοθέτηση, οργάνωση, ετικετοποίηση και διαχείριση εγγράφων.',
+    'Το SwyxDrive είναι ένα open-source σύστημα διαχείρισης εγγράφων για αρχειοθέτηση, οργάνωση, ετικετοποίηση και διαχείριση εγγράφων.',
   'about.links.title': 'Σύνδεσμοι',
   'about.links.documentation': 'Τεκμηρίωση',
   'about.links.documentation-description': 'Οδηγοί χρήσης & Αναφορά API',

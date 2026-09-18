@@ -177,7 +177,7 @@ function available(row: ShareRow) {
   if (row.is_enabled !== 1 || (row.expires_at !== null && row.expires_at <= Date.now()))
     return fail(410, 'Share link unavailable');
 }
-async function publicShare(env: Env, token: string) {
+export async function publicShare(env: Env, token: string) {
   if (!validShareId(token)) return fail(404, 'Share link not found');
   const row = await env.DB.prepare('SELECT * FROM share_links WHERE token=?')
     .bind(token)

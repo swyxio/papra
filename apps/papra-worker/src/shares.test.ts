@@ -5,6 +5,7 @@ import { HTTPException } from 'hono/http-exception';
 import { Miniflare } from 'miniflare';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { hashSharePassword, registerShareRoutes, verifySharePassword } from './shares';
+import { pageMetadata, rewritePageMetadata } from './page-metadata';
 
 // Share authorization uses real D1. Containers are unrelated to these routes and only exist in workerd.
 vi.mock('@cloudflare/containers', () => ({ Container: class {}, getContainer: vi.fn() }));
@@ -164,6 +165,56 @@ async function fixture() {
 }
 
 describe('Worker share link permission and revocation', () => {
+  test('unfurls use current names and stable IDs while respecting passwords and revocation', async () => {
+    const { env, DB, create } = await fixture();
+    const share = await create();
+    const path = `/s/${share.token}/an-old-title`;
+    expect(await pageMetadata(env, path)).toEqual({
+      title: 'open file — SwyxDrive',
+      description: expect.stringContaining('PDF'),
+      url: `${env.APP_URL}/s/${share.token}`,
+    });
+    await DB.prepare('UPDATE documents SET name=? WHERE id=?').bind('New name', 'open').run();
+    expect((await pageMetadata(env, path)).title).toBe('New name — SwyxDrive');
+    const protectedShare = await create('open', 'secret');
+    expect((await pageMetadata(env, `/s/${protectedShare.token}`)).title).toBe(
+      'Protected file — SwyxDrive',
+    );
+    await DB.prepare('UPDATE share_links SET is_enabled=0 WHERE id=?').bind(share.id).run();
+    expect((await pageMetadata(env, path)).title).toBe('Share unavailable — SwyxDrive');
+    expect((await pageMetadata(env, '/orgs/private/documents/private')).title).toBe(
+      'SwyxDrive — Documents, sharing & signing',
+    );
+  });
+
+  test('real HTMLRewriter emits crawler-visible tags and escapes hostile filenames', async () => {
+    const shell =
+      '<html><head><title>Default</title><meta name="title" content="Default"><meta name="description" content="Default"><meta property="og:title" content="Default"><meta property="og:description" content="Default"><meta property="og:url" content="Default"><meta name="twitter:title" content="Default"><link rel="canonical" href="https://papra.app/"></head><body>App</body></html>';
+    const metadata = {
+      title: '</title><script>alert("x")</script> — SwyxDrive',
+      description: 'File & sharing',
+      url: 'https://drive.example/s/abcdefghijklmnop',
+    };
+    const instance = new Miniflare({
+      modules: true,
+      script: `const rewritePageMetadata = ${rewritePageMetadata.toString()}; export default { async fetch() { const response = rewritePageMetadata(new Response(${JSON.stringify(shell)}, {headers:{'Content-Type':'text/html','ETag':'old'}}), ${JSON.stringify(metadata)}); let scripts = 0; const inspected = new HTMLRewriter().on('script', {element(){scripts++;}}).transform(response); const body = await inspected.text(); const headers = new Headers(inspected.headers); headers.set('X-Test-Script-Count', String(scripts)); return new Response(body, {headers}); } }`,
+      compatibilityDate: '2026-07-21',
+    });
+    instances.push(instance);
+    const response = await instance.dispatchFetch('https://drive.example/s/abcdefghijklmnop');
+    const html = await response.text();
+    expect(response.headers.get('x-test-script-count')).toBe('0');
+    expect(html).toContain('&lt;/title&gt;');
+    expect(html).toContain(
+      'property="og:title" content="</title><script>alert(&quot;x&quot;)</script>',
+    );
+    expect(html).toContain(`rel="canonical" href="${metadata.url}"`);
+    expect(html).not.toContain('papra.app');
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    expect(response.headers.get('x-robots-tag')).toContain('noindex');
+    expect(response.headers.get('etag')).toBeNull();
+  });
+
   test('sharing lists expose actual manage permission without inviting members to forbidden actions', async () => {
     const { request, create } = await fixture();
     const share = await create();

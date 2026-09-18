@@ -27,8 +27,9 @@ export const translations = {
 
   'auth.email-provider.open': 'Open {{ provider }}',
 
-  'auth.login.title': 'Login to Papra',
-  'auth.login.description': 'Enter your email or use social login to access your Papra account.',
+  'auth.login.title': 'Login to SwyxDrive',
+  'auth.login.description':
+    'Enter your email or use social login to access your SwyxDrive account.',
   'auth.login.login-with-provider': 'Login with {{ provider }}',
   'auth.login.no-account': "Don't have an account?",
   'auth.login.register': 'Register',
@@ -60,8 +61,8 @@ export const translations = {
   'auth.login.two-factor.use-backup-code': 'Use backup code instead',
   'auth.login.two-factor.use-totp': 'Use authenticator app instead',
 
-  'auth.register.title': 'Register to Papra',
-  'auth.register.description': 'Create an account to start using Papra.',
+  'auth.register.title': 'Register to SwyxDrive',
+  'auth.register.description': 'Create an account to start using SwyxDrive.',
   'auth.register.register-with-email': 'Register with email',
   'auth.register.register-with-provider': 'Register with {{ provider }}',
   'auth.register.providers.google': 'Google',
@@ -70,7 +71,7 @@ export const translations = {
   'auth.register.login': 'Login',
   'auth.register.registration-disabled.title': 'Registration is disabled',
   'auth.register.registration-disabled.description':
-    'The creation of new accounts is currently disabled on this instance of Papra. Only users with existing accounts can log in. If you think this is a mistake, please contact the administrator of this instance.',
+    'The creation of new accounts is currently disabled on this instance of SwyxDrive. Only users with existing accounts can log in. If you think this is a mistake, please contact the administrator of this instance.',
   'auth.register.form.email.label': 'Email',
   'auth.register.form.email.placeholder': 'Example: ada@papra.app',
   'auth.register.form.email.required': 'Please enter your email address',
@@ -106,7 +107,7 @@ export const translations = {
 
   'auth.no-auth-provider.title': 'No authentication provider',
   'auth.no-auth-provider.description':
-    'There are no authentication providers enabled on this instance of Papra. Please contact the administrator of this instance to enable them.',
+    'There are no authentication providers enabled on this instance of SwyxDrive. Please contact the administrator of this instance to enable them.',
 
   // User settings
 
@@ -888,7 +889,7 @@ export const translations = {
 
   'intake-emails.title': 'Intake Emails',
   'intake-emails.description':
-    "Intake emails address are used to automatically ingest emails into Papra. Just forward emails to the intake email address and their attachments will be added to your organization's documents.",
+    "Intake emails address are used to automatically ingest emails into SwyxDrive. Just forward emails to the intake email address and their attachments will be added to your organization's documents.",
   'intake-emails.disabled.title': 'Intake Emails are disabled',
   'intake-emails.disabled.description':
     'Intake emails are disabled on this instance. Please contact your administrator to enable them. See the {{ documentation }} for more information.',
@@ -953,7 +954,7 @@ export const translations = {
   'api-keys.permissions.custom-properties.custom-properties:update': 'Update custom properties',
   'api-keys.permissions.custom-properties.custom-properties:delete': 'Delete custom properties',
   'api-keys.create.title': 'Create API key',
-  'api-keys.create.description': 'Create a new API key to access the Papra API.',
+  'api-keys.create.description': 'Create a new API key to access the SwyxDrive API.',
   'api-keys.create.success': 'The API key has been created successfully.',
   'api-keys.create.back': 'Back to API keys',
   'api-keys.create.form.name.label': 'Name',
@@ -969,7 +970,7 @@ export const translations = {
   'api-keys.list.description': 'Manage your API keys here.',
   'api-keys.list.create': 'Create API key',
   'api-keys.list.empty.title': 'No API keys',
-  'api-keys.list.empty.description': 'Create an API key to access the Papra API.',
+  'api-keys.list.empty.description': 'Create an API key to access the SwyxDrive API.',
   'api-keys.list.card.created': 'Created',
   'api-keys.delete.success': 'The API key has been deleted successfully',
   'api-keys.delete.confirm.title': 'Delete API key',
@@ -1069,7 +1070,7 @@ export const translations = {
   'user-menu.invitations': 'Invitations',
   'user-menu.language': 'Language',
   'user-menu.theme': 'Theme',
-  'user-menu.about': 'About Papra',
+  'user-menu.about': 'About SwyxDrive',
   'user-menu.logout': 'Logout',
 
   // Command palette
@@ -1103,7 +1104,7 @@ export const translations = {
   'api-errors.internal.error':
     'An error occurred while processing your request. Please try again later.',
   'api-errors.auth.invalid_origin':
-    'Invalid application origin. If you are self-hosting Papra, ensure your APP_BASE_URL environment variable matches your current url. For more details see https://docs.papra.app/resources/troubleshooting/#invalid-application-origin',
+    'Invalid application origin. If you are self-hosting SwyxDrive, ensure your APP_BASE_URL environment variable matches your current url. For more details see https://docs.papra.app/resources/troubleshooting/#invalid-application-origin',
   'api-errors.organization.max_members_count_reached':
     'The maximum number of members and pending invitations for this organization has been reached. Please upgrade your plan to add more members.',
   'api-errors.organization.has_active_subscription':
@@ -1233,9 +1234,9 @@ export const translations = {
 
   'plan-entitlements.claim.selfhst.title': 'Claim your selfh.st Insider perk',
   'plan-entitlements.claim.selfhst.description':
-    "As a selfh.st Insider, you're entitled to a bigger Papra free tier: twice the document storage, email intakes and members on all the free organizations you own.",
+    "As a selfh.st Insider, you're entitled to a bigger SwyxDrive free tier: twice the document storage, email intakes and members on all the free organizations you own.",
   'plan-entitlements.claim.selfhst.email-notice':
-    'We will verify that your Papra account email {{ email }} has an active selfh.st Insider membership.',
+    'We will verify that your SwyxDrive account email {{ email }} has an active selfh.st Insider membership.',
   'plan-entitlements.claim.selfhst.claim-button': 'Claim perk',
   'plan-entitlements.claim.selfhst.success.title': 'Perk claimed!',
   'plan-entitlements.claim.selfhst.success.description':
@@ -1244,7 +1245,7 @@ export const translations = {
   'plan-entitlements.claim.selfhst.already-claimed.description':
     'Your selfh.st perk is already active on this account.',
   'plan-entitlements.claim.selfhst.errors.not-eligible':
-    'We could not find an active selfh.st Insider membership for {{ email }}. Make sure your Papra account uses the same email as your selfh.st account.',
+    'We could not find an active selfh.st Insider membership for {{ email }}. Make sure your SwyxDrive account uses the same email as your selfh.st account.',
   'plan-entitlements.claim.selfhst.errors.claims-disabled':
     'Claiming this perk is currently disabled. Please try again later.',
   'plan-entitlements.claim.selfhst.errors.rate-limited':
@@ -1255,14 +1256,14 @@ export const translations = {
 
   // Admin
 
-  'admin.layout.header': 'Papra admin',
+  'admin.layout.header': 'SwyxDrive admin',
   'admin.layout.back-to-app': 'Back to App',
   'admin.layout.menu.analytics': 'Analytics',
   'admin.layout.menu.users': 'Users',
   'admin.layout.menu.organizations': 'Organizations',
 
   'admin.analytics.title': 'Dashboard',
-  'admin.analytics.description': 'Insights and analytics about Papra usage.',
+  'admin.analytics.description': 'Insights and analytics about SwyxDrive usage.',
   'admin.analytics.user-count': 'User count',
   'admin.analytics.organization-count': 'Organization count',
   'admin.analytics.document-count': 'Document count',
@@ -1421,12 +1422,12 @@ export const translations = {
 
   // About page
 
-  'about.title': 'About Papra',
+  'about.title': 'About SwyxDrive',
   'about.version': 'Version',
   'about.git-commit': 'Git Commit',
   'about.commit-date': 'Commit Date',
   'about.description':
-    'Papra is an open-source document management system that helps you archive, organize, tag, and manage your documents with ease.',
+    'SwyxDrive is an open-source document management system that helps you archive, organize, tag, and manage your documents with ease.',
   'about.links.title': 'Links',
   'about.links.documentation': 'Documentation',
   'about.links.documentation-description': 'User guides and API reference',

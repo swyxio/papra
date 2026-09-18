@@ -43,7 +43,7 @@ const AdminLayout: ParentComponent = (props) => {
       mainMenu={getNavigationMenu()}
       footer={() => (
         <div class="px-4 text-sm text-muted-foreground text-center">
-          Papra &copy;
+          SwyxDrive &copy;
           {new Date().getFullYear()}
         </div>
       )}

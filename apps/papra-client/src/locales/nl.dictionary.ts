@@ -31,9 +31,9 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'auth.email-provider.open': 'Open {{ provider }}',
 
-  'auth.login.title': 'Inloggen bij Papra',
+  'auth.login.title': 'Inloggen bij SwyxDrive',
   'auth.login.description':
-    'Voer uw e-mailadres in of gebruik sociale media om toegang te krijgen tot uw Papra-account.',
+    'Voer uw e-mailadres in of gebruik sociale media om toegang te krijgen tot uw SwyxDrive-account.',
   'auth.login.login-with-provider': 'Inloggen met {{ provider }}',
   'auth.login.no-account': 'Nog geen account?',
   'auth.login.register': 'Registreren',
@@ -65,8 +65,8 @@ export const translations: Partial<TranslationsDictionary> = {
   'auth.login.two-factor.use-backup-code': 'Gebruik in plaats daarvan een back-upcode',
   'auth.login.two-factor.use-totp': 'Gebruik in plaats daarvan de authenticatie-app',
 
-  'auth.register.title': 'Registreren bij Papra',
-  'auth.register.description': 'Maak een account aan om Papra te gebruiken.',
+  'auth.register.title': 'Registreren bij SwyxDrive',
+  'auth.register.description': 'Maak een account aan om SwyxDrive te gebruiken.',
   'auth.register.register-with-email': 'Registreren met e-mail',
   'auth.register.register-with-provider': 'Registreren met {{ provider }}',
   'auth.register.providers.google': 'Google',
@@ -75,7 +75,7 @@ export const translations: Partial<TranslationsDictionary> = {
   'auth.register.login': 'Inloggen',
   'auth.register.registration-disabled.title': 'Registratie is uitgeschakeld',
   'auth.register.registration-disabled.description':
-    'Het aanmaken van nieuwe accounts is momenteel uitgeschakeld op deze Papra-instantie. Alleen gebruikers met bestaande accounts kunnen inloggen. Als u denkt dat dit een vergissing is, neem dan contact op met de beheerder van deze instantie.',
+    'Het aanmaken van nieuwe accounts is momenteel uitgeschakeld op deze SwyxDrive-instantie. Alleen gebruikers met bestaande accounts kunnen inloggen. Als u denkt dat dit een vergissing is, neem dan contact op met de beheerder van deze instantie.',
   'auth.register.form.email.label': 'E-mail',
   'auth.register.form.email.placeholder': 'Voorbeeld: ada@papra.app',
   'auth.register.form.email.required': 'Voer uw e-mailadres in',
@@ -113,7 +113,7 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'auth.no-auth-provider.title': 'Geen authenticatieprovider',
   'auth.no-auth-provider.description':
-    'Er zijn geen authenticatieproviders ingeschakeld op deze Papra-instantie. Neem contact op met de beheerder om deze in te schakelen.',
+    'Er zijn geen authenticatieproviders ingeschakeld op deze SwyxDrive-instantie. Neem contact op met de beheerder om deze in te schakelen.',
 
   // User settings
 
@@ -878,7 +878,7 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'intake-emails.title': 'Intake-e-mails',
   'intake-emails.description':
-    'Intake-e-mailadressen worden gebruikt om e-mails automatisch in Papra te importeren. Stuur e-mails door naar het intake-adres en de bijlagen worden toegevoegd aan de documenten van uw organisatie.',
+    'Intake-e-mailadressen worden gebruikt om e-mails automatisch in SwyxDrive te importeren. Stuur e-mails door naar het intake-adres en de bijlagen worden toegevoegd aan de documenten van uw organisatie.',
   'intake-emails.disabled.title': 'Intake-e-mails zijn uitgeschakeld',
   'intake-emails.disabled.description':
     'Intake-e-mails zijn uitgeschakeld op deze instantie. Neem contact op met uw beheerder om ze in te schakelen. Zie de {{ documentation }} voor meer informatie.',
@@ -946,7 +946,7 @@ export const translations: Partial<TranslationsDictionary> = {
   'api-keys.permissions.custom-properties.custom-properties:delete':
     'Aangepaste eigenschappen verwijderen',
   'api-keys.create.title': 'API-sleutel aanmaken',
-  'api-keys.create.description': 'Maak een nieuwe API-sleutel om de Papra API te gebruiken.',
+  'api-keys.create.description': 'Maak een nieuwe API-sleutel om de SwyxDrive API te gebruiken.',
   'api-keys.create.success': 'De API-sleutel is succesvol aangemaakt.',
   'api-keys.create.back': 'Terug naar API-sleutels',
   'api-keys.create.form.name.label': 'Naam',
@@ -962,7 +962,7 @@ export const translations: Partial<TranslationsDictionary> = {
   'api-keys.list.description': 'Beheer hier uw API-sleutels.',
   'api-keys.list.create': 'API-sleutel aanmaken',
   'api-keys.list.empty.title': 'Geen API-sleutels',
-  'api-keys.list.empty.description': 'Maak een API-sleutel om de Papra API te gebruiken.',
+  'api-keys.list.empty.description': 'Maak een API-sleutel om de SwyxDrive API te gebruiken.',
   'api-keys.list.card.created': 'Aangemaakt',
   'api-keys.delete.success': 'De API-sleutel is succesvol verwijderd',
   'api-keys.delete.confirm.title': 'API-sleutel verwijderen',
@@ -1063,7 +1063,7 @@ export const translations: Partial<TranslationsDictionary> = {
   'user-menu.invitations': 'Uitnodigingen',
   'user-menu.language': 'Taal',
   'user-menu.theme': 'Thema',
-  'user-menu.about': 'Over Papra',
+  'user-menu.about': 'Over SwyxDrive',
   'user-menu.logout': 'Uitloggen',
 
   // Command palette
@@ -1097,7 +1097,7 @@ export const translations: Partial<TranslationsDictionary> = {
   'api-errors.internal.error':
     'Er is een fout opgetreden bij het verwerken van uw verzoek. Probeer het later opnieuw.',
   'api-errors.auth.invalid_origin':
-    'Ongeldige applicatiebron. Als u Papra zelf host, zorg ervoor dat uw APP_BASE_URL-omgeving variabele overeenkomt met uw huidige URL. Zie https://docs.papra.app/resources/troubleshooting/#invalid-application-origin voor meer informatie.',
+    'Ongeldige applicatiebron. Als u SwyxDrive zelf host, zorg ervoor dat uw APP_BASE_URL-omgeving variabele overeenkomt met uw huidige URL. Zie https://docs.papra.app/resources/troubleshooting/#invalid-application-origin voor meer informatie.',
   'api-errors.organization.max_members_count_reached':
     'Het maximale aantal leden en openstaande uitnodigingen voor deze organisatie is bereikt. Upgrade uw plan om meer leden toe te voegen.',
   'api-errors.organization.has_active_subscription':
@@ -1228,14 +1228,14 @@ export const translations: Partial<TranslationsDictionary> = {
 
   // Admin
 
-  'admin.layout.header': 'Papra beheer',
+  'admin.layout.header': 'SwyxDrive beheer',
   'admin.layout.back-to-app': 'Terug naar app',
   'admin.layout.menu.analytics': 'Statistieken',
   'admin.layout.menu.users': 'Gebruikers',
   'admin.layout.menu.organizations': 'Organisaties',
 
   'admin.analytics.title': 'Dashboard',
-  'admin.analytics.description': 'Inzichten en statistieken over Papra-gebruik.',
+  'admin.analytics.description': 'Inzichten en statistieken over SwyxDrive-gebruik.',
   'admin.analytics.user-count': 'Aantal gebruikers',
   'admin.analytics.organization-count': 'Aantal organisaties',
   'admin.analytics.document-count': 'Aantal documenten',
@@ -1395,12 +1395,12 @@ export const translations: Partial<TranslationsDictionary> = {
 
   // About page
 
-  'about.title': 'Over Papra',
+  'about.title': 'Over SwyxDrive',
   'about.version': 'Versie',
   'about.git-commit': 'Git Commit',
   'about.commit-date': 'Commitdatum',
   'about.description':
-    'Papra is een open-source documentbeheersysteem dat u helpt uw documenten gemakkelijk te archiveren, organiseren, taggen en beheren.',
+    'SwyxDrive is een open-source documentbeheersysteem dat u helpt uw documenten gemakkelijk te archiveren, organiseren, taggen en beheren.',
   'about.links.title': 'Links',
   'about.links.documentation': 'Documentatie',
   'about.links.documentation-description': 'Gebruikershandleidingen en API-referentie',

@@ -16,7 +16,7 @@ export function AppLogo<T extends ValidComponent = 'div'>(
       {...rest}
     >
       <div class="i-tabler-file-text text-primary rotate-12 size-6 group-hover:rotate-25 transition" />
-      Papra
+      SwyxDrive
     </Polymorphic>
   );
 }

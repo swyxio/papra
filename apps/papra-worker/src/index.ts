@@ -16,6 +16,7 @@ import { registerReviewRoutes } from './reviews';
 import { registerAuthoringRoutes } from './authoring';
 import { registerGoogleDocumentRoutes } from './google-docs';
 import { registerSigningRoutes, processSigning, repairSigning } from './signing';
+import { pageMetadata, rewritePageMetadata } from './page-metadata';
 
 export { ImageProcessorContainer, ContainerProxy } from '../native/container';
 export { MetadataBackupWorkflow } from './backup-workflow';
@@ -74,7 +75,12 @@ app.get('/api/config', (c) =>
 );
 registerAuthRoutes(app);
 app.use('/api/*', async (c, next) => {
-  if (c.req.path.startsWith('/api/share-links/') || c.req.path.startsWith('/api/signing/') || c.req.path.startsWith('/api/reviews/')) return next();
+  if (
+    c.req.path.startsWith('/api/share-links/') ||
+    c.req.path.startsWith('/api/signing/') ||
+    c.req.path.startsWith('/api/reviews/')
+  )
+    return next();
   const identity =
     (await getIdentity(c.req.raw, c.env)) || (await serviceIdentity(c.req.raw, c.env));
   if (!identity) throw new HTTPException(401, { message: 'Google sign-in required' });
@@ -110,7 +116,11 @@ registerAuthoringRoutes(app);
 registerGoogleDocumentRoutes(app);
 registerReviewRoutes(app);
 app.all('/api/*', (c) => c.json({ message: 'API route not found' }, 404));
-app.all('*', async (c) => {const response=await c.env.ASSETS.fetch(c.req.raw);if(/^\/(sign|review)\//.test(c.req.path)){const headers=new Headers(response.headers);headers.set('Referrer-Policy','no-referrer');headers.set('X-Robots-Tag','noindex, noarchive');return new Response(response.body,{status:response.status,headers});}return response;});
+app.all('*', async (c) => {
+  const response = await c.env.ASSETS.fetch(c.req.raw);
+  if (!response.headers.get('Content-Type')?.includes('text/html')) return response;
+  return rewritePageMetadata(response, await pageMetadata(c.env, c.req.path));
+});
 app.onError((err, c) => {
   if (err instanceof HTTPException) return c.json({ message: err.message }, err.status);
   // eslint-disable-next-line no-console -- Record a sanitized error name in Cloudflare logs.
@@ -123,11 +133,18 @@ export default {
     const ordinary = [];
     for (const message of batch.messages) {
       const body = message.body as { signingId?: string };
-      if (typeof body?.signingId !== 'string') { ordinary.push(message); continue; }
-      try { await processSigning(env, body.signingId); message.ack(); }
-      catch { message.retry({delaySeconds:60}); }
+      if (typeof body?.signingId !== 'string') {
+        ordinary.push(message);
+        continue;
+      }
+      try {
+        await processSigning(env, body.signingId);
+        message.ack();
+      } catch {
+        message.retry({ delaySeconds: 60 });
+      }
     }
-    if (ordinary.length) await consumeJobs({...batch,messages:ordinary},env);
+    if (ordinary.length) await consumeJobs({ ...batch, messages: ordinary }, env);
   },
   scheduled: async (_event: ScheduledController, env: Env, ctx: ExecutionContext) => {
     ctx.waitUntil(Promise.all([housekeeping(env), purgeExpiredTrash(env), repairSigning(env)]));

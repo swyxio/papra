@@ -11,7 +11,7 @@
     "directory": "../papra-client/dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/sign/*", "/review/*"],
+    "run_worker_first": ["/api/*", "/s/*", "/sign/*", "/review/*"],
   },
   "d1_databases": [
     {
@@ -33,8 +33,18 @@
     ],
     "consumers": [
       { "queue": "papra-drive-jobs", "max_batch_size": 1, "max_retries": 3, "max_concurrency": 2 },
-      { "queue": "papra-drive-transfers", "max_batch_size": 1, "max_retries": 3, "max_concurrency": 4 },
-      { "queue": "papra-drive-search", "max_batch_size": 1, "max_retries": 3, "max_concurrency": 4 },
+      {
+        "queue": "papra-drive-transfers",
+        "max_batch_size": 1,
+        "max_retries": 3,
+        "max_concurrency": 4,
+      },
+      {
+        "queue": "papra-drive-search",
+        "max_batch_size": 1,
+        "max_retries": 3,
+        "max_concurrency": 4,
+      },
       { "queue": "papra-drive-text", "max_batch_size": 1, "max_retries": 3, "max_concurrency": 8 },
     ],
   },

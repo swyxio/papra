@@ -29,9 +29,9 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'auth.email-provider.open': 'Deschide {{ provider }}',
 
-  'auth.login.title': 'Autentificare la Papra',
+  'auth.login.title': 'Autentificare la SwyxDrive',
   'auth.login.description':
-    'Introdu e-mailul sau folosește autentificarea cu cont social pentru a accesa contul Papra.',
+    'Introdu e-mailul sau folosește autentificarea cu cont social pentru a accesa contul SwyxDrive.',
   'auth.login.login-with-provider': 'Autentificare cu {{ provider }}',
   'auth.login.no-account': 'Nu ai cont?',
   'auth.login.register': 'Înregistrare',
@@ -64,8 +64,8 @@ export const translations: Partial<TranslationsDictionary> = {
   'auth.login.two-factor.use-backup-code': 'Folosește cod de rezervă',
   'auth.login.two-factor.use-totp': 'Folosește aplicația de autentificare',
 
-  'auth.register.title': 'Înregistrare la Papra',
-  'auth.register.description': 'Introdu e-mailul pentru a accesa Papra.',
+  'auth.register.title': 'Înregistrare la SwyxDrive',
+  'auth.register.description': 'Introdu e-mailul pentru a accesa SwyxDrive.',
   'auth.register.register-with-email': 'înregistrează-te cu e-mail',
   'auth.register.register-with-provider': 'Inregistreaza-te cu {{ provider }}',
   'auth.register.providers.google': 'Google',
@@ -74,7 +74,7 @@ export const translations: Partial<TranslationsDictionary> = {
   'auth.register.login': 'Autentificare',
   'auth.register.registration-disabled.title': 'Înregistrarea este dezactivată',
   'auth.register.registration-disabled.description':
-    'Crearea de conturi noi este momentan dezactivată pe această instanță de Papra. Doar utilizatorii cu conturi existente se pot autentifica. Dacă aceasta pare a fi o greșeală, contactează administratorul acestei instanțe.',
+    'Crearea de conturi noi este momentan dezactivată pe această instanță de SwyxDrive. Doar utilizatorii cu conturi existente se pot autentifica. Dacă aceasta pare a fi o greșeală, contactează administratorul acestei instanțe.',
   'auth.register.form.email.label': 'E-mail',
   'auth.register.form.email.placeholder': 'Exemplu: popescu@papra.app',
   'auth.register.form.email.required': 'Introdu adresa de e-mail',
@@ -112,7 +112,7 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'auth.no-auth-provider.title': 'Niciun furnizor de autentificare',
   'auth.no-auth-provider.description':
-    'Nu este niciun furnizor de autentificare activat pe această instanță de Papra. Te rugăm să contactezi administratorul aceste instanțe pentru a le activa.',
+    'Nu este niciun furnizor de autentificare activat pe această instanță de SwyxDrive. Te rugăm să contactezi administratorul aceste instanțe pentru a le activa.',
 
   // User settings
 
@@ -884,7 +884,7 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'intake-emails.title': 'E-mailuri de primire',
   'intake-emails.description':
-    'Adresele de e-mail de primire sunt folosite pentru a introduce automat email-uri în Papra. Doar redirecționează e-mailuri către adresa de primire, iar fișierele atașate vor fi adăugate automat în documentele organizației tale.',
+    'Adresele de e-mail de primire sunt folosite pentru a introduce automat email-uri în SwyxDrive. Doar redirecționează e-mailuri către adresa de primire, iar fișierele atașate vor fi adăugate automat în documentele organizației tale.',
   'intake-emails.disabled.title': 'Email-urile de primire sunt dezactivate',
   'intake-emails.disabled.description':
     'Email-urile de primire sunt dezactivate pe aceasta instanță. Te rugăm să contactezi administratorul pentru a le activa. Consultă {{ documentation }} pentru mai multe informații.',
@@ -953,7 +953,7 @@ export const translations: Partial<TranslationsDictionary> = {
   'api-keys.permissions.custom-properties.custom-properties:delete':
     'Șterge proprietăți personalizate',
   'api-keys.create.title': 'Creează cheie API',
-  'api-keys.create.description': 'Creează o nouă cheie API pentru a accesa API-ul Papra.',
+  'api-keys.create.description': 'Creează o nouă cheie API pentru a accesa API-ul SwyxDrive.',
   'api-keys.create.success': 'Cheia API a fost creată cu succes.',
   'api-keys.create.back': 'Înapoi la cheile API',
   'api-keys.create.form.name.label': 'Nume',
@@ -969,7 +969,7 @@ export const translations: Partial<TranslationsDictionary> = {
   'api-keys.list.description': 'Gestionează-ți cheile API aici.',
   'api-keys.list.create': 'Creează cheie API',
   'api-keys.list.empty.title': 'Nicio cheie API',
-  'api-keys.list.empty.description': 'Creează o cheie API pentru a accesa API-ul Papra.',
+  'api-keys.list.empty.description': 'Creează o cheie API pentru a accesa API-ul SwyxDrive.',
   'api-keys.list.card.created': 'Creat la',
   'api-keys.delete.success': 'Cheia API a fost ștearsă cu succes',
   'api-keys.delete.confirm.title': 'Șterge cheia API',
@@ -1072,7 +1072,7 @@ export const translations: Partial<TranslationsDictionary> = {
   'user-menu.invitations': 'Invitații',
   'user-menu.language': 'Limbă',
   'user-menu.theme': 'Temă',
-  'user-menu.about': 'Despre Papra',
+  'user-menu.about': 'Despre SwyxDrive',
   'user-menu.logout': 'Deconectare',
 
   // Command palette
@@ -1108,7 +1108,7 @@ export const translations: Partial<TranslationsDictionary> = {
   'api-errors.internal.error':
     'A apărut o eroare la procesarea cererii. Te rugăm să încerci din nou.',
   'api-errors.auth.invalid_origin':
-    'Origine invalidă a aplicației. Dacă hospedezi Papra, asigură-te că variabila de mediu APP_BASE_URL corespunde URL-ului actual. Pentru mai multe detalii, consulta https://docs.papra.app/resources/troubleshooting/#invalid-application-origin',
+    'Origine invalidă a aplicației. Dacă hospedezi SwyxDrive, asigură-te că variabila de mediu APP_BASE_URL corespunde URL-ului actual. Pentru mai multe detalii, consulta https://docs.papra.app/resources/troubleshooting/#invalid-application-origin',
   'api-errors.organization.max_members_count_reached':
     'Numărul maxim de membri și invitații în așteptare pentru această organizație a fost atins. Te rugăm să îți actualizezi planul pentru a adăuga mai mulți membri.',
   'api-errors.organization.has_active_subscription':
@@ -1243,14 +1243,14 @@ export const translations: Partial<TranslationsDictionary> = {
 
   // Admin
 
-  'admin.layout.header': 'Administrare Papra',
+  'admin.layout.header': 'Administrare SwyxDrive',
   'admin.layout.back-to-app': 'Înapoi la aplicație',
   'admin.layout.menu.analytics': 'Statistici',
   'admin.layout.menu.users': 'Utilizatori',
   'admin.layout.menu.organizations': 'Organizații',
 
   'admin.analytics.title': 'Tablou de bord',
-  'admin.analytics.description': 'Informații și statistici despre utilizarea Papra.',
+  'admin.analytics.description': 'Informații și statistici despre utilizarea SwyxDrive.',
   'admin.analytics.user-count': 'Număr de utilizatori',
   'admin.analytics.organization-count': 'Număr de organizații',
   'admin.analytics.document-count': 'Număr de documente',
@@ -1411,12 +1411,12 @@ export const translations: Partial<TranslationsDictionary> = {
 
   // About page
 
-  'about.title': 'Despre Papra',
+  'about.title': 'Despre SwyxDrive',
   'about.version': 'Versiune',
   'about.git-commit': 'Commit Git',
   'about.commit-date': 'Data Commit-ului',
   'about.description':
-    'Papra este un sistem de gestionare a documentelor cu sursă deschisă care vă ajută să arhivați, să organizați, să etichetați și să gestionați documentele cu ușurință.',
+    'SwyxDrive este un sistem de gestionare a documentelor cu sursă deschisă care vă ajută să arhivați, să organizați, să etichetați și să gestionați documentele cu ușurință.',
   'about.links.title': 'Linkuri',
   'about.links.documentation': 'Documentație',
   'about.links.documentation-description': 'Ghiduri utilizator și referință API',

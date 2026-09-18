@@ -31,9 +31,9 @@ export const translations = {
 
   'auth.email-provider.open': 'Obre {{ provider }}',
 
-  'auth.login.title': 'Inicia la sessió a Papra',
+  'auth.login.title': 'Inicia la sessió a SwyxDrive',
   'auth.login.description':
-    "Introdueix el teu correu electrònic o utilitza l'inici de sessió social per accedir al teu compte de Papra.",
+    "Introdueix el teu correu electrònic o utilitza l'inici de sessió social per accedir al teu compte de SwyxDrive.",
   'auth.login.login-with-provider': 'Inicia la sessió amb {{ provider }}',
   'auth.login.no-account': 'No tens un compte?',
   'auth.login.register': "Registra't",
@@ -65,8 +65,8 @@ export const translations = {
   'auth.login.two-factor.use-backup-code': 'Utilitza el codi de recuperació',
   'auth.login.two-factor.use-totp': "Utilitza l'aplicació d'autenticació",
 
-  'auth.register.title': "Registra't a Papra",
-  'auth.register.description': 'Crea un compte per començar a utilitzar Papra.',
+  'auth.register.title': "Registra't a SwyxDrive",
+  'auth.register.description': 'Crea un compte per començar a utilitzar SwyxDrive.',
   'auth.register.register-with-email': "Registra't amb el correu electrònic",
   'auth.register.register-with-provider': "Registra't amb {{ provider }}",
   'auth.register.providers.google': 'Google',
@@ -75,7 +75,7 @@ export const translations = {
   'auth.register.login': 'Inicia la sessió',
   'auth.register.registration-disabled.title': 'El registre està deshabilitat',
   'auth.register.registration-disabled.description':
-    "La creació de nous comptes està actualment deshabilitada en aquesta instància de Papra. Només els usuaris amb comptes existents poden iniciar sessió. Si creus que es tracta d'un error, posa't en contacte amb l'administrador d'aquesta instància.",
+    "La creació de nous comptes està actualment deshabilitada en aquesta instància de SwyxDrive. Només els usuaris amb comptes existents poden iniciar sessió. Si creus que es tracta d'un error, posa't en contacte amb l'administrador d'aquesta instància.",
   'auth.register.form.email.label': 'Correu electrònic',
   'auth.register.form.email.placeholder': 'Exemple: ada@papra.app',
   'auth.register.form.email.required': 'Si us plau, introdueix la teva adreça de correu electrònic',
@@ -113,7 +113,7 @@ export const translations = {
 
   'auth.no-auth-provider.title': "No hi ha cap proveïdor d'autenticació",
   'auth.no-auth-provider.description':
-    "No hi ha proveïdors d'autenticació habilitats en aquesta instància de Papra. Si us plau, posa't en contacte amb l'administrador de la instància perquè els habiliti.",
+    "No hi ha proveïdors d'autenticació habilitats en aquesta instància de SwyxDrive. Si us plau, posa't en contacte amb l'administrador de la instància perquè els habiliti.",
 
   // User settings
 
@@ -915,7 +915,7 @@ export const translations = {
 
   'intake-emails.title': "Correus electrònics d'entrada",
   'intake-emails.description':
-    "Les adreces de correus electrònics d'entrada s'utilitzen per ingerir automàticament correus electrònics a Papra. Només has de reenviar els correus a l'adreça de correu electrònic d'entrada i els seus fitxers adjunts s'afegiran als documents de la teva organització.",
+    "Les adreces de correus electrònics d'entrada s'utilitzen per ingerir automàticament correus electrònics a SwyxDrive. Només has de reenviar els correus a l'adreça de correu electrònic d'entrada i els seus fitxers adjunts s'afegiran als documents de la teva organització.",
   'intake-emails.disabled.title': "Els correus electrònics d'entrada estan deshabilitats",
   'intake-emails.disabled.description':
     "Els correus electrònics d'entrada estan deshabilitats en aquesta instància. Si us plau, posa't en contacte amb l'administrador per habilitar-los. Consulta la {{ documentation }} per a més informació.",
@@ -986,7 +986,7 @@ export const translations = {
   'api-keys.permissions.custom-properties.custom-properties:delete':
     'Suprimeix propietats personalitzades',
   'api-keys.create.title': 'Crea una clau API',
-  'api-keys.create.description': "Crea una nova clau API per accedir a l'API de Papra.",
+  'api-keys.create.description': "Crea una nova clau API per accedir a l'API de SwyxDrive.",
   'api-keys.create.success': "La clau API s'ha creat correctament.",
   'api-keys.create.back': 'Torna a les claus API',
   'api-keys.create.form.name.label': 'Nom',
@@ -1002,7 +1002,7 @@ export const translations = {
   'api-keys.list.description': 'Gestiona les teves claus API aquí.',
   'api-keys.list.create': 'Crea una clau API',
   'api-keys.list.empty.title': 'No hi ha claus API',
-  'api-keys.list.empty.description': "Crea una clau API per accedir a l'API de Papra.",
+  'api-keys.list.empty.description': "Crea una clau API per accedir a l'API de SwyxDrive.",
   'api-keys.list.card.created': 'Creada',
   'api-keys.delete.success': "La clau API s'ha suprimit correctament",
   'api-keys.delete.confirm.title': 'Suprimeix la clau API',
@@ -1105,7 +1105,7 @@ export const translations = {
   'user-menu.invitations': 'Invitacions',
   'user-menu.language': 'Idioma',
   'user-menu.theme': 'Tema',
-  'user-menu.about': 'Quant a Papra',
+  'user-menu.about': 'Quant a SwyxDrive',
   'user-menu.logout': 'Tanca la sessió',
 
   // Command palette
@@ -1141,7 +1141,7 @@ export const translations = {
   'api-errors.internal.error':
     "S'ha produït un error en processar la teva sol·licitud. Torna-ho a provar més tard.",
   'api-errors.auth.invalid_origin':
-    "Origen de l'aplicació no vàlid. Si estàs allotjant Papra tu mateix, assegura't que la variable d'entorn APP_BASE_URL coincideixi amb la teva URL actual. Per a més detalls, consulta https://docs.papra.app/resources/troubleshooting/#invalid-application-origin",
+    "Origen de l'aplicació no vàlid. Si estàs allotjant SwyxDrive tu mateix, assegura't que la variable d'entorn APP_BASE_URL coincideixi amb la teva URL actual. Per a més detalls, consulta https://docs.papra.app/resources/troubleshooting/#invalid-application-origin",
   'api-errors.organization.max_members_count_reached':
     "S'ha assolit el nombre màxim de membres i invitacions pendents per a aquesta organització. Si us plau, actualitza el teu pla per afegir més membres.",
   'api-errors.organization.has_active_subscription':
@@ -1277,14 +1277,14 @@ export const translations = {
 
   // Admin
 
-  'admin.layout.header': 'Administració de Papra',
+  'admin.layout.header': 'Administració de SwyxDrive',
   'admin.layout.back-to-app': "Torna a l'aplicació",
   'admin.layout.menu.analytics': 'Analítica',
   'admin.layout.menu.users': 'Usuaris',
   'admin.layout.menu.organizations': 'Organitzacions',
 
   'admin.analytics.title': 'Panell de control',
-  'admin.analytics.description': "Informació i analítica sobre l'ús de Papra.",
+  'admin.analytics.description': "Informació i analítica sobre l'ús de SwyxDrive.",
   'admin.analytics.user-count': "Nombre d'usuaris",
   'admin.analytics.organization-count': "Nombre d'organitzacions",
   'admin.analytics.document-count': 'Nombre de documents',
@@ -1445,12 +1445,12 @@ export const translations = {
 
   // About page
 
-  'about.title': 'Quant a Papra',
+  'about.title': 'Quant a SwyxDrive',
   'about.version': 'Versió',
   'about.git-commit': 'Git Commit',
   'about.commit-date': 'Data del commit',
   'about.description':
-    "Papra és un sistema de gestió de documents de codi obert que t'ajuda a arxivar, organitzar, etiquetar i gestionar els teus documents amb facilitat.",
+    "SwyxDrive és un sistema de gestió de documents de codi obert que t'ajuda a arxivar, organitzar, etiquetar i gestionar els teus documents amb facilitat.",
   'about.links.title': 'Enllaços',
   'about.links.documentation': 'Documentació',
   'about.links.documentation-description': "Guies d'usuari i referència de l'API",

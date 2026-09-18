@@ -26,8 +26,8 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'auth.email-provider.open': '打开 {{ provider }}',
 
-  'auth.login.title': '登录 Papra',
-  'auth.login.description': '输入您的电子邮件或使用社交账户登录访问您的 Papra 账户。',
+  'auth.login.title': '登录 SwyxDrive',
+  'auth.login.description': '输入您的电子邮件或使用社交账户登录访问您的 SwyxDrive 账户。',
   'auth.login.login-with-provider': '使用 {{ provider }} 登录',
   'auth.login.no-account': '没有账户？',
   'auth.login.register': '注册',
@@ -56,8 +56,8 @@ export const translations: Partial<TranslationsDictionary> = {
   'auth.login.two-factor.use-backup-code': '使用备用码',
   'auth.login.two-factor.use-totp': '使用身份验证应用',
 
-  'auth.register.title': '注册 Papra',
-  'auth.register.description': '创建一个账户以开始使用 Papra。',
+  'auth.register.title': '注册 SwyxDrive',
+  'auth.register.description': '创建一个账户以开始使用 SwyxDrive。',
   'auth.register.register-with-email': '使用电子邮件注册',
   'auth.register.register-with-provider': '使用 {{ provider }} 注册',
   'auth.register.providers.google': 'Google',
@@ -66,7 +66,7 @@ export const translations: Partial<TranslationsDictionary> = {
   'auth.register.login': '登录',
   'auth.register.registration-disabled.title': '注册被禁用',
   'auth.register.registration-disabled.description':
-    '当前 Papra 实例已禁用新账户的创建。只有已有账户的用户可以登录。如果您认为这是错误，请联系该实例的管理员。',
+    '当前 SwyxDrive 实例已禁用新账户的创建。只有已有账户的用户可以登录。如果您认为这是错误，请联系该实例的管理员。',
   'auth.register.form.email.label': '电子邮件',
   'auth.register.form.email.placeholder': '示例: ada@papra.app',
   'auth.register.form.email.required': '请输入您的电子邮件地址',
@@ -99,7 +99,7 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'auth.no-auth-provider.title': '无身份验证提供者',
   'auth.no-auth-provider.description':
-    '此 Papra 实例未启用任何身份验证提供者。请联系该实例的管理员以启用它们。',
+    '此 SwyxDrive 实例未启用任何身份验证提供者。请联系该实例的管理员以启用它们。',
 
   // User settings
 
@@ -813,7 +813,7 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'intake-emails.title': '接收邮箱',
   'intake-emails.description':
-    '接收邮箱地址用于将电子邮件自动导入到 Papra。只需将邮件转发至接收地址，其附件将被添加到组织的文档中。',
+    '接收邮箱地址用于将电子邮件自动导入到 SwyxDrive。只需将邮件转发至接收地址，其附件将被添加到组织的文档中。',
   'intake-emails.disabled.title': '接收邮箱已禁用',
   'intake-emails.disabled.description':
     '此实例已禁用接收邮箱。请联系管理员以启用。更多信息请参阅 {{ documentation }}。',
@@ -875,7 +875,7 @@ export const translations: Partial<TranslationsDictionary> = {
   'api-keys.permissions.custom-properties.custom-properties:update': '更新自定义属性',
   'api-keys.permissions.custom-properties.custom-properties:delete': '删除自定义属性',
   'api-keys.create.title': '创建 API 密钥',
-  'api-keys.create.description': '创建新的 API 密钥以访问 Papra API。',
+  'api-keys.create.description': '创建新的 API 密钥以访问 SwyxDrive API。',
   'api-keys.create.success': 'API 密钥创建成功。',
   'api-keys.create.back': '返回 API 密钥',
   'api-keys.create.form.name.label': '名称',
@@ -890,7 +890,7 @@ export const translations: Partial<TranslationsDictionary> = {
   'api-keys.list.description': '在此管理您的 API 密钥。',
   'api-keys.list.create': '创建 API 密钥',
   'api-keys.list.empty.title': '暂无 API 密钥',
-  'api-keys.list.empty.description': '创建 API 密钥以访问 Papra API。',
+  'api-keys.list.empty.description': '创建 API 密钥以访问 SwyxDrive API。',
   'api-keys.list.card.created': '创建时间',
   'api-keys.delete.success': 'API 密钥已删除',
   'api-keys.delete.confirm.title': '删除 API 密钥',
@@ -988,7 +988,7 @@ export const translations: Partial<TranslationsDictionary> = {
   'user-menu.invitations': '邀请',
   'user-menu.language': '语言',
   'user-menu.theme': '主题',
-  'user-menu.about': '关于 Papra',
+  'user-menu.about': '关于 SwyxDrive',
   'user-menu.logout': '登出',
 
   // Command palette
@@ -1018,7 +1018,7 @@ export const translations: Partial<TranslationsDictionary> = {
   'api-errors.tags.organization_limit_reached': '该组织的标签数量已达上限。',
   'api-errors.internal.error': '处理请求时发生错误。请稍后重试。',
   'api-errors.auth.invalid_origin':
-    '应用来源无效。如果您自托管 Papra，请确保 APP_BASE_URL 环境变量与当前 URL 匹配。详情见 https://docs.papra.app/resources/troubleshooting/#invalid-application-origin',
+    '应用来源无效。如果您自托管 SwyxDrive，请确保 APP_BASE_URL 环境变量与当前 URL 匹配。详情见 https://docs.papra.app/resources/troubleshooting/#invalid-application-origin',
   'api-errors.organization.max_members_count_reached':
     '该组织的成员和待处理邀请数量已达上限。请升级方案以添加更多成员。',
   'api-errors.organization.has_active_subscription':
@@ -1139,14 +1139,14 @@ export const translations: Partial<TranslationsDictionary> = {
 
   // Admin
 
-  'admin.layout.header': 'Papra 管理',
+  'admin.layout.header': 'SwyxDrive 管理',
   'admin.layout.back-to-app': '返回应用',
   'admin.layout.menu.analytics': '统计',
   'admin.layout.menu.users': '用户',
   'admin.layout.menu.organizations': '组织',
 
   'admin.analytics.title': '仪表板',
-  'admin.analytics.description': 'Papra 使用情况的信息和统计。',
+  'admin.analytics.description': 'SwyxDrive 使用情况的信息和统计。',
   'admin.analytics.user-count': '用户数量',
   'admin.analytics.organization-count': '组织数量',
   'admin.analytics.document-count': '文档数量',
@@ -1303,11 +1303,11 @@ export const translations: Partial<TranslationsDictionary> = {
 
   // About page
 
-  'about.title': '关于 Papra',
+  'about.title': '关于 SwyxDrive',
   'about.version': '版本',
   'about.git-commit': 'Git 提交',
   'about.commit-date': '提交日期',
-  'about.description': 'Papra 是一个开源文档管理系统,帮助您轻松归档、组织、标记和管理文档。',
+  'about.description': 'SwyxDrive 是一个开源文档管理系统,帮助您轻松归档、组织、标记和管理文档。',
   'about.links.title': '链接',
   'about.links.documentation': '文档',
   'about.links.documentation-description': '用户指南和 API 参考',

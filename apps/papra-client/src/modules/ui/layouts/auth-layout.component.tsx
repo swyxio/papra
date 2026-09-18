@@ -24,7 +24,7 @@ export const AuthLayout: ParentComponent = (props) => {
           class="group text-base text-muted-foreground flex gap-2 font-semibold hover:text-foreground transition"
         >
           <div class="i-tabler-file-text size-6 text-primary transform rotate-12deg group-hover:rotate-25deg transition" />
-          Papra
+          SwyxDrive
         </A>
 
         <div class="flex gap-2">

@@ -6,7 +6,7 @@ import type { Component } from 'solid-js';
 import { formatBytes } from '@corentinth/chisels';
 import { A, useParams } from '@solidjs/router';
 import { useMutation, useQuery } from '@tanstack/solid-query';
-import { createSignal, Match, Show, Switch } from 'solid-js';
+import { createEffect, createSignal, onCleanup, Match, Show, Switch } from 'solid-js';
 import { DocumentBlobPreview } from '@/modules/documents/components/document-preview.component';
 import { getDocumentIcon } from '@/modules/documents/document.models';
 import { useI18n } from '@/modules/i18n/i18n.provider';
@@ -185,6 +185,13 @@ const SharedDocumentCard: Component<{
     retry: false,
     refetchInterval: 5000,
   }));
+  createEffect(() => {
+    document.title = `${props.document.name} — SwyxDrive`;
+  });
+  onCleanup(() => {
+    document.title = 'SwyxDrive — Documents, sharing & signing';
+  });
+
   return (
     <div>
       <div class="flex flex-col md:flex-row items-center gap-2 md:gap-4 max-w-5xl px-6 w-full mx-auto py-12 border-b">
@@ -367,7 +374,7 @@ export const SharedDocumentPage: Component = () => {
             class="group text-base text-muted-foreground flex gap-2 font-semibold hover:text-foreground transition"
           >
             <div class="i-tabler-file-text size-6 text-primary transform rotate-12deg group-hover:rotate-25deg transition" />
-            Papra
+            SwyxDrive
           </A>
 
           <div class="flex gap-2">

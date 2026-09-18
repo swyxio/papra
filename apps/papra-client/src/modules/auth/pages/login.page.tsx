@@ -46,7 +46,7 @@ export const LoginPage: Component = () => {
           <p class="text-muted-foreground text-xs mt-4">
             Powered by{' '}
             <a class="underline" href="https://github.com/swyxio/papra">
-              Papra · source code (AGPL-3.0)
+              SwyxDrive · built on Papra (AGPL-3.0)
             </a>
           </p>
           <AuthLegalLinks />

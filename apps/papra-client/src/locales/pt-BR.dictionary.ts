@@ -29,9 +29,9 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'auth.email-provider.open': 'Abrir {{ provider }}',
 
-  'auth.login.title': 'Acessar o Papra',
+  'auth.login.title': 'Acessar o SwyxDrive',
   'auth.login.description':
-    'Insira seu e-mail ou use um login de rede social para acessar sua conta no Papra.',
+    'Insira seu e-mail ou use um login de rede social para acessar sua conta no SwyxDrive.',
   'auth.login.login-with-provider': 'Entrar com {{ provider }}',
   'auth.login.no-account': 'Não tem uma conta?',
   'auth.login.register': 'Cadastre-se',
@@ -63,8 +63,8 @@ export const translations: Partial<TranslationsDictionary> = {
   'auth.login.two-factor.use-backup-code': 'Usar código de backup',
   'auth.login.two-factor.use-totp': 'Usar aplicativo autenticador',
 
-  'auth.register.title': 'Cadastre-se no Papra',
-  'auth.register.description': 'Crie uma conta para começar a usar o Papra.',
+  'auth.register.title': 'Cadastre-se no SwyxDrive',
+  'auth.register.description': 'Crie uma conta para começar a usar o SwyxDrive.',
   'auth.register.register-with-email': 'Cadastrar com e-mail',
   'auth.register.register-with-provider': 'Cadastrar com {{ provider }}',
   'auth.register.providers.google': 'Google',
@@ -73,7 +73,7 @@ export const translations: Partial<TranslationsDictionary> = {
   'auth.register.login': 'Entrar',
   'auth.register.registration-disabled.title': 'Cadastro desativado',
   'auth.register.registration-disabled.description':
-    'A criação de novas contas está desativada nesta instância do Papra. Somente usuários com contas existentes podem acessar. Se você acha que isso é um engano, entre em contato com o administrador desta instância.',
+    'A criação de novas contas está desativada nesta instância do SwyxDrive. Somente usuários com contas existentes podem acessar. Se você acha que isso é um engano, entre em contato com o administrador desta instância.',
   'auth.register.form.email.label': 'E-mail',
   'auth.register.form.email.placeholder': 'Exemplo: cesar@papra.app',
   'auth.register.form.email.required': 'Por favor, insira seu endereço de e-mail',
@@ -110,7 +110,7 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'auth.no-auth-provider.title': 'Nenhum provedor de autenticação',
   'auth.no-auth-provider.description':
-    'Não há provedores de autenticação habilitados nesta instância do Papra. Por favor, entre em contato com o administrador desta instância para habilitá-los.',
+    'Não há provedores de autenticação habilitados nesta instância do SwyxDrive. Por favor, entre em contato com o administrador desta instância para habilitá-los.',
 
   // User settings
 
@@ -874,7 +874,7 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'intake-emails.title': 'E-mails de entrada',
   'intake-emails.description':
-    'Os endereços de e-mail de entrada são usados para importar automaticamente e-mails para o Papra. Basta encaminhar e-mails para o endereço de entrada e os anexos serão adicionados aos documentos da sua organização.',
+    'Os endereços de e-mail de entrada são usados para importar automaticamente e-mails para o SwyxDrive. Basta encaminhar e-mails para o endereço de entrada e os anexos serão adicionados aos documentos da sua organização.',
   'intake-emails.disabled.title': 'E-mails de entrada desativados',
   'intake-emails.disabled.description':
     'Os e-mails de entrada estão desativados nesta instância. Por favor, entre em contato com o administrador para ativá-los. Consulte a {{ documentation }} para mais informações.',
@@ -943,7 +943,7 @@ export const translations: Partial<TranslationsDictionary> = {
   'api-keys.permissions.custom-properties.custom-properties:delete':
     'Excluir propriedades personalizadas',
   'api-keys.create.title': 'Criar chave de API',
-  'api-keys.create.description': 'Crie uma nova chave de API para acessar a API do Papra.',
+  'api-keys.create.description': 'Crie uma nova chave de API para acessar a API do SwyxDrive.',
   'api-keys.create.success': 'A chave de API foi criada com sucesso.',
   'api-keys.create.back': 'Voltar para as chaves de API',
   'api-keys.create.form.name.label': 'Nome',
@@ -959,7 +959,7 @@ export const translations: Partial<TranslationsDictionary> = {
   'api-keys.list.description': 'Gerencie suas chaves de API aqui.',
   'api-keys.list.create': 'Criar chave de API',
   'api-keys.list.empty.title': 'Nenhuma chave de API',
-  'api-keys.list.empty.description': 'Crie uma chave de API para acessar a API do Papra.',
+  'api-keys.list.empty.description': 'Crie uma chave de API para acessar a API do SwyxDrive.',
   'api-keys.list.card.created': 'Criada em',
   'api-keys.delete.success': 'A chave de API foi excluída com sucesso',
   'api-keys.delete.confirm.title': 'Excluir chave de API',
@@ -1060,7 +1060,7 @@ export const translations: Partial<TranslationsDictionary> = {
   'user-menu.invitations': 'Convites',
   'user-menu.language': 'Idioma',
   'user-menu.theme': 'Tema',
-  'user-menu.about': 'Sobre o Papra',
+  'user-menu.about': 'Sobre o SwyxDrive',
   'user-menu.logout': 'Sair',
 
   // Command palette
@@ -1094,7 +1094,7 @@ export const translations: Partial<TranslationsDictionary> = {
   'api-errors.internal.error':
     'Ocorreu um erro ao processar sua solicitação. Por favor, tente novamente.',
   'api-errors.auth.invalid_origin':
-    'Origem da aplicação inválida. Se você está hospedando o Papra, certifique-se de que a variável de ambiente APP_BASE_URL corresponde à sua URL atual. Para mais detalhes, consulte https://docs.papra.app/resources/troubleshooting/#invalid-application-origin',
+    'Origem da aplicação inválida. Se você está hospedando o SwyxDrive, certifique-se de que a variável de ambiente APP_BASE_URL corresponde à sua URL atual. Para mais detalhes, consulte https://docs.papra.app/resources/troubleshooting/#invalid-application-origin',
   'api-errors.organization.max_members_count_reached':
     'O número máximo de membros e convites pendentes para esta organização foi atingido. Atualize seu plano para adicionar mais membros.',
   'api-errors.organization.has_active_subscription':
@@ -1226,14 +1226,14 @@ export const translations: Partial<TranslationsDictionary> = {
 
   // Admin
 
-  'admin.layout.header': 'Administração Papra',
+  'admin.layout.header': 'Administração SwyxDrive',
   'admin.layout.back-to-app': 'Voltar ao app',
   'admin.layout.menu.analytics': 'Estatísticas',
   'admin.layout.menu.users': 'Usuários',
   'admin.layout.menu.organizations': 'Organizações',
 
   'admin.analytics.title': 'Painel de controle',
-  'admin.analytics.description': 'Informações e estatísticas sobre o uso do Papra.',
+  'admin.analytics.description': 'Informações e estatísticas sobre o uso do SwyxDrive.',
   'admin.analytics.user-count': 'Número de usuários',
   'admin.analytics.organization-count': 'Número de organizações',
   'admin.analytics.document-count': 'Número de documentos',
@@ -1393,12 +1393,12 @@ export const translations: Partial<TranslationsDictionary> = {
 
   // About page
 
-  'about.title': 'Sobre o Papra',
+  'about.title': 'Sobre o SwyxDrive',
   'about.version': 'Versão',
   'about.git-commit': 'Commit do Git',
   'about.commit-date': 'Data do Commit',
   'about.description':
-    'Papra é um sistema de gerenciamento de documentos de código aberto que ajuda você a arquivar, organizar, etiquetar e gerenciar seus documentos com facilidade.',
+    'SwyxDrive é um sistema de gerenciamento de documentos de código aberto que ajuda você a arquivar, organizar, etiquetar e gerenciar seus documentos com facilidade.',
   'about.links.title': 'Links',
   'about.links.documentation': 'Documentação',
   'about.links.documentation-description': 'Guias do usuário e referência da API',

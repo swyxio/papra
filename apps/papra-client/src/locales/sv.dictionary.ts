@@ -30,9 +30,9 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'auth.email-provider.open': 'Öppna {{ provider }}',
 
-  'auth.login.title': 'Logga in på Papra',
+  'auth.login.title': 'Logga in på SwyxDrive',
   'auth.login.description':
-    'Ange din e-postadress eller använd sociala medier-inloggning för att komma åt ditt Papra-konto.',
+    'Ange din e-postadress eller använd sociala medier-inloggning för att komma åt ditt SwyxDrive-konto.',
   'auth.login.login-with-provider': 'Logga in med {{ provider }}',
   'auth.login.no-account': 'Har du inget konto?',
   'auth.login.register': 'Registrera',
@@ -64,8 +64,8 @@ export const translations: Partial<TranslationsDictionary> = {
   'auth.login.two-factor.use-backup-code': 'Använd reservkod istället',
   'auth.login.two-factor.use-totp': 'Använd autentiseringsappen istället',
 
-  'auth.register.title': 'Registrera dig på Papra',
-  'auth.register.description': 'Skapa ett konto för att börja använda Papra.',
+  'auth.register.title': 'Registrera dig på SwyxDrive',
+  'auth.register.description': 'Skapa ett konto för att börja använda SwyxDrive.',
   'auth.register.register-with-email': 'Registrera med e-postadress',
   'auth.register.register-with-provider': 'Registrera med {{ provider }}',
   'auth.register.providers.google': 'Google',
@@ -74,7 +74,7 @@ export const translations: Partial<TranslationsDictionary> = {
   'auth.register.login': 'Inloggning',
   'auth.register.registration-disabled.title': 'Registreringen är inaktiverad',
   'auth.register.registration-disabled.description':
-    'Skapandet av nya konton är för närvarande inaktiverat på denna instans av Papra. Endast användare med befintliga konton kan logga in. Om du tror att detta är ett misstag, kontakta administratören för denna instans.',
+    'Skapandet av nya konton är för närvarande inaktiverat på denna instans av SwyxDrive. Endast användare med befintliga konton kan logga in. Om du tror att detta är ett misstag, kontakta administratören för denna instans.',
   'auth.register.form.email.label': 'E-post',
   'auth.register.form.email.placeholder': 'Exempel: ada@papra.app',
   'auth.register.form.email.required': 'Ange din e-postadress',
@@ -112,7 +112,7 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'auth.no-auth-provider.title': 'Ingen autentiseringsleverantör',
   'auth.no-auth-provider.description':
-    'Det finns inga autentiseringsleverantörer aktiverade på denna instans av Papra. Kontakta administratören för denna instans för att aktivera dem.',
+    'Det finns inga autentiseringsleverantörer aktiverade på denna instans av SwyxDrive. Kontakta administratören för denna instans för att aktivera dem.',
 
   // User settings
 
@@ -867,7 +867,7 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'intake-emails.title': 'Inmatning av e-post',
   'intake-emails.description':
-    'Inmatningsadresser används för att automatiskt mata in e-postmeddelanden i Papra. Vidarebefordra e-postmeddelanden till inmatningsadressen så kommer deras bilagor att läggas till i din organisation.',
+    'Inmatningsadresser används för att automatiskt mata in e-postmeddelanden i SwyxDrive. Vidarebefordra e-postmeddelanden till inmatningsadressen så kommer deras bilagor att läggas till i din organisation.',
   'intake-emails.disabled.title': 'Inmatning av e-post är avaktiverat',
   'intake-emails.disabled.description':
     'Inmatning av e-postmeddelanden är inaktiverat på den här instansen. Kontakta din administratör för att aktivera det. Se {{ documentation }} för mer information.',
@@ -933,7 +933,7 @@ export const translations: Partial<TranslationsDictionary> = {
     'Uppdatera anpassade egenskaper',
   'api-keys.permissions.custom-properties.custom-properties:delete': 'Radera anpassade egenskaper',
   'api-keys.create.title': 'Skapa API-nyckel',
-  'api-keys.create.description': 'Skapa en ny API-nyckel för att komma åt Papras API',
+  'api-keys.create.description': 'Skapa en ny API-nyckel för att komma åt SwyxDrives API',
   'api-keys.create.success': 'API-nyckeln har skapats',
   'api-keys.create.back': 'Tillbaka till API-nycklar',
   'api-keys.create.form.name.label': 'Namn',
@@ -949,7 +949,7 @@ export const translations: Partial<TranslationsDictionary> = {
   'api-keys.list.description': 'Hantera dina API-nycklar här.',
   'api-keys.list.create': 'Skapa API-nyckel',
   'api-keys.list.empty.title': 'Inga API-nycklar',
-  'api-keys.list.empty.description': 'Skapa en API-nyckel för att komma åt Papras API.',
+  'api-keys.list.empty.description': 'Skapa en API-nyckel för att komma åt SwyxDrives API.',
   'api-keys.list.card.created': 'Skapad',
   'api-keys.delete.success': 'API-nyckeln har raderats',
   'api-keys.delete.confirm.title': 'Radera API-nyckel',
@@ -1049,7 +1049,7 @@ export const translations: Partial<TranslationsDictionary> = {
   'user-menu.invitations': 'Inbjudningar',
   'user-menu.language': 'Språk',
   'user-menu.theme': 'Tema',
-  'user-menu.about': 'Om Papra',
+  'user-menu.about': 'Om SwyxDrive',
   'user-menu.logout': 'Logga ut',
 
   // Command palette
@@ -1082,7 +1082,7 @@ export const translations: Partial<TranslationsDictionary> = {
     'Det maximala antalet taggar för denna organisation har uppnåtts.',
   'api-errors.internal.error': 'Ett fel uppstod när din begäran bearbetades. Försök igen senare.',
   'api-errors.auth.invalid_origin':
-    'Ogiltigt applikationsursprung. Om du själv tillhandahåller Papra, se till att din APP_BASE_URL-variabel matchar din nuvarande webbadress. För mer information se https://docs.papra.app/resources/troubleshooting/#invalid-application-origin',
+    'Ogiltigt applikationsursprung. Om du själv tillhandahåller SwyxDrive, se till att din APP_BASE_URL-variabel matchar din nuvarande webbadress. För mer information se https://docs.papra.app/resources/troubleshooting/#invalid-application-origin',
   'api-errors.organization.max_members_count_reached':
     'Det maximala antalet medlemmar och väntande inbjudningar för den här organisationen har uppnåtts. Uppgradera din plan för att lägga till fler medlemmar.',
   'api-errors.organization.has_active_subscription':
@@ -1212,14 +1212,14 @@ export const translations: Partial<TranslationsDictionary> = {
 
   // Admin
 
-  'admin.layout.header': 'Papra admin',
+  'admin.layout.header': 'SwyxDrive admin',
   'admin.layout.back-to-app': 'Tillbaka till appen',
   'admin.layout.menu.analytics': 'Analyser',
   'admin.layout.menu.users': 'Användare',
   'admin.layout.menu.organizations': 'Organisationer',
 
   'admin.analytics.title': 'Kontrollpanel',
-  'admin.analytics.description': 'Insikter och analyser om Papra-användning.',
+  'admin.analytics.description': 'Insikter och analyser om SwyxDrive-användning.',
   'admin.analytics.user-count': 'Antal användare',
   'admin.analytics.organization-count': 'Antal organisationer',
   'admin.analytics.document-count': 'Antal dokument',
@@ -1377,12 +1377,12 @@ export const translations: Partial<TranslationsDictionary> = {
 
   // About page
 
-  'about.title': 'Om Papra',
+  'about.title': 'Om SwyxDrive',
   'about.version': 'Version',
   'about.git-commit': 'Git Commit',
   'about.commit-date': 'Commit-datum',
   'about.description':
-    'Papra är ett dokumenthanteringssystem med öppen källkod som hjälper dig att arkivera, organisera, tagga och hantera dina dokument.',
+    'SwyxDrive är ett dokumenthanteringssystem med öppen källkod som hjälper dig att arkivera, organisera, tagga och hantera dina dokument.',
   'about.links.title': 'Länkar',
   'about.links.documentation': 'Dokumentation',
   'about.links.documentation-description': 'Användarguider och API-referens',

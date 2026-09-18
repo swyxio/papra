@@ -1,6 +1,8 @@
 {
-  "name": "Papra",
-  "short_name": "Papra",
+  "name": "SwyxDrive",
+  "short_name": "SwyxDrive",
+  "start_url": "/",
+  "description": "Documents, sharing and signing in one place.",
   "icons": [
     {
       "src": "/web-app-manifest-192x192.png",
