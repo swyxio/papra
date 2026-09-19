@@ -28,6 +28,8 @@ Scoped credentials grant read or read/write within a selected folder subtree in 
 
 Automatic native PDF/image processing caps inputs at 2 GiB and 250 pages. Audio/video tools range-read signed originals without downloading them wholesale to temporary disk; processing caps duration at six hours, audio at 72 five-minute mono chunks, frames at 12 and native execution at 12 minutes. Unsupported or over-limit originals remain downloadable with explicit processing status.
 
+Every Workers AI call, including queue transcription, vision and indexing, uses the authenticated `swyx-shared` AI Gateway. The gateway's rolling-month $10 budget is shared with other participating sites and background agents. Private request/response logging and response caching are disabled on each call. Existing daily reservations remain a separate instance safeguard. Keyword search and originals remain available when AI inference is denied.
+
 AI reservations cap automatic audio at six hours/day, vision at 100 images/day and document chat at 100 requests/day across the instance. These are application limits, not a promise of free processing. Exhaustion is recorded in job status; files and keyword search remain available. Private R2 backups consume additional storage.
 
 ## Release
