@@ -1,3 +1,4 @@
+import { AI_GATEWAY } from './ai-gateway';
 import { getContainer } from '@cloudflare/containers';
 import { S3mini } from 's3mini';
 import type { Env } from './types';
@@ -519,7 +520,7 @@ async function enrichVersion(env: Env, j: Job, v: Version) {
           vad_filter: true,
           condition_on_previous_text: false,
         },
-        { signal: AbortSignal.timeout(120_000) },
+        { signal: AbortSignal.timeout(120_000), gateway: AI_GATEWAY },
       ),
       start = asset.startSeconds ?? 0;
     result = {
@@ -558,7 +559,7 @@ async function enrichVersion(env: Env, j: Job, v: Version) {
         chat_template_kwargs: { enable_thinking: false },
         temperature: 0,
       },
-      { signal: AbortSignal.timeout(90_000) },
+      { signal: AbortSignal.timeout(90_000), gateway: AI_GATEWAY },
     );
     const caption = response.choices?.[0]?.message?.content;
     if (typeof caption !== 'string' || !caption.trim())
@@ -662,7 +663,7 @@ async function indexVersion(env: Env, j: Job, initial: Version) {
     const result = await env.AI.run(
       EMBEDDING,
       { text: chunks.slice(offset, offset + 16), pooling: 'mean' },
-      { signal: AbortSignal.timeout(90_000) },
+      { signal: AbortSignal.timeout(90_000), gateway: AI_GATEWAY },
     );
     if (
       !('data' in result) ||

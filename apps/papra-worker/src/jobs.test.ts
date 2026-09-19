@@ -120,6 +120,18 @@ test('duplicate queue delivery claims once and indexes manually corrected curren
   await Promise.all([consumeJobs(batch(body), env), consumeJobs(batch(body), env)]);
   expect(embed).toHaveBeenCalledTimes(1);
   expect(embed.mock.calls[0][1]).toMatchObject({ text: ['Manual corrected content'] });
+  expect(
+    (
+      embed.mock.calls[0] as unknown as [
+        string,
+        unknown,
+        { gateway: GatewayOptions; signal: AbortSignal },
+      ]
+    )[2],
+  ).toMatchObject({
+    gateway: { id: 'swyx-shared', collectLog: false, skipCache: true },
+    signal: expect.any(AbortSignal),
+  });
   expect(upsert).toHaveBeenCalledTimes(1);
   expect(upsert.mock.calls[0][0][0].namespace).toBe('f');
   expect((await DB.prepare('SELECT text FROM chunks').first<{ text: string }>())!.text).toBe(
@@ -347,7 +359,10 @@ test('vision jobs use Gemma multimodal messages and publish its chat completion 
       max_completion_tokens: 256,
       chat_template_kwargs: { enable_thinking: false },
     }),
-    expect.anything(),
+    expect.objectContaining({
+      gateway: { id: 'swyx-shared', collectLog: false, skipCache: true },
+      signal: expect.any(AbortSignal),
+    }),
   );
   expect(await DB.prepare("SELECT status FROM jobs WHERE id='vision'").first()).toEqual({
     status: 'done',
@@ -358,6 +373,74 @@ test('vision jobs use Gemma multimodal messages and publish its chat completion 
   expect(await DB.prepare("SELECT content FROM documents WHERE id='d'").first()).toEqual({
     content: 'Manual corrected content',
   });
+});
+
+test('transcription routes through the shared private gateway while retaining its deadline', async () => {
+  const { env, DB } = await fixture();
+  const bytes = new Uint8Array([1, 2, 3]);
+  const sha256 = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (x) =>
+    x.toString(16).padStart(2, '0'),
+  ).join('');
+  const assetKey = 'derived/v/g0/audio.mp3';
+  const cache = new Map<string, string>();
+  const manifest = {
+    versionId: 'v',
+    generation: 0,
+    result: {
+      text: '',
+      chunks: [],
+      warnings: [],
+      outputs: [
+        {
+          kind: 'audio',
+          key: assetKey,
+          byteSize: bytes.length,
+          sha256,
+          startSeconds: 0,
+          endSeconds: 10,
+        },
+      ],
+    },
+  };
+  const ai = vi.fn(async () => ({ text: 'Synthetic transcript', segments: [] }));
+  Object.assign(env, {
+    FILES: {
+      head: async () => null,
+      get: async (key: string) =>
+        key === assetKey
+          ? { size: bytes.length, arrayBuffer: async () => bytes.buffer }
+          : key === 'derived/v/native-g0.json'
+            ? { size: 500, json: async () => manifest }
+            : null,
+      put: async (key: string, value: string) => {
+        cache.set(key, value);
+      },
+    },
+    BACKUPS: { put: vi.fn(async () => {}) },
+    AI: { run: ai },
+  });
+  await DB.batch([
+    DB.prepare(
+      "INSERT INTO jobs(id,version_id,kind,status,generation,created_at,updated_at) VALUES('p','v','process','done',0,1,1)",
+    ),
+    DB.prepare(
+      "INSERT INTO jobs(id,version_id,kind,status,generation,created_at,updated_at) VALUES('transcribe','v','transcribe:0:0','pending',0,1,1)",
+    ),
+  ]);
+  await consumeJobs(batch({ jobId: 'transcribe', generation: 0 }), env);
+  expect(ai).toHaveBeenCalledOnce();
+  expect(ai).toHaveBeenCalledWith(
+    '@cf/openai/whisper-large-v3-turbo',
+    expect.objectContaining({ task: 'transcribe' }),
+    expect.objectContaining({
+      gateway: { id: 'swyx-shared', collectLog: false, skipCache: true },
+      signal: expect.any(AbortSignal),
+    }),
+  );
+  expect(await DB.prepare("SELECT status FROM jobs WHERE id='transcribe'").first()).toEqual({
+    status: 'done',
+  });
+  expect(JSON.parse(cache.get('derived/v/transcribe-0-0.json')!).text).toBe('Synthetic transcript');
 });
 
 test('indexing incorporates cached media scenes in numeric order without rerunning AI enrichment', async () => {

@@ -113,6 +113,9 @@ test('document questions quote actual signature instructions even before vector 
   });
   expect(f.query).not.toHaveBeenCalled();
   expect(f.ai.mock.calls[0][0]).toContain('llama');
+  expect(
+    (f.ai.mock.calls[0] as unknown as [string, unknown, { gateway: GatewayOptions }])[2],
+  ).toEqual({ gateway: { id: 'swyx-shared', collectLog: false, skipCache: true } });
   const call = f.ai.mock.calls[0] as unknown as [string, { messages: { content: string }[] }];
   expect(call[1].messages[1].content).toContain('For your signature, please type TEST ONLY.');
 });
@@ -159,6 +162,9 @@ test('semantic retrieval rechecks access, organization, current version and home
     matches: ['c-secret-doc', 'c-foreign-doc', 'stale', 'c-doc'].map((id) => ({ id, score: 0.9 })),
   } as never);
   const sources = await semanticSources(f.env, f.identity, 'o', 'Signature instructions');
+  expect(
+    (f.ai.mock.calls[0] as unknown as [string, unknown, { gateway: GatewayOptions }])[2],
+  ).toEqual({ gateway: { id: 'swyx-shared', collectLog: false, skipCache: true } });
   expect(sources.map((s) => s.id)).toEqual(['c-doc']);
   expect(
     f.query.mock.calls.map(
