@@ -5,12 +5,7 @@ import { downloadFile } from '@/modules/shared/files/download';
 import { useConfirmModal } from '../shared/confirm';
 import { queryClient } from '../shared/query/query-client';
 import { createToast } from '../ui/components/sonner';
-import {
-  deleteDocument,
-  fetchDocument,
-  fetchDocumentFile,
-  restoreDocument,
-} from './documents.services';
+import { deleteDocument, restoreDocument } from './documents.services';
 
 export async function invalidateOrganizationDocumentsQuery({
   organizationId,
