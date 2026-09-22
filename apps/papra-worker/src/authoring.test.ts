@@ -224,18 +224,41 @@ test('the PDF layout engine renders paginated tables in the real Workers runtime
   ).toBeGreaterThan(1);
 });
 
-test('private templates require organization membership and originals stay within their organization', async () => {
+test('shared blank templates work across member organizations and require membership', async () => {
   const f = await fixture(),
     base = '/api/organizations/org/document-templates';
+  expect((await f.request(base)).status).toBe(503);
   await f.env.FILES.put(
-    'templates/org/atlas/catalog.json',
+    'templates/atlas/catalog.json',
     JSON.stringify({ templates: [{ id: 'nda', name: 'TEST ONLY NDA' }] }),
   );
   await f.env.FILES.put(
-    'templates/org/atlas/nda.json',
+    'templates/atlas/nda.json',
     JSON.stringify({ id: 'nda', source, fields: [], guidance: 'TEST ONLY guidance' }),
   );
-  await f.env.FILES.put('templates/org/atlas/originals/nda.docx', new Uint8Array([80, 75, 1, 2]));
+  await f.env.FILES.put('templates/atlas/originals/nda.docx', new Uint8Array([80, 75, 1, 2]));
+  await f.env.DB.prepare(
+    "INSERT INTO organizations(id,name,created_at,updated_at) VALUES ('personal','Personal',1,1)",
+  ).run();
+  await f.env.DB.prepare(
+    "INSERT INTO organization_members(id,organization_id,user_id,role,created_at,updated_at) VALUES ('personal-owner','personal','owner','owner',1,1)",
+  ).run();
+  for (const suffix of ['', '/nda', '/nda/original']) {
+    const shared = await f.request('/api/organizations/personal/document-templates' + suffix);
+    expect(shared.status).toBe(200);
+    expect(await shared.arrayBuffer()).toEqual(
+      await (await f.request(base + suffix)).arrayBuffer(),
+    );
+    expect(
+      (
+        await f.request(
+          '/api/organizations/personal/document-templates' + suffix,
+          undefined,
+          'writer',
+        )
+      ).status,
+    ).toBe(403);
+  }
   expect((await f.request(base)).status).toBe(200);
   expect((await f.request(base + '/nda')).status).toBe(200);
   const original = await f.request(base + '/nda/original');

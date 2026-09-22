@@ -1,7 +1,6 @@
 import { A, useNavigate, useParams } from '@solidjs/router';
 import { createMemo, createResource, createSignal, For, Show } from 'solid-js';
 import { apiClient } from '@/modules/shared/http/api-client';
-import { getErrorStatus } from '@/modules/shared/utils/errors';
 import { getHttpErrorMessage } from '@/modules/shared/http/http-errors';
 import { Button } from '@/modules/ui/components/button';
 import { Sheet, SheetContent, SheetTitle } from '@/modules/ui/components/sheet';
@@ -29,9 +28,9 @@ export function NewDocumentPage() {
     queryFn: async () => fetchOrganization({ organizationId: params.organizationId }),
   }));
   const { user } = useCurrentUser();
-  const [name, setName] = createSignal('Untitled document');
+  const [name, setName] = createSignal('Mutual NDA');
   const [customName, setCustomName] = createSignal(false);
-  const [template, setTemplate] = createSignal('blank');
+  const [template, setTemplate] = createSignal('atlas:mutual-nda');
   const [values, setValues] = createSignal<Record<string, string>>({});
   const [search, setSearch] = createSignal('');
   const [busy, setBusy] = createSignal(false),
@@ -174,19 +173,10 @@ export function NewDocumentPage() {
       </Show>
       <Show when={catalog.error}>
         <p class="text-sm text-muted-foreground" role="status">
-          <Show
-            when={getErrorStatus(catalog.error) === 404}
-            fallback={
-              <span>
-                Could not load agreement templates.{' '}
-                <button class="underline" onClick={() => void reloadCatalog()}>
-                  Retry
-                </button>
-              </span>
-            }
-          >
-            Stripe Atlas agreement templates are available in the Smol space.
-          </Show>
+          Could not load agreement templates.{' '}
+          <button class="underline" onClick={() => void reloadCatalog()}>
+            Retry
+          </button>
         </p>
       </Show>
     </>
