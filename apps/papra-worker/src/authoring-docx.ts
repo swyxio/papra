@@ -10,6 +10,7 @@ import {
   Paragraph,
   Table,
   TableCell,
+  TableLayoutType,
   TableRow,
   TextRun,
   WidthType,
@@ -18,6 +19,8 @@ import type { IParagraphOptions, INumberingOptions } from 'docx';
 import type { DocumentNode } from './authoring-pdf';
 
 export const docxMime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const pageWidth = 11906;
+const pageMargin = 960;
 export async function renderDocx(source: DocumentNode, title: string) {
   const numbering: INumberingOptions['config'][number][] = [];
   function runs(nodes: DocumentNode[] = []): TextRun[] {
@@ -25,19 +28,17 @@ export async function renderDocx(source: DocumentNode, title: string) {
       n.type === 'hardBreak'
         ? [new TextRun({ break: 1 })]
         : n.type === 'text'
-          ? n
-              .text!.split('\n')
-              .flatMap((line, i) => [
-                new TextRun({
-                  text: line,
-                  ...(i ? { break: 1 } : {}),
-                  ...(n.marks?.some((m) => m.type === 'bold') ? { bold: true } : {}),
-                  ...(n.marks?.some((m) => m.type === 'italic') ? { italics: true } : {}),
-                  ...(n.marks?.some((m) => m.type === 'strike') ? { strike: true } : {}),
-                  ...(n.marks?.some((m) => m.type === 'underline') ? { underline: {} } : {}),
-                  ...(n.marks?.some((m) => m.type === 'code') ? { font: 'Courier New' } : {}),
-                }),
-              ])
+          ? n.text!.split('\n').flatMap((line, i) => [
+              new TextRun({
+                text: line,
+                ...(i ? { break: 1 } : {}),
+                ...(n.marks?.some((m) => m.type === 'bold') ? { bold: true } : {}),
+                ...(n.marks?.some((m) => m.type === 'italic') ? { italics: true } : {}),
+                ...(n.marks?.some((m) => m.type === 'strike') ? { strike: true } : {}),
+                ...(n.marks?.some((m) => m.type === 'underline') ? { underline: {} } : {}),
+                ...(n.marks?.some((m) => m.type === 'code') ? { font: 'Courier New' } : {}),
+              }),
+            ])
           : [],
     );
   }
@@ -45,6 +46,7 @@ export async function renderDocx(source: DocumentNode, title: string) {
     node: DocumentNode,
     depth = 0,
     paragraph: IParagraphOptions = {},
+    availableWidth = pageWidth - 2 * pageMargin,
   ): (Paragraph | Table)[] {
     if (node.type === 'paragraph' || node.type === 'heading')
       return [
@@ -100,22 +102,38 @@ export async function renderDocx(source: DocumentNode, title: string) {
           border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: 'CBD5E1' } },
         }),
       ];
-    if (node.type === 'table')
+    if (node.type === 'table') {
+      const columns = node.content![0].content!.length;
+      const columnWidths = Array.from(
+        { length: columns },
+        (_, i) =>
+          Math.floor(((i + 1) * availableWidth) / columns) -
+          Math.floor((i * availableWidth) / columns),
+      );
       return [
         new Table({
-          width: { size: 100, type: WidthType.PERCENTAGE },
+          width: { size: availableWidth, type: WidthType.DXA },
+          layout: TableLayoutType.FIXED,
+          // Google Docs honors the grid widths; docx defaults each column to 100 twips.
+          columnWidths,
           rows: node.content!.map(
             (row) =>
               new TableRow({
                 tableHeader: row.content!.every((c) => c.type === 'tableHeader'),
                 children: row.content!.map(
-                  (cell) =>
+                  (cell, i) =>
                     new TableCell({
+                      width: { size: columnWidths[i], type: WidthType.DXA },
                       children: cell.content!.flatMap((child) =>
-                        blocks(child, 0, {
-                          spacing: { after: 70 },
-                          ...(cell.type === 'tableHeader' ? { style: 'TableHeader' } : {}),
-                        }),
+                        blocks(
+                          child,
+                          0,
+                          {
+                            spacing: { after: 70 },
+                            ...(cell.type === 'tableHeader' ? { style: 'TableHeader' } : {}),
+                          },
+                          columnWidths[i] - 200,
+                        ),
                       ),
                       ...(cell.type === 'tableHeader' ? { shading: { fill: 'F1F5F9' } } : {}),
                       margins: { top: 100, bottom: 100, left: 100, right: 100 },
@@ -125,8 +143,11 @@ export async function renderDocx(source: DocumentNode, title: string) {
           ),
         }),
       ];
+    }
     if (node.type === 'doc' || node.type === 'listItem')
-      return (node.content || []).flatMap((child) => blocks(child, depth, paragraph));
+      return (node.content || []).flatMap((child) =>
+        blocks(child, depth, paragraph, availableWidth),
+      );
     throw new Error('Unsupported Word document content');
   }
   const children = blocks(source);
@@ -161,8 +182,8 @@ export async function renderDocx(source: DocumentNode, title: string) {
       {
         properties: {
           page: {
-            size: { width: 11906, height: 16838 },
-            margin: { top: 960, bottom: 960, left: 960, right: 960 },
+            size: { width: pageWidth, height: 16838 },
+            margin: { top: pageMargin, bottom: pageMargin, left: pageMargin, right: pageMargin },
           },
         },
         footers: {

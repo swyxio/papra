@@ -78,6 +78,39 @@ test('editable Word export preserves headings, text, nested lists, tables, page 
   expect(result.footer).toContain('NUMPAGES');
   expect(result.footer).toContain('PAGE');
 });
+test.each([1, 3, 10])(
+  'Word tables have usable explicit widths for Google import (%i columns)',
+  async (columns) => {
+    const tableSource = validateSource({
+      type: 'doc',
+      content: [
+        {
+          type: 'table',
+          content: [
+            {
+              type: 'tableRow',
+              content: Array.from({ length: columns }, () => ({
+                type: 'tableCell',
+                content: [p('Description')],
+              })),
+            },
+          ],
+        },
+      ],
+    });
+    const result = await xml(await renderDocx(tableSource, 'Table'));
+    const widths = [...result.document.matchAll(/<w:gridCol w:w="(\d+)"\/>/g)].map((m) =>
+      Number(m[1]),
+    );
+    expect(widths).toHaveLength(columns);
+    expect(widths.reduce((sum, width) => sum + width, 0)).toBe(9986);
+    expect(Math.min(...widths)).toBeGreaterThanOrEqual(998);
+    expect(result.document).toContain('w:tblLayout w:type="fixed"');
+    expect(result.document).toContain('w:tblW w:type="dxa" w:w="9986"');
+    for (const width of widths)
+      expect(result.document).toContain(`w:tcW w:type="dxa" w:w="${width}"`);
+  },
+);
 async function fixture() {
   const m = new Miniflare({
     modules: true,
