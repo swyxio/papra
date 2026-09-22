@@ -28,6 +28,25 @@ test('an imported signature page break survives validation and PDF conversion', 
   const pdf = await PDF.load(await renderDocument(document, 'TEST ONLY'));
   expect(pdf.getPages()).toHaveLength(2);
 });
+test('a signature section does not add a blank page at a natural page boundary', async () => {
+  const document = validateSource({
+    type: 'doc',
+    content: [
+      {
+        type: 'paragraph',
+        content: [{ type: 'text', text: Array(46).fill('Agreement terms').join('\n') }],
+      },
+      {
+        type: 'paragraph',
+        attrs: { pageBreakBefore: true },
+        content: [{ type: 'text', text: 'Signature page' }],
+      },
+    ],
+  });
+  const pdf = await PDF.load(await renderDocument(document, 'TEST ONLY'));
+  expect(pdf.getPages()).toHaveLength(2);
+  for (const page of pdf.getPages()) expect(page.extractText().text.trim()).not.toBe('');
+});
 afterEach(async () => {
   for (const m of instances.splice(0)) await m.dispose();
 });

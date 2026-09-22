@@ -123,13 +123,13 @@ function block(n: DocumentNode): any {
     case 'paragraph':
       return {
         text: inline(n.content).length ? inline(n.content) : ' ',
-        ...(n.attrs?.pageBreakBefore ? { pageBreak: 'before' } : {}),
+        ...(n.attrs?.pageBreakBefore ? { style: 'pageBreakBefore' } : {}),
         margin: [0, 0, 0, 8],
       };
     case 'heading':
       return {
         text: inline(n.content),
-        ...(n.attrs?.pageBreakBefore ? { pageBreak: 'before' } : {}),
+        ...(n.attrs?.pageBreakBefore ? { style: 'pageBreakBefore' } : {}),
         fontSize: [24, 18, 14][n.attrs!.level - 1],
         bold: true,
         margin: [0, 12, 0, 8],
@@ -178,6 +178,11 @@ export async function renderDocument(source: DocumentNode, title: string) {
         pageSize: 'A4',
         pageMargins: [48, 48, 48, 48],
         defaultStyle: { font: 'Roboto', fontSize: 11, lineHeight: 1.25 },
+        styles: { pageBreakBefore: {} },
+        // A paragraph's bottom margin can already advance to the next page.
+        // Starting a section there must not insert an extra empty page.
+        pageBreakBefore: (node: any) =>
+          node.style === 'pageBreakBefore' && node.startPosition.top > 48.1,
         content: source.content?.map(block) || [{ text: ' ' }],
       })
       .getBuffer(),
