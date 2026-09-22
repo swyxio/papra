@@ -1,5 +1,6 @@
 import { getHttpErrorMessage } from '@/modules/shared/http/http-errors';
-import { Editor, type JSONContent } from '@tiptap/core';
+import { Editor, Extension } from '@tiptap/core';
+import type { JSONContent } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import { TableKit } from '@tiptap/extension-table';
 import { A, useNavigate, useParams } from '@solidjs/router';
@@ -15,7 +16,28 @@ import {
 import { Button } from '@/modules/ui/components/button';
 import { apiClient } from '@/modules/shared/http/api-client';
 import './editor.css';
+import { fillTemplate } from './document-templates';
+import type { DocumentTemplate, TemplateSummary } from './document-templates';
+
 const randomKey = () => crypto.randomUUID().replaceAll('-', '');
+const PageBreaks = Extension.create({
+  name: 'pageBreaks',
+  addGlobalAttributes() {
+    return [
+      {
+        types: ['paragraph', 'heading'],
+        attributes: {
+          pageBreakBefore: {
+            default: false,
+            parseHTML: (element) => element.getAttribute('data-page-break-before') === 'true',
+            renderHTML: (attributes) =>
+              attributes.pageBreakBefore ? { 'data-page-break-before': 'true' } : {},
+          },
+        },
+      },
+    ];
+  },
+});
 const paragraph = (text: string): JSONContent => ({
   type: 'paragraph',
   content: text ? [{ type: 'text', text }] : [],
@@ -90,6 +112,7 @@ export function NativeEditor(props: {
       extensions: [
         StarterKit.configure({ heading: { levels: [1, 2, 3] }, codeBlock: false, link: false }),
         TableKit.configure({ table: { resizable: false } }),
+        PageBreaks,
       ],
       content: props.source,
       editable: props.editable !== false,
@@ -111,6 +134,18 @@ export function NativeEditor(props: {
     ['Heading', () => editor?.chain().focus().toggleHeading({ level: 2 }).run()],
     ['Bullets', () => editor?.chain().focus().toggleBulletList().run()],
     ['Numbered list', () => editor?.chain().focus().toggleOrderedList().run()],
+    [
+      'Page break',
+      () => {
+        if (!editor) return;
+        const type = editor.isActive('heading') ? 'heading' : 'paragraph';
+        editor
+          .chain()
+          .focus()
+          .updateAttributes(type, { pageBreakBefore: !editor.getAttributes(type).pageBreakBefore })
+          .run();
+      },
+    ],
     [
       'Insert table',
       () => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
@@ -138,7 +173,12 @@ export function NativeEditor(props: {
           </For>
         </div>
       </Show>
-      <div class="min-h-96 p-6 md:p-12" ref={element} />
+      <div
+        class="min-h-96 p-6 md:p-12"
+        ref={(el) => {
+          element = el;
+        }}
+      />
     </div>
   );
 }
@@ -150,6 +190,25 @@ export function NewDocumentPage() {
     [template, setTemplate] = createSignal('blank'),
     [busy, setBusy] = createSignal(false),
     [error, setError] = createSignal('');
+  const templateBase = `/api/organizations/${params.organizationId}/document-templates`;
+  const [catalog] = createResource(async () =>
+    apiClient<{ templates: TemplateSummary[] }>({ path: templateBase }),
+  );
+  const [selectedTemplate, { refetch: reloadTemplate }] = createResource(
+    () => (template().startsWith('atlas:') ? template().slice(6) : false),
+    async (id) => apiClient<DocumentTemplate>({ path: `${templateBase}/${id}` }),
+  );
+  const [values, setValues] = createSignal<Record<string, string>>({});
+  const [preview, setPreview] = createSignal(false);
+  function selectTemplate(id: string) {
+    setTemplate(id);
+    setValues({});
+    setPreview(false);
+    const title = id.startsWith('atlas:')
+      ? catalog()?.templates.find((t) => t.id === id.slice(6))?.name
+      : undefined;
+    if (title) setName(title);
+  }
   async function create() {
     setBusy(true);
     setError('');
@@ -157,7 +216,13 @@ export function NewDocumentPage() {
       const result = await apiClient<{ documentId: string }>({
         path: `/api/organizations/${params.organizationId}/authored-documents`,
         method: 'POST',
-        body: { key, name: name(), source: templates.find((t) => t.id === template())!.source },
+        body: {
+          key,
+          name: name(),
+          source: template().startsWith('atlas:')
+            ? fillTemplate(selectedTemplate()!, values())
+            : templates.find((t) => t.id === template())!.source,
+        },
       });
       navigate(`/organizations/${params.organizationId}/documents/${result.documentId}/editor`);
     } catch (e) {
@@ -167,7 +232,7 @@ export function NewDocumentPage() {
     }
   }
   return (
-    <div class="max-w-xl mx-auto p-6">
+    <div class="max-w-3xl mx-auto p-6">
       <A class="text-sm underline" href={`/organizations/${params.organizationId}/documents`}>
         ← Documents
       </A>
@@ -185,11 +250,93 @@ export function NewDocumentPage() {
         <select
           class="block w-full border rounded p-2 my-2 bg-background"
           value={template()}
-          onChange={(e) => setTemplate(e.currentTarget.value)}
+          onChange={(e) => selectTemplate(e.currentTarget.value)}
         >
           <For each={templates}>{(t) => <option value={t.id}>{t.name}</option>}</For>
+          <optgroup label="Stripe Atlas agreements">
+            <For each={catalog()?.templates}>
+              {(t) => <option value={`atlas:${t.id}`}>{t.name}</option>}
+            </For>
+          </optgroup>
         </select>
       </label>
+      <Show when={catalog.error}>
+        <p role="alert" class="text-red-600 my-3">
+          Could not load your agreement templates.{' '}
+          <button class="underline" onClick={() => location.reload()}>
+            Retry
+          </button>
+        </p>
+      </Show>
+      <Show when={template().startsWith('atlas:')}>
+        <Show when={selectedTemplate.loading}>
+          <p class="my-4" role="status">
+            Loading agreement…
+          </p>
+        </Show>
+        <Show when={selectedTemplate.error}>
+          <p role="alert" class="my-4 text-red-600">
+            Could not load this agreement.{' '}
+            <button class="underline" onClick={() => void reloadTemplate()}>
+              Retry
+            </button>
+          </p>
+        </Show>
+        <Show when={selectedTemplate()}>
+          {(selected) => (
+            <>
+              <div class="my-4 flex flex-wrap gap-4 text-sm">
+                <a class="underline" href={`${templateBase}/${selected().id}/original`}>
+                  Download original .docx
+                </a>
+                <a class="underline" target="_blank" rel="noreferrer" href={selected().url}>
+                  Atlas source
+                </a>
+                <span class="text-muted-foreground">Imported {selected().preparedAt}</span>
+              </div>
+              <p class="text-sm text-muted-foreground mb-4">
+                Fill common details below, then edit the full agreement. Blank fields keep their
+                original placeholders. Review optional clauses and attachments in the editor before
+                requesting signatures.
+              </p>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4 my-4">
+                <For each={selected().fields}>
+                  {(field) => (
+                    <label class="block text-sm break-words">
+                      {field.label}
+                      <input
+                        class="block w-full border rounded p-2 mt-2 bg-background"
+                        value={values()[field.id] ?? ''}
+                        placeholder={field.original}
+                        onInput={(e) => {
+                          setValues({ ...values(), [field.id]: e.currentTarget.value });
+                          setPreview(false);
+                        }}
+                      />
+                    </label>
+                  )}
+                </For>
+              </div>
+              <details class="my-4 border rounded p-3">
+                <summary class="cursor-pointer text-sm">Source guidance and drafting notes</summary>
+                <div class="whitespace-pre-wrap text-sm mt-3 max-h-96 overflow-auto">
+                  {selected().guidance}
+                </div>
+              </details>
+              <button class="text-sm underline my-3" onClick={() => setPreview(!preview())}>
+                {preview() ? 'Hide preview' : 'Preview filled agreement'}
+              </button>
+              <Show when={preview()}>
+                <NativeEditor
+                  source={fillTemplate(selected(), values())}
+                  editable={false}
+                  onChange={() => {}}
+                />
+              </Show>
+            </>
+          )}
+        </Show>
+      </Show>
       <p class="text-sm text-muted-foreground my-4">
         Edit text and tables in Drive. Saving creates a PDF version ready for signing.
       </p>
@@ -198,7 +345,15 @@ export function NewDocumentPage() {
           {error()}
         </p>
       </Show>
-      <Button disabled={busy() || !name().trim()} onClick={() => void create()}>
+      <Button
+        disabled={
+          busy() ||
+          !name().trim() ||
+          (template().startsWith('atlas:') &&
+            (selectedTemplate.loading || !!selectedTemplate.error || !selectedTemplate()))
+        }
+        onClick={() => void create()}
+      >
         {busy() ? 'Creating…' : 'Create document'}
       </Button>
     </div>
@@ -220,7 +375,7 @@ export function DocumentEditorPage() {
     lockKey = `drive-editor:${params.documentId}`,
     token = sessionStorage.getItem(lockKey) || randomKey();
   sessionStorage.setItem(lockKey, token);
-  const [data] = createResource(() => apiClient<EditorData>({ path: base }));
+  const [data] = createResource(async () => apiClient<EditorData>({ path: base }));
   const [source, setSource] = createSignal<JSONContent>(),
     [version, setVersion] = createSignal(''),
     [dirty, setDirty] = createSignal(false),
@@ -376,7 +531,7 @@ export function DocumentEditorPage() {
   );
 }
 export function NativeDocumentAction(props: { organizationId: string; documentId: string }) {
-  const [data] = createResource(() =>
+  const [data] = createResource(async () =>
     apiClient<EditorData>({
       path: `/api/organizations/${props.organizationId}/documents/${props.documentId}/editor`,
     }),

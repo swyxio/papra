@@ -17,6 +17,7 @@ import { registerAuthoringRoutes } from './authoring';
 import { registerGoogleDocumentRoutes } from './google-docs';
 import { registerSigningRoutes, processSigning, repairSigning } from './signing';
 import { pageMetadata, rewritePageMetadata } from './page-metadata';
+import { registerTemplateRoutes } from './templates';
 
 export { ImageProcessorContainer, ContainerProxy } from '../native/container';
 export { MetadataBackupWorkflow } from './backup-workflow';
@@ -113,6 +114,7 @@ registerAutomationRoutes(app);
 registerSearchRoutes(app);
 registerSigningRoutes(app);
 registerAuthoringRoutes(app);
+registerTemplateRoutes(app);
 registerGoogleDocumentRoutes(app);
 registerReviewRoutes(app);
 app.all('/api/*', (c) => c.json({ message: 'API route not found' }, 404));
