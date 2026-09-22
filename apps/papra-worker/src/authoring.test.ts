@@ -34,11 +34,12 @@ test('a signature section does not add a blank page at a natural page boundary',
     content: [
       {
         type: 'paragraph',
-        content: [{ type: 'text', text: Array(46).fill('Agreement terms').join('\n') }],
+        // 42 lines reach the page boundary with the document's current leading.
+        content: [{ type: 'text', text: Array(42).fill('Agreement terms').join('\n') }],
       },
       {
-        type: 'paragraph',
-        attrs: { pageBreakBefore: true },
+        type: 'heading',
+        attrs: { pageBreakBefore: true, level: 2 },
         content: [{ type: 'text', text: 'Signature page' }],
       },
     ],

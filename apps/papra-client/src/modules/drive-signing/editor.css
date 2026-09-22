@@ -4,24 +4,43 @@
   line-height: 1.6;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 15px;
+  color: #263244;
 }
 .native-document .tiptap p {
-  margin: 0.5rem 0;
+  margin: 0 0 1rem;
 }
 .native-document .tiptap h1 {
-  font-size: 2rem;
+  font-size: 1.8rem;
   font-weight: 700;
-  margin: 1rem 0;
+  margin: 0.6rem 0 1.5rem;
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
 }
 .native-document .tiptap h2 {
-  font-size: 1.5rem;
-  font-weight: 700;
-  margin: 1rem 0;
-}
-.native-document .tiptap h3 {
   font-size: 1.2rem;
   font-weight: 700;
-  margin: 1rem 0;
+  margin: 1.8rem 0 0.75rem;
+  line-height: 1.35;
+}
+.native-document .tiptap h3 {
+  font-size: 1rem;
+  font-weight: 700;
+  margin: 1.5rem 0 0.5rem;
+  line-height: 1.4;
+  color: #111827;
+}
+.native-document .tiptap > :first-child {
+  margin-top: 0;
+}
+.native-document .tiptap h1 + p {
+  margin-top: 0;
+}
+.native-document .tiptap td p,
+.native-document .tiptap th p {
+  margin-bottom: 0.35rem;
 }
 .native-document .tiptap ul {
   list-style: disc;

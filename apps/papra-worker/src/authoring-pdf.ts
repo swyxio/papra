@@ -124,15 +124,20 @@ function block(n: DocumentNode): any {
       return {
         text: inline(n.content).length ? inline(n.content) : ' ',
         ...(n.attrs?.pageBreakBefore ? { style: 'pageBreakBefore' } : {}),
-        margin: [0, 0, 0, 8],
+        margin: [0, 0, 0, 12],
       };
     case 'heading':
       return {
-        text: inline(n.content),
+        text: inline(n.content).map((run) =>
+          typeof run === 'string' ? run : { ...run, bold: true },
+        ),
+        headlineLevel: n.attrs!.level,
         ...(n.attrs?.pageBreakBefore ? { style: 'pageBreakBefore' } : {}),
-        fontSize: [24, 18, 14][n.attrs!.level - 1],
+        fontSize: [24, 15, 12][n.attrs!.level - 1],
         bold: true,
-        margin: [0, 12, 0, 8],
+        color: '#111827',
+        lineHeight: 1.2,
+        margin: [0, n.attrs!.level === 1 ? 4 : 18, 0, n.attrs!.level === 1 ? 18 : 6],
       };
     case 'bulletList':
     case 'orderedList':
@@ -174,15 +179,27 @@ export async function renderDocument(source: DocumentNode, title: string) {
   return new Uint8Array(
     await pdfmake
       .createPdf({
-        info: { title, creator: 'swyx Drive' },
+        info: { title, creator: 'SwyxDrive' },
         pageSize: 'A4',
         pageMargins: [48, 48, 48, 48],
-        defaultStyle: { font: 'Roboto', fontSize: 11, lineHeight: 1.25 },
+        defaultStyle: { font: 'Roboto', fontSize: 11, lineHeight: 1.35, color: '#263244' },
+        footer: (page: number, pages: number) => ({
+          text: `${page} / ${pages}`,
+          alignment: 'right',
+          margin: [48, 12, 48, 0],
+          fontSize: 8,
+          color: '#64748b',
+        }),
         styles: { pageBreakBefore: {} },
         // A paragraph's bottom margin can already advance to the next page.
         // Starting a section there must not insert an extra empty page.
-        pageBreakBefore: (node: any) =>
-          node.style === 'pageBreakBefore' && node.startPosition.top > 48.1,
+        pageBreakBefore: (node: any, container: any) =>
+          (node.style === 'pageBreakBefore' &&
+            node.startPosition.top >
+              48.1 + (node.headlineLevel ? (node.headlineLevel === 1 ? 4 : 18) : 0)) ||
+          (node.headlineLevel &&
+            container.getFollowingNodesOnPage().length === 0 &&
+            container.getNodesOnNextPage().length > 0),
         content: source.content?.map(block) || [{ text: ' ' }],
       })
       .getBuffer(),

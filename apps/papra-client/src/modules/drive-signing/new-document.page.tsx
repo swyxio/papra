@@ -10,12 +10,25 @@ import type { DocumentTemplate, TemplateSummary } from './document-templates';
 import { documentStarters } from './document-starters';
 import { NativeEditor } from './editor.pages';
 import { describeTemplate } from './template-descriptions';
+import { useQuery } from '@tanstack/solid-query';
+import { fetchOrganization } from '@/modules/organizations/organizations.services';
+import { useCurrentUser } from '@/modules/users/composables/useCurrentUser';
+import {
+  companyNameForOrganization,
+  presentTemplate,
+  templateDefaults,
+} from './template-presentation';
 import './document-studio.css';
 
 export function NewDocumentPage() {
   const params = useParams(),
     navigate = useNavigate();
   const key = crypto.randomUUID().replaceAll('-', '');
+  const organization = useQuery(() => ({
+    queryKey: ['organizations', params.organizationId],
+    queryFn: async () => fetchOrganization({ organizationId: params.organizationId }),
+  }));
+  const { user } = useCurrentUser();
   const [name, setName] = createSignal('Untitled document');
   const [customName, setCustomName] = createSignal(false);
   const [template, setTemplate] = createSignal('blank');
@@ -32,7 +45,8 @@ export function NewDocumentPage() {
   );
   const [selected, { refetch: reloadTemplate }] = createResource(
     () => (template().startsWith('atlas:') ? template().slice(6) : false),
-    async (id) => apiClient<DocumentTemplate>({ path: `${templateBase}/${id}` }),
+    async (id) =>
+      presentTemplate(await apiClient<DocumentTemplate>({ path: `${templateBase}/${id}` })),
   );
   const choices = createMemo(() => [
     ...documentStarters.map((t) => ({ id: t.id, name: t.name, atlas: false })),
@@ -47,9 +61,18 @@ export function NewDocumentPage() {
   const isAtlas = () => template().startsWith('atlas:');
   const ready = () =>
     !isAtlas() || (!selected.loading && !selected.error && selected()?.id === template().slice(6));
+  const defaults = () =>
+    isAtlas() && ready()
+      ? templateDefaults(
+          selected()!,
+          companyNameForOrganization(organization.data?.organization.name ?? ''),
+          user.name,
+        )
+      : {};
+  const fieldValue = (id: string) => values()[id] ?? defaults()[id] ?? '';
   const source = createMemo(() =>
     isAtlas() && ready()
-      ? fillTemplate(selected()!, values())
+      ? fillTemplate(selected()!, { ...defaults(), ...values() })
       : documentStarters.find((t) => t.id === template())?.source,
   );
   function choose(id: string) {
@@ -213,16 +236,28 @@ export function NewDocumentPage() {
             </div>
             <For each={t().fields}>
               {(field) => (
-                <label class="block text-sm break-words">
-                  {field.label}
-                  <input
-                    class="studio-input mt-2"
-                    value={values()[field.id] ?? ''}
-                    placeholder={field.original}
-                    disabled={busy()}
-                    onInput={(e) => setValues({ ...values(), [field.id]: e.currentTarget.value })}
-                  />
-                </label>
+                <div class="text-sm break-words">
+                  <label class="block">
+                    {field.label}
+                    <input
+                      class="studio-input mt-2"
+                      value={fieldValue(field.id)}
+                      placeholder={field.original}
+                      disabled={busy()}
+                      onInput={(e) => setValues({ ...values(), [field.id]: e.currentTarget.value })}
+                    />
+                  </label>
+                  <Show when={/^(employee-name|company-signatory-name)$/.test(field.id)}>
+                    <button
+                      type="button"
+                      class="text-xs text-primary underline mt-2"
+                      disabled={busy()}
+                      onClick={() => setValues({ ...values(), [field.id]: user.name })}
+                    >
+                      Use my name
+                    </button>
+                  </Show>
+                </div>
               )}
             </For>
             <section class="border-t pt-4 space-y-3 text-sm">

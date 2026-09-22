@@ -34,15 +34,17 @@
   border-radius: 3px;
   box-shadow: 0 3px 16px #0002;
   min-height: 100%;
+  max-width: 800px;
+  margin: auto;
 }
 .studio-paper-scroll .native-document > div {
-  padding: 30px;
+  padding: 36px;
 }
 .studio-paper-scroll .tiptap {
-  font-size: 13px;
+  font-size: 14px;
 }
 .studio-paper-scroll .tiptap h1 {
-  font-size: 24px;
+  font-size: 26px;
 }
 .studio-rail,
 .studio-inspector {
@@ -130,6 +132,11 @@
   display: none;
 }
 @container studio (min-width: 620px) {
+  .studio-cancel {
+    display: inline-block;
+  }
+}
+@container studio (min-width: 740px) {
   .studio-workspace {
     grid-template-columns: minmax(0, 1fr) 280px;
   }
@@ -138,9 +145,6 @@
   }
   .studio-compact-controls .studio-details-button {
     display: none;
-  }
-  .studio-cancel {
-    display: inline-block;
   }
 }
 @container studio (min-width: 980px) {
