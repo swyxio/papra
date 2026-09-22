@@ -316,7 +316,7 @@ export const DocumentsPage: Component = () => {
           variant="outline"
           href={`/organizations/${params.organizationId}/documents/new`}
         >
-          Create document
+          Create doc from template
         </Button>
         <DriveExport organizationId={params.organizationId} />
       </div>

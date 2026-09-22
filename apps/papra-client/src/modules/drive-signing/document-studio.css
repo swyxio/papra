@@ -1,0 +1,200 @@
+.document-studio {
+  container: studio / inline-size;
+  height: calc(100dvh - 68px);
+  min-height: 480px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 24px;
+}
+.studio-heading {
+  flex-shrink: 0;
+}
+.studio-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+}
+.studio-preview {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.studio-paper-scroll {
+  overflow: auto;
+  padding: 16px;
+  flex: 1;
+  min-height: 0;
+}
+.studio-paper-scroll .native-document {
+  border-radius: 3px;
+  box-shadow: 0 3px 16px #0002;
+  min-height: 100%;
+}
+.studio-paper-scroll .native-document > div {
+  padding: 30px;
+}
+.studio-paper-scroll .tiptap {
+  font-size: 13px;
+}
+.studio-paper-scroll .tiptap h1 {
+  font-size: 24px;
+}
+.studio-rail,
+.studio-inspector {
+  display: none;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+}
+.studio-template {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 12px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  margin-bottom: 6px;
+}
+.studio-template:hover {
+  background: hsl(var(--accent));
+}
+.studio-template[aria-pressed='true'] {
+  border-color: hsl(var(--primary));
+  background: hsl(var(--primary) / 0.07);
+}
+.studio-template:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+.studio-template > span:last-child > span:last-child {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.studio-input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid hsl(var(--input));
+  border-radius: 6px;
+  background: hsl(var(--background));
+  padding: 10px 12px;
+  font-size: 14px;
+}
+.studio-input:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+.studio-variant {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+}
+.studio-footer {
+  padding: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.studio-compact-controls {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.studio-sheet {
+  display: flex;
+  flex-direction: column;
+  max-height: 55dvh;
+  gap: 0;
+  padding-bottom: max(24px, env(safe-area-inset-bottom));
+}
+.studio-sheet > div:first-child {
+  flex-shrink: 0;
+  align-items: center;
+}
+.studio-footer-note,
+.studio-cancel {
+  display: none;
+}
+@container studio (min-width: 620px) {
+  .studio-workspace {
+    grid-template-columns: minmax(0, 1fr) 280px;
+  }
+  .studio-inspector {
+    display: block;
+  }
+  .studio-compact-controls .studio-details-button {
+    display: none;
+  }
+  .studio-cancel {
+    display: inline-block;
+  }
+}
+@container studio (min-width: 980px) {
+  .studio-workspace {
+    grid-template-columns: 220px minmax(0, 1fr) 290px;
+  }
+  .studio-rail {
+    display: block;
+  }
+  .studio-compact-controls {
+    display: none;
+  }
+  .studio-footer-note {
+    display: block;
+  }
+}
+.studio-expanded .studio-workspace {
+  grid-template-columns: minmax(0, 1fr);
+}
+.studio-expanded .studio-rail,
+.studio-expanded .studio-inspector {
+  display: none;
+}
+.studio-expanded .studio-compact-controls,
+.studio-expanded .studio-details-button {
+  display: flex;
+}
+.studio-expanded .native-document {
+  max-width: 800px;
+  margin: auto;
+}
+@media (max-width: 600px) {
+  .document-studio {
+    padding: 16px;
+    gap: 12px;
+  }
+  .studio-heading h1 {
+    font-size: 21px;
+  }
+  .studio-paper-scroll {
+    padding: 10px;
+  }
+  .studio-paper-scroll .native-document > div {
+    padding: 20px;
+  }
+  .studio-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .studio-footer > div:last-child,
+  .studio-footer > div:last-child > button {
+    width: 100%;
+  }
+  .studio-footer > div:first-child:empty {
+    display: none;
+  }
+}

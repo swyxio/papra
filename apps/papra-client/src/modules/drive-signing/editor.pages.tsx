@@ -16,8 +16,6 @@ import {
 import { Button } from '@/modules/ui/components/button';
 import { apiClient } from '@/modules/shared/http/api-client';
 import './editor.css';
-import { fillTemplate } from './document-templates';
-import type { DocumentTemplate, TemplateSummary } from './document-templates';
 
 const randomKey = () => crypto.randomUUID().replaceAll('-', '');
 const PageBreaks = Extension.create({
@@ -38,67 +36,6 @@ const PageBreaks = Extension.create({
     ];
   },
 });
-const paragraph = (text: string): JSONContent => ({
-  type: 'paragraph',
-  content: text ? [{ type: 'text', text }] : [],
-});
-const heading = (text: string): JSONContent => ({
-  type: 'heading',
-  attrs: { level: 1 },
-  content: [{ type: 'text', text }],
-});
-const cell = (text: string, header = false): JSONContent => ({
-  type: header ? 'tableHeader' : 'tableCell',
-  attrs: { colspan: 1, rowspan: 1 },
-  content: [paragraph(text)],
-});
-const templates: { id: string; name: string; source: JSONContent }[] = [
-  { id: 'blank', name: 'Blank document', source: { type: 'doc', content: [paragraph('')] } },
-  {
-    id: 'invoice',
-    name: 'Invoice',
-    source: {
-      type: 'doc',
-      content: [
-        heading('Invoice'),
-        paragraph('Invoice number: [number]'),
-        paragraph('From: [your name or company]'),
-        paragraph('Bill to: [customer]'),
-        paragraph('Date: [date] · Due: [due date]'),
-        {
-          type: 'table',
-          content: [
-            {
-              type: 'tableRow',
-              content: [cell('Description', true), cell('Quantity', true), cell('Amount', true)],
-            },
-            { type: 'tableRow', content: [cell('[Service or item]'), cell('1'), cell('[Amount]')] },
-            { type: 'tableRow', content: [cell('Total'), cell(''), cell('[Total]')] },
-          ],
-        },
-        paragraph('Payment instructions: [details]'),
-        paragraph('Notes: [optional notes]'),
-      ],
-    },
-  },
-  {
-    id: 'agreement',
-    name: 'Agreement outline',
-    source: {
-      type: 'doc',
-      content: [
-        heading('Agreement'),
-        paragraph('Draft — replace the placeholders and review the terms before sending.'),
-        paragraph('Parties: [party one] and [party two]'),
-        { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'Scope' }] },
-        paragraph('[Describe the work, deliverables, and responsibilities.]'),
-        { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'Terms' }] },
-        paragraph('[Add dates, payment terms, and other agreed conditions.]'),
-        paragraph('Signatures:'),
-      ],
-    },
-  },
-];
 export function NativeEditor(props: {
   source: JSONContent;
   onChange: (source: JSONContent) => void;
@@ -122,8 +59,13 @@ export function NativeEditor(props: {
           'aria-label': 'Document content',
           'role': 'textbox',
           'aria-multiline': 'true',
+          'aria-readonly': String(props.editable === false),
         },
       },
+    });
+    createEffect(() => {
+      if (props.editable === false)
+        editor?.commands.setContent(props.source, { emitUpdate: false });
     });
   });
   createEffect(() => editor?.setEditable(props.editable !== false, false));
@@ -179,185 +121,6 @@ export function NativeEditor(props: {
           element = el;
         }}
       />
-    </div>
-  );
-}
-export function NewDocumentPage() {
-  const params = useParams(),
-    navigate = useNavigate();
-  const key = randomKey();
-  const [name, setName] = createSignal('Untitled document'),
-    [template, setTemplate] = createSignal('blank'),
-    [busy, setBusy] = createSignal(false),
-    [error, setError] = createSignal('');
-  const templateBase = `/api/organizations/${params.organizationId}/document-templates`;
-  const [catalog, { refetch: reloadCatalog }] = createResource(async () =>
-    apiClient<{ templates: TemplateSummary[] }>({ path: templateBase }),
-  );
-  const [selectedTemplate, { refetch: reloadTemplate }] = createResource(
-    () => (template().startsWith('atlas:') ? template().slice(6) : false),
-    async (id) => apiClient<DocumentTemplate>({ path: `${templateBase}/${id}` }),
-  );
-  const [values, setValues] = createSignal<Record<string, string>>({});
-  const [preview, setPreview] = createSignal(false);
-  function selectTemplate(id: string) {
-    setTemplate(id);
-    setValues({});
-    setPreview(false);
-    const title = id.startsWith('atlas:')
-      ? catalog()?.templates.find((t) => t.id === id.slice(6))?.name
-      : undefined;
-    if (title) setName(title);
-  }
-  async function create() {
-    setBusy(true);
-    setError('');
-    try {
-      const result = await apiClient<{ documentId: string }>({
-        path: `/api/organizations/${params.organizationId}/authored-documents`,
-        method: 'POST',
-        body: {
-          key,
-          name: name(),
-          source: template().startsWith('atlas:')
-            ? fillTemplate(selectedTemplate()!, values())
-            : templates.find((t) => t.id === template())!.source,
-        },
-      });
-      navigate(`/organizations/${params.organizationId}/documents/${result.documentId}/editor`);
-    } catch (e) {
-      setError(getHttpErrorMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <div class="max-w-3xl mx-auto p-6">
-      <A class="text-sm underline" href={`/organizations/${params.organizationId}/documents`}>
-        ← Documents
-      </A>
-      <h1 class="text-2xl font-semibold my-6">Create a document</h1>
-      <label class="block mb-4">
-        Document name
-        <input
-          class="block w-full border rounded p-2 mt-2 bg-background"
-          value={name()}
-          onInput={(e) => setName(e.currentTarget.value)}
-        />
-      </label>
-      <label>
-        Start with
-        <select
-          class="block w-full border rounded p-2 my-2 bg-background"
-          value={template()}
-          onChange={(e) => selectTemplate(e.currentTarget.value)}
-        >
-          <For each={templates}>{(t) => <option value={t.id}>{t.name}</option>}</For>
-          <optgroup label="Stripe Atlas agreements">
-            <For each={catalog()?.templates}>
-              {(t) => <option value={`atlas:${t.id}`}>{t.name}</option>}
-            </For>
-          </optgroup>
-        </select>
-      </label>
-      <Show when={catalog.error}>
-        <p role="alert" class="text-red-600 my-3">
-          Could not load your agreement templates.{' '}
-          <button class="underline" onClick={() => void reloadCatalog()}>
-            Retry
-          </button>
-        </p>
-      </Show>
-      <Show when={template().startsWith('atlas:')}>
-        <Show when={selectedTemplate.loading}>
-          <p class="my-4" role="status">
-            Loading agreement…
-          </p>
-        </Show>
-        <Show when={selectedTemplate.error}>
-          <p role="alert" class="my-4 text-red-600">
-            Could not load this agreement.{' '}
-            <button class="underline" onClick={() => void reloadTemplate()}>
-              Retry
-            </button>
-          </p>
-        </Show>
-        <Show when={selectedTemplate()}>
-          {(selected) => (
-            <>
-              <div class="my-4 flex flex-wrap gap-4 text-sm">
-                <a class="underline" href={`${templateBase}/${selected().id}/original`}>
-                  Download original .docx
-                </a>
-                <a class="underline" target="_blank" rel="noreferrer" href={selected().url}>
-                  Atlas source
-                </a>
-                <span class="text-muted-foreground">Imported {selected().preparedAt}</span>
-              </div>
-              <p class="text-sm text-muted-foreground mb-4">
-                Fill common details below, then edit the full agreement. Blank fields keep their
-                original placeholders. Review optional clauses and attachments in the editor before
-                requesting signatures.
-              </p>
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-4 my-4">
-                <For each={selected().fields}>
-                  {(field) => (
-                    <label class="block text-sm break-words">
-                      {field.label}
-                      <input
-                        class="block w-full border rounded p-2 mt-2 bg-background"
-                        value={values()[field.id] ?? ''}
-                        placeholder={field.original}
-                        onInput={(e) => {
-                          setValues({ ...values(), [field.id]: e.currentTarget.value });
-                          setPreview(false);
-                        }}
-                      />
-                    </label>
-                  )}
-                </For>
-              </div>
-              <details class="my-4 border rounded p-3">
-                <summary class="cursor-pointer text-sm">Source guidance and drafting notes</summary>
-                <div class="whitespace-pre-wrap text-sm mt-3 max-h-96 overflow-auto">
-                  {selected().guidance}
-                </div>
-              </details>
-              <button class="text-sm underline my-3" onClick={() => setPreview(!preview())}>
-                {preview() ? 'Hide preview' : 'Preview filled agreement'}
-              </button>
-            </>
-          )}
-        </Show>
-      </Show>
-      <p class="text-sm text-muted-foreground my-4">
-        Edit text and tables in Drive. Saving creates a PDF version ready for signing.
-      </p>
-      <Show when={error()}>
-        <p role="alert" class="text-red-600 mb-4">
-          {error()}
-        </p>
-      </Show>
-      <Button
-        disabled={
-          busy() ||
-          !name().trim() ||
-          (template().startsWith('atlas:') &&
-            (selectedTemplate.loading || !!selectedTemplate.error || !selectedTemplate()))
-        }
-        onClick={() => void create()}
-      >
-        {busy() ? 'Creating…' : 'Create document'}
-      </Button>
-      <Show when={template().startsWith('atlas:') && preview() && selectedTemplate()}>
-        <div class="mt-6">
-          <NativeEditor
-            source={fillTemplate(selectedTemplate()!, values())}
-            editable={false}
-            onChange={() => {}}
-          />
-        </div>
-      </Show>
     </div>
   );
 }

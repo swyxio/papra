@@ -53,15 +53,19 @@ export const SidenavLayout: ParentComponent<{
         <props.sideNav />
       </div>
 
-      <div class="flex-1 min-h-0 flex flex-col">
+      <div class="flex-1 min-w-0 min-h-0 flex flex-col">
         {props.topSection && <props.topSection />}
 
         <div class="flex items-center px-6 pt-4">
           <Sheet open={getIsSheetOpen()} onOpenChange={setIsSheetOpen}>
-            <SheetTrigger>
-              <Button variant="ghost" size="icon" class="lg:hidden mr-2">
-                <div class="i-tabler-menu-2 size-6" />
-              </Button>
+            <SheetTrigger
+              as={Button}
+              variant="ghost"
+              size="icon"
+              class="lg:hidden mr-2"
+              aria-label="Open navigation"
+            >
+              <div class="i-tabler-menu-2 size-6" />
             </SheetTrigger>
             <SheetContent side="left" class="bg-card p-0!">
               <props.sideNav />

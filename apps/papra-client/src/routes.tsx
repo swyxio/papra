@@ -1,5 +1,6 @@
+import { NewDocumentPage } from './modules/drive-signing/new-document.page';
 import { PublicReviewPage } from './modules/drive-signing/review.pages';
-import { DocumentEditorPage, NewDocumentPage } from './modules/drive-signing/editor.pages';
+import { DocumentEditorPage } from './modules/drive-signing/editor.pages';
 import type { RouteDefinition } from '@solidjs/router';
 import { Navigate, useParams } from '@solidjs/router';
 import { useQuery } from '@tanstack/solid-query';
@@ -120,6 +121,18 @@ export const routes: RouteDefinition[] = [
                     component: DocumentsPage,
                   },
                   {
+                    path: '/documents/new',
+                    component: NewDocumentPage,
+                  },
+                  {
+                    path: '/documents/:documentId/editor',
+                    component: DocumentEditorPage,
+                  },
+                  {
+                    path: '/documents/:documentId/signing',
+                    component: SigningSetupPage,
+                  },
+                  {
                     path: '/documents/:documentId',
                     component: DocumentPage,
                   },
@@ -160,18 +173,6 @@ export const routes: RouteDefinition[] = [
               {
                 path: '/documents/:documentId/pdf-viewer',
                 component: DocumentPdfViewerPage,
-              },
-              {
-                path: '/documents/new',
-                component: NewDocumentPage,
-              },
-              {
-                path: '/documents/:documentId/editor',
-                component: DocumentEditorPage,
-              },
-              {
-                path: '/documents/:documentId/signing',
-                component: SigningSetupPage,
               },
             ],
           },
