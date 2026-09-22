@@ -43,7 +43,15 @@ test('raw HTML retains sandboxed download bytes and reports preview and integrit
     ),
   ]);
   const body = '<script>fetch("/api/users/me")</script>';
-  const env = { DB, FILES: { get: async () => ({ body, size: body.length }) } } as unknown as Env;
+  const get = vi.fn(async () => ({ body, size: body.length }));
+  const env = {
+    DB,
+    FILES: { get },
+    R2_ENDPOINT: 'https://storage.example.com',
+    R2_BUCKET: 'test',
+    R2_ACCESS_KEY_ID: 'test-key',
+    R2_SECRET_ACCESS_KEY: 'test-secret',
+  } as unknown as Env;
   const identity: Identity = {
     userId: 'u',
     email: 'u@smol.ai',
@@ -64,6 +72,49 @@ test('raw HTML retains sandboxed download bytes and reports preview and integrit
   expect(response.headers.get('Content-Security-Policy')).toBe("sandbox; default-src 'none'");
   expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
   expect(await response.text()).toBe(body);
+  const download = await app.request('/api/organizations/o/documents/d/download', {}, env);
+  expect(download.status).toBe(200);
+  expect(download.headers.get('Location')).toBeNull();
+  expect(download.headers.get('Content-Disposition')).toBe(
+    "attachment; filename*=UTF-8''untrusted.html",
+  );
+  expect(download.headers.get('Cache-Control')).toBe('private, no-store');
+  expect(download.headers.get('Content-Security-Policy')).toBe("sandbox; default-src 'none'");
+  expect(await download.text()).toBe(body);
+  const versionDownload = await app.request(
+    '/api/organizations/o/documents/d/versions/v/download',
+    {},
+    env,
+  );
+  expect(versionDownload.status).toBe(200);
+  expect(versionDownload.headers.get('Location')).toBeNull();
+  expect(versionDownload.headers.get('Content-Disposition')).toBe(
+    "attachment; filename*=UTF-8''untrusted.html",
+  );
+  expect(await versionDownload.text()).toBe(body);
+  expect(
+    (
+      await app.request(
+        '/api/organizations/o/documents/d/versions/not-this-document/download',
+        {},
+        env,
+      )
+    ).status,
+  ).toBe(404);
+  expect((await app.request('/api/organizations/other/documents/d/download', {}, env)).status).toBe(
+    404,
+  );
+  await DB.prepare("UPDATE versions SET size=? WHERE id='v'")
+    .bind(32 * 1024 ** 2 + 1)
+    .run();
+  get.mockClear();
+  for (const path of ['download', 'versions/v/download']) {
+    const large = await app.request(`/api/organizations/o/documents/d/${path}`, {}, env);
+    expect(large.status).toBe(302);
+    expect(large.headers.get('Location')).toMatch(/^https:\/\/storage\.example\.com\/test\//);
+  }
+  expect(get).not.toHaveBeenCalled();
+  await DB.prepare("UPDATE versions SET size=? WHERE id='v'").bind(body.length).run();
   const preview = async () => app.request('/api/organizations/o/documents/d/preview', {}, env);
   expect(await (await preview()).json()).toMatchObject({
     url: null,
@@ -93,6 +144,10 @@ test('raw HTML retains sandboxed download bytes and reports preview and integrit
     integrityStatus: 'failed',
     reason: null,
   });
+  await DB.prepare("UPDATE documents SET is_deleted=1 WHERE id='d'").run();
+  expect((await app.request('/api/organizations/o/documents/d/download', {}, env)).status).toBe(
+    404,
+  );
 });
 
 test('failed purge cancels processing before storage deletion and resumes without the retention delay', async () => {

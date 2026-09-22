@@ -7,6 +7,23 @@ import { enqueueVersion } from './jobs';
 import { keywordPredicate } from './keyword';
 
 const base = '/api/organizations/:org/documents';
+const smallFileLimit = 32 * 1024 ** 2;
+async function downloadBytes(env: Env, key: string, mime: string, name?: string) {
+  const object = await env.FILES.get(key);
+  if (!object) throw error(404, 'File not found');
+  return new Response(object.body, {
+    headers: {
+      'Content-Type': mime,
+      'Content-Length': String(object.size),
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Disposition': name
+        ? `attachment; filename*=UTF-8''${encodeURIComponent(name)}`
+        : 'attachment',
+      'Content-Security-Policy': "sandbox; default-src 'none'",
+    },
+  });
+}
 async function document(
   env: Env,
   user: Identity,
@@ -272,25 +289,16 @@ export function registerDocumentRoutes(app: App) {
     const d = await document(c.env, c.get('identity'), c.req.param('org'), c.req.param('doc'));
     if (d.is_deleted) throw error(404, 'Document is in trash');
     if (!d.current_version_id) throw error(409, 'Convert this Google document to PDF first');
+    if (d.original_size <= smallFileLimit)
+      return downloadBytes(c.env, d.original_storage_key, d.mime_type, d.original_name);
     return c.redirect(await signedDownload(c.env, d.original_storage_key, d.original_name), 302);
   });
   app.get(`${base}/:doc/file`, async (c) => {
     const d = await document(c.env, c.get('identity'), c.req.param('org'), c.req.param('doc'));
     if (d.is_deleted) throw error(404, 'Document is in trash');
     if (!d.current_version_id) throw error(409, 'Convert this Google document to PDF first');
-    if (d.original_size > 32 * 1024 ** 2) throw error(413, 'Use a direct download for large files');
-    const object = await c.env.FILES.get(d.original_storage_key);
-    if (!object) throw error(404, 'File not found');
-    return new Response(object.body, {
-      headers: {
-        'Content-Type': d.mime_type,
-        'Content-Length': String(object.size),
-        'Cache-Control': 'private, no-store',
-        'X-Content-Type-Options': 'nosniff',
-        'Content-Disposition': 'attachment',
-        'Content-Security-Policy': "sandbox; default-src 'none'",
-      },
-    });
+    if (d.original_size > smallFileLimit) throw error(413, 'Use a direct download for large files');
+    return downloadBytes(c.env, d.original_storage_key, d.mime_type);
   });
   app.get(`${base}/:doc/preview`, async (c) => {
     const d = await document(c.env, c.get('identity'), c.req.param('org'), c.req.param('doc'));
@@ -348,7 +356,9 @@ export function registerDocumentRoutes(app: App) {
     if (d.is_deleted) throw error(404, 'Document is in trash');
     return c.json({
       document: await formatDocument(c.env, d),
-      url: d.current_version_id ? await signedDownload(c.env, d.original_storage_key, d.original_name, 3600) : null,
+      url: d.current_version_id
+        ? await signedDownload(c.env, d.original_storage_key, d.original_name, 3600)
+        : null,
     });
   });
   app.get(`${base}/:doc/versions/:version/download`, async (c) => {
@@ -360,6 +370,8 @@ export function registerDocumentRoutes(app: App) {
       d.id,
     );
     if (!v) throw error(404, 'Version not found');
+    if (v.size <= smallFileLimit)
+      return downloadBytes(c.env, v.storage_key, v.mime_type, v.original_name);
     return c.redirect(await signedDownload(c.env, v.storage_key, v.original_name), 302);
   });
   app.post(`${base}/:doc/versions/:version/restore`, async (c) => {
