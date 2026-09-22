@@ -1,6 +1,7 @@
 import type {App,Env,Identity} from './types';
 import {first,error} from './db';
 import {canWriteFolder,ensureOrganizationMember,ensureDocumentAccess,organizationHomeFolderId} from './collaboration';
+import {registerAuthoringExportRoutes} from './authoring-export';
 import {renderDocument,validateSource,sourceText} from './authoring-pdf';
 import {digestBytes,SIGNING_MAX_BYTES} from './signing-pdf';
 import {enqueueVersion} from './jobs';
@@ -16,6 +17,7 @@ async function document(env:Env,user:Identity,org:string,doc:string,mode:'read'|
 }
 function key(value:unknown){if(typeof value!=='string'||!/^[a-f0-9]{32}$/.test(value))throw error(400,'Invalid save key');return value;}
 export function registerAuthoringRoutes(app:App){
+  registerAuthoringExportRoutes(app);
   app.get(base,async c=>{
     const d=await document(c.env,c.get('identity'),c.req.param('org'),c.req.param('doc'));
     const source=await first(c.env,'SELECT * FROM authored_versions WHERE document_id=? ORDER BY (version_id=?) DESC,created_at DESC LIMIT 1',d.id,d.current_version_id);

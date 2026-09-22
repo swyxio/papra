@@ -15,6 +15,8 @@ import {
 } from 'solid-js';
 import { Button } from '@/modules/ui/components/button';
 import { apiClient } from '@/modules/shared/http/api-client';
+import { DocumentExportActions } from './document-export.component';
+import { GoogleDocsSource } from '@/modules/google-docs/google-docs-source.component';
 import './editor.css';
 
 const randomKey = () => crypto.randomUUID().replaceAll('-', '');
@@ -279,6 +281,20 @@ export function DocumentEditorPage() {
                   </button>
                 </div>
               </Show>
+              <DocumentExportActions
+                organizationId={params.organizationId}
+                documentId={params.documentId}
+                name={data()!.name}
+                source={source() || data()!.source}
+                versionId={version() || data()!.versionId}
+                canEdit={!!data()?.canEdit}
+                disabled={busy()}
+                dirty={dirty()}
+              />
+              <GoogleDocsSource
+                organizationId={params.organizationId}
+                documentId={params.documentId}
+              />
               <NativeEditor
                 source={data()!.source}
                 editable={!!data()?.canEdit && locked() && !busy()}
