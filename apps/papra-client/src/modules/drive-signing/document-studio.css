@@ -34,17 +34,6 @@
   border-radius: 3px;
   box-shadow: 0 3px 16px #0002;
   min-height: 100%;
-  max-width: 800px;
-  margin: auto;
-}
-.studio-paper-scroll .native-document > div {
-  padding: 36px;
-}
-.studio-paper-scroll .tiptap {
-  font-size: 14px;
-}
-.studio-paper-scroll .tiptap h1 {
-  font-size: 26px;
 }
 .studio-rail,
 .studio-inspector {
@@ -172,10 +161,6 @@
 .studio-expanded .studio-details-button {
   display: flex;
 }
-.studio-expanded .native-document {
-  max-width: 800px;
-  margin: auto;
-}
 @media (max-width: 600px) {
   .document-studio {
     padding: 16px;
@@ -186,9 +171,6 @@
   }
   .studio-paper-scroll {
     padding: 10px;
-  }
-  .studio-paper-scroll .native-document > div {
-    padding: 20px;
   }
   .studio-footer {
     flex-direction: column;

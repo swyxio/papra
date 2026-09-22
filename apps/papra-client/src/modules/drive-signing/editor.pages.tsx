@@ -116,7 +116,7 @@ export function NativeEditor(props: {
         </div>
       </Show>
       <div
-        class="min-h-96 p-6 md:p-12"
+        class="native-document-body"
         ref={(el) => {
           element = el;
         }}
