@@ -4,7 +4,6 @@ import { createSignal, onCleanup, onMount, Show } from 'solid-js';
 import { Button } from '@/modules/ui/components/button';
 import { apiClient } from '@/modules/shared/http/api-client';
 import { getHttpErrorMessage } from '@/modules/shared/http/http-errors';
-import { useCurrentUser } from '@/modules/users/composables/useCurrentUser';
 import {
   fetchGoogleDocumentSource,
   fetchGooglePickerConfig,
@@ -22,7 +21,6 @@ export function DocumentExportActions(props: {
   disabled: boolean;
   dirty: boolean;
 }) {
-  const { user } = useCurrentUser();
   const client = useQueryClient();
   const queryKey = () => [
     'organizations',
@@ -49,7 +47,7 @@ export function DocumentExportActions(props: {
   async function prepare() {
     setSetupError('');
     try {
-      const ready = await prepareGoogleAuthorization(await fetchGooglePickerConfig(), user.email);
+      const ready = await prepareGoogleAuthorization(await fetchGooglePickerConfig());
       if (!disposed) setAuthorize(() => ready);
     } catch (e) {
       if (!disposed) setSetupError(getHttpErrorMessage(e));

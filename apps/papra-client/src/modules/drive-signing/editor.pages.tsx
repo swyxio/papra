@@ -296,7 +296,7 @@ export function DocumentEditorPage() {
                 documentId={params.documentId}
               />
               <NativeEditor
-                source={data()!.source}
+                source={source() || data()!.source}
                 editable={!!data()?.canEdit && locked() && !busy()}
                 onChange={(value) => {
                   setSource(value);
