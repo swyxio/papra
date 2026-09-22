@@ -623,6 +623,11 @@ export function PublicSigningPage() {
   return (
     <main class="max-w-7xl mx-auto p-4 md:p-8">
       <p class="text-sm text-muted-foreground">SwyxDrive · Document signing</p>
+      <Show when={data.loading && !data.latest}>
+        <p role="status" class="my-6">
+          Loading your signing request…
+        </p>
+      </Show>
       <Show when={loadError()}>
         <Show when={!data.latest}>
           <h1 class="text-xl font-semibold mt-8">Signing link unavailable</h1>
