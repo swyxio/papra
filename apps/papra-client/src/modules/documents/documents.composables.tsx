@@ -43,9 +43,7 @@ export function useDownloadDocument() {
     }) => {
       try {
         const url = `/api/organizations/${organizationId}/documents/${documentId}/download`;
-        const link = window.document.createElement('a');
-        link.href = url;
-        link.click();
+        downloadFile({ url, fileName: '' });
       } catch {
         createToast({ type: 'error', message: t('documents.actions.download.error') });
       }

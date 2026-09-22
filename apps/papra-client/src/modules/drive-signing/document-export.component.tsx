@@ -124,6 +124,9 @@ export function DocumentExportActions(props: {
             : 'Export your current native draft.'}{' '}
           Resolve changes in the external editor before making the signing PDF.
         </p>
+        <p class="text-xs text-muted-foreground mt-1">
+          Google copies use the selected account’s default sharing settings.
+        </p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
         <Button
