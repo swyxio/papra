@@ -2,6 +2,7 @@ import type { TransferProgress } from '../documents/drive-multipart.services';
 import { createEffect, createResource, createSignal, For, Show } from 'solid-js';
 import { multipartUpload } from '../documents/drive-multipart.services';
 import { Button } from '../ui/components/button';
+import { downloadStoredFile } from '../shared/files/download';
 import { fetchVersions, restoreVersion, versionDownloadHref } from './drive-capabilities.services';
 import { DriveError, DriveEvidence } from './drive-evidence.component';
 
@@ -150,6 +151,19 @@ export function DriveDocumentCapabilities(props: {
                           version.id,
                         )}
                         download=""
+                        onClick={(event) => {
+                          event.preventDefault();
+                          setError(undefined);
+                          void downloadStoredFile({
+                            url: versionDownloadHref(
+                              props.organizationId,
+                              props.documentId,
+                              version.id,
+                            ),
+                            fileName: version.originalName,
+                            size: version.size,
+                          }).catch(setError);
+                        }}
                       >
                         Download original
                       </a>

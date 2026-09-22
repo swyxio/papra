@@ -1,7 +1,7 @@
 import type { Document } from './documents.types';
 import { createSignal } from 'solid-js';
 import { useI18n } from '@/modules/i18n/i18n.provider';
-import { downloadFile } from '@/modules/shared/files/download';
+import { downloadStoredFile } from '@/modules/shared/files/download';
 import { useConfirmModal } from '../shared/confirm';
 import { queryClient } from '../shared/query/query-client';
 import { createToast } from '../ui/components/sonner';
@@ -32,13 +32,17 @@ export function useDownloadDocument() {
     downloadDocument: async ({
       organizationId,
       documentId,
+      fileName,
+      size,
     }: {
       organizationId: string;
       documentId: string;
+      fileName: string;
+      size: number;
     }) => {
       try {
         const url = `/api/organizations/${organizationId}/documents/${documentId}/download`;
-        downloadFile({ url, fileName: '' });
+        await downloadStoredFile({ url, fileName, size });
       } catch {
         createToast({ type: 'error', message: t('documents.actions.download.error') });
       }

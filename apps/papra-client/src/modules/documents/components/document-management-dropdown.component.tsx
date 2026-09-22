@@ -73,6 +73,8 @@ export const DocumentManagementDropdown: Component<{ document: Document }> = (pr
             downloadDocument({
               documentId: props.document.id,
               organizationId: props.document.organizationId,
+              fileName: props.document.name,
+              size: props.document.originalSize,
             })
           }
         >

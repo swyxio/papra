@@ -453,6 +453,8 @@ export const DocumentPage: Component = () => {
                         downloadDocument({
                           organizationId: getDocument().organizationId,
                           documentId: getDocument().id,
+                          fileName: getDocument().name,
+                          size: getDocument().originalSize,
                         })
                       }
                       variant="outline"
