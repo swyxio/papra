@@ -583,8 +583,8 @@ async function deliverMail(env: Env, r: RequestRow) {
           to: [p.email],
           subject: `${completed ? 'Signed' : 'Signature requested'}: ${r.name}`,
           text: completed
-            ? `${r.name} has been signed by every recipient.\n\nDownload the sealed PDF and view the signing record:\n${url}\n\nswyx Drive`
-            : `${r.sender_name} (${r.sender_email}) requests your signature on ${r.name}.\n\nReview and sign:\n${url}\n\nThis link grants access to this signing request only. No account is needed.\n\nswyx Drive`,
+            ? `${r.name} has been signed by every recipient.\n\nDownload the sealed PDF and view the signing record:\n${url}\n\nSwyxDrive`
+            : `${r.sender_name} (${r.sender_email}) requests your signature on ${r.name}.\n\nReview and sign:\n${url}\n\nThis link grants access to this signing request only. No account is needed.\n\nSwyxDrive`,
         }),
         signal: AbortSignal.timeout(15000),
       });

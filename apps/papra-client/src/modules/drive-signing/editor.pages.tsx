@@ -191,7 +191,7 @@ export function NewDocumentPage() {
     [busy, setBusy] = createSignal(false),
     [error, setError] = createSignal('');
   const templateBase = `/api/organizations/${params.organizationId}/document-templates`;
-  const [catalog] = createResource(async () =>
+  const [catalog, { refetch: reloadCatalog }] = createResource(async () =>
     apiClient<{ templates: TemplateSummary[] }>({ path: templateBase }),
   );
   const [selectedTemplate, { refetch: reloadTemplate }] = createResource(
@@ -263,7 +263,7 @@ export function NewDocumentPage() {
       <Show when={catalog.error}>
         <p role="alert" class="text-red-600 my-3">
           Could not load your agreement templates.{' '}
-          <button class="underline" onClick={() => location.reload()}>
+          <button class="underline" onClick={() => void reloadCatalog()}>
             Retry
           </button>
         </p>
@@ -326,13 +326,6 @@ export function NewDocumentPage() {
               <button class="text-sm underline my-3" onClick={() => setPreview(!preview())}>
                 {preview() ? 'Hide preview' : 'Preview filled agreement'}
               </button>
-              <Show when={preview()}>
-                <NativeEditor
-                  source={fillTemplate(selected(), values())}
-                  editable={false}
-                  onChange={() => {}}
-                />
-              </Show>
             </>
           )}
         </Show>
@@ -356,6 +349,15 @@ export function NewDocumentPage() {
       >
         {busy() ? 'Creating…' : 'Create document'}
       </Button>
+      <Show when={template().startsWith('atlas:') && preview() && selectedTemplate()}>
+        <div class="mt-6">
+          <NativeEditor
+            source={fillTemplate(selectedTemplate()!, values())}
+            editable={false}
+            onChange={() => {}}
+          />
+        </div>
+      </Show>
     </div>
   );
 }
@@ -474,7 +476,7 @@ export function DocumentEditorPage() {
             <>
               <div class="flex flex-wrap justify-between items-center gap-3 my-4">
                 <div>
-                  <h1 class="text-xl font-semibold">{data()?.name}</h1>
+                  <h1 class="text-xl font-semibold break-words">{data()?.name}</h1>
                   <p class="text-xs text-muted-foreground mt-1">
                     {dirty()
                       ? 'Unsaved changes'
@@ -484,7 +486,7 @@ export function DocumentEditorPage() {
                   </p>
                 </div>
                 <Show when={data()?.canEdit}>
-                  <div class="flex gap-2">
+                  <div class="flex flex-wrap gap-2">
                     <Button
                       variant="outline"
                       disabled={busy() || !dirty()}

@@ -27,6 +27,11 @@ export function PdfFields(
 ) {
   const [pdf, setPdf] = createSignal<PDFDocumentProxy>();
   const [message, setMessage] = createSignal('Loading PDF…');
+  const [zoom, setZoom] = createSignal(100);
+  const pages = new Map<number, HTMLDivElement>();
+  function goToPage(page: number) {
+    pages.get(page)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
   createEffect(() => {
     const task = getDocument({
       url: props.url,
@@ -63,16 +68,62 @@ export function PdfFields(
       </Show>
       <Show when={pdf()}>
         {(d) => (
-          <For each={Array.from({ length: d().numPages }, (_, i) => i + 1)}>
-            {(page) => (
-              <PdfPage
-                {...props}
-                pdf={d()}
-                page={page}
-                fields={props.fields.filter((f) => f.page === page)}
-              />
-            )}
-          </For>
+          <>
+            <div class="sticky top-0 z-10 flex flex-wrap items-center gap-3 rounded-md border bg-background p-2 text-sm">
+              <label>
+                Go to page
+                <select
+                  class="ml-2 rounded border bg-background p-1"
+                  aria-label="Go to PDF page"
+                  onChange={(e) => goToPage(+e.currentTarget.value)}
+                >
+                  <For each={Array.from({ length: d().numPages }, (_, i) => i + 1)}>
+                    {(page) => (
+                      <option value={page}>
+                        Page {page} of {d().numPages}
+                      </option>
+                    )}
+                  </For>
+                </select>
+              </label>
+              <label>
+                Zoom
+                <select
+                  class="ml-2 rounded border bg-background p-1"
+                  aria-label="PDF zoom"
+                  value={zoom()}
+                  onChange={(e) => setZoom(+e.currentTarget.value)}
+                >
+                  <option value="100">Fit width</option>
+                  <option value="150">150%</option>
+                  <option value="200">200%</option>
+                </select>
+              </label>
+              <Show when={props.fields.some((f) => f.type === 'signature')}>
+                <button
+                  type="button"
+                  class="underline"
+                  onClick={() => goToPage(props.fields.find((f) => f.type === 'signature')!.page)}
+                >
+                  Go to signature
+                </button>
+              </Show>
+            </div>
+            <For each={Array.from({ length: d().numPages }, (_, i) => i + 1)}>
+              {(page) => (
+                <div ref={(el) => pages.set(page, el)} class="scroll-mt-24 overflow-x-auto">
+                  <div style={{ width: `${zoom()}%` }}>
+                    <PdfPage
+                      {...props}
+                      pdf={d()}
+                      page={page}
+                      fields={props.fields.filter((f) => f.page === page)}
+                    />
+                  </div>
+                </div>
+              )}
+            </For>
+          </>
         )}
       </Show>
     </div>
@@ -142,7 +193,7 @@ function PdfPage(
       <div
         ref={wrapper}
         class="relative w-full min-w-0 border shadow-sm bg-white overflow-hidden"
-        style={{ 'aspect-ratio': ratio(), 'touch-action': props.onPlace ? 'none' : 'auto' }}
+        style={{ 'aspect-ratio': ratio(), 'touch-action': 'auto' }}
         onClick={(e) => {
           if (e.target !== canvas) return;
           const r = wrapper.getBoundingClientRect();

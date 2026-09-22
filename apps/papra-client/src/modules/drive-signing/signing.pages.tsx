@@ -17,6 +17,34 @@ type SigningRequest = {
   recipients: { id: string; name: string; email: string; signedAt: number | null; url?: string }[];
   mail: { recipient_id: string; kind: string; status: string; error?: string }[];
 };
+function CopySigningLink(props: { url: string }) {
+  const [copied, setCopied] = createSignal(false);
+  const [error, setError] = createSignal('');
+  return (
+    <span>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={async () => {
+          try {
+            await navigator.clipboard.writeText(props.url);
+            setCopied(true);
+            setError('');
+          } catch {
+            setError('Could not copy. Open the signing link and copy its address.');
+          }
+        }}
+      >
+        {copied() ? 'Link copied' : 'Copy signing link'}
+      </Button>
+      <Show when={error()}>
+        <span role="alert" class="block text-sm text-destructive">
+          {error()}
+        </span>
+      </Show>
+    </span>
+  );
+}
 const inputClass = 'w-full rounded-md border bg-background px-3 py-2 text-sm';
 const validEmail = (email: string) => /^\S+@[^@\s]+\.[^@\s]+$/.test(email.trim());
 async function downloadPdf(path: string, name: string) {
@@ -36,7 +64,7 @@ async function downloadPdf(path: string, name: string) {
 export function PublicSigningHomePage() {
   return (
     <main class="max-w-2xl mx-auto p-6 md:py-16">
-      <p class="text-sm text-muted-foreground">swyx Drive</p>
+      <p class="text-sm text-muted-foreground">SwyxDrive</p>
       <h1 class="text-3xl font-semibold my-5">Documents and signing in one place</h1>
       <p class="mb-5">
         Upload a PDF or create a document from an invoice or agreement template. Open the document
@@ -136,13 +164,7 @@ export function DocumentSigning(props: {
                       {p.name} · {p.signedAt ? 'Signed' : 'Awaiting signature'}
                     </span>
                     <Show when={p.url && !p.signedAt && r.status === 'pending'}>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => void navigator.clipboard.writeText(p.url!)}
-                      >
-                        Copy signing link
-                      </Button>
+                      <CopySigningLink url={p.url!} />
                     </Show>
                   </div>
                 )}
@@ -216,6 +238,19 @@ export function SigningSetupPage() {
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal('');
   const [sent, setSent] = createSignal<SigningRequest>();
+  const mailTimer = setInterval(async () => {
+    if (!sent()?.mail.some((m) => ['pending', 'sending'].includes(m.status)) || document.hidden)
+      return;
+    try {
+      const result = await apiClient<{ requests: SigningRequest[] }>({ path: `${base}/signing` });
+      const request = result.requests.find((r) => r.id === sent()?.id);
+      if (request) setSent(request);
+      setError('');
+    } catch (e) {
+      setError(message(e));
+    }
+  }, 3000);
+  onCleanup(() => clearInterval(mailTimer));
   function updateRecipient(index: number, key: 'name' | 'email', value: string) {
     setRecipients(recipients().map((r, i) => (i === index ? { ...r, [key]: value } : r)));
   }
@@ -272,31 +307,49 @@ export function SigningSetupPage() {
           <div class="rounded-lg border p-6">
             <h2 class="font-semibold text-xl">Signing request created</h2>
             <p class="my-3">
-              Email invitations are being sent. You can also copy each recipient’s signing link.
+              Each recipient can review and sign without an account. Track email status below or
+              copy their signing link.
             </p>
             <For each={sent()?.recipients}>
               {(r) => (
-                <div class="flex gap-3 items-center mb-3">
-                  <span>
-                    {r.name} · {r.email}
-                  </span>
-                  <Button
-                    variant="outline"
-                    onClick={() => void navigator.clipboard.writeText(r.url!)}
-                  >
-                    Copy signing link
-                  </Button>
+                <div class="flex flex-wrap gap-3 items-center mb-3 min-w-0">
+                  <div class="min-w-0 break-words">
+                    <p>
+                      {r.name} · {r.email}
+                    </p>
+                    <p role="status" class="text-sm text-muted-foreground">
+                      {sent()?.mail.find((m) => m.recipient_id === r.id && m.kind === 'request')
+                        ?.status === 'sent'
+                        ? 'Email sent'
+                        : sent()?.mail.find((m) => m.recipient_id === r.id && m.kind === 'request')
+                              ?.status === 'error'
+                          ? 'Email failed — open request status to retry, or copy the link'
+                          : 'Sending email…'}
+                    </p>
+                  </div>
+                  <CopySigningLink url={r.url!} />
                   <A class="underline" href={r.url!}>
                     Open signing link
                   </A>
                 </div>
               )}
             </For>
+            <Show when={error()}>
+              <p role="alert" class="text-destructive text-sm">
+                Could not refresh email status. {error()}
+              </p>
+            </Show>
+            <A
+              class="underline inline-block mt-3"
+              href={`/organizations/${params.organizationId}/documents/${params.documentId}`}
+            >
+              View request status
+            </A>
           </div>
         }
       >
         <div class="grid md:grid-cols-[300px_minmax(0,1fr)] gap-6">
-          <aside class="space-y-4 min-w-0">
+          <aside class="space-y-4 min-w-0 self-start md:sticky md:top-4 md:max-h-[calc(100dvh-2rem)] md:overflow-y-auto">
             <Show when={eligibility.loading}>
               <p role="status">Checking PDF…</p>
             </Show>
@@ -413,6 +466,15 @@ export function SigningSetupPage() {
                   Use a different email address for each recipient.
                 </p>
               </Show>
+              <p role="status" class="text-sm">
+                {fields().length} fields placed ·{' '}
+                {
+                  recipients().filter((_, i) =>
+                    fields().some((f) => f.recipient === i && f.type === 'signature'),
+                  ).length
+                }
+                /{recipients().length} recipients ready
+              </p>
               <p class="text-xs text-muted-foreground">
                 Every recipient needs a signature field. Sending approves this PDF revision; later
                 edits won’t change this request.
@@ -560,7 +622,7 @@ export function PublicSigningPage() {
   }
   return (
     <main class="max-w-7xl mx-auto p-4 md:p-8">
-      <p class="text-sm text-muted-foreground">swyx Drive · Document signing</p>
+      <p class="text-sm text-muted-foreground">SwyxDrive · Document signing</p>
       <Show when={loadError()}>
         <Show when={!data.latest}>
           <h1 class="text-xl font-semibold mt-8">Signing link unavailable</h1>
@@ -572,8 +634,11 @@ export function PublicSigningPage() {
       <Show when={data.latest}>
         {(r) => (
           <>
-            <h1 class="text-2xl font-semibold my-4">{r().name}</h1>
-            <p class="text-sm mb-6">{r().senderName} requests your signature.</p>
+            <h1 class="text-2xl font-semibold my-4 break-words">{r().name}</h1>
+            <p class="text-sm mb-3">{r().senderName} requests your signature. No account needed.</p>
+            <a class="text-sm underline inline-block mb-6" href={`${base()}/file?download=true`}>
+              Download PDF to review
+            </a>
             <div class="grid md:grid-cols-[minmax(0,1fr)_300px] gap-6">
               <PdfFields
                 url={`${base()}/file${r().status === 'completed' ? '?signed=true' : ''}`}
@@ -590,7 +655,7 @@ export function PublicSigningPage() {
                         : values()[f.id] || f.label || 'Text'
                 }
               />
-              <aside class="space-y-4">
+              <aside class="order-first md:order-last space-y-4 min-w-0 self-start md:sticky md:top-20 md:max-h-[calc(100dvh-6rem)] md:overflow-y-auto">
                 <Show
                   when={!r().recipient.signedAt && r().status === 'pending'}
                   fallback={
