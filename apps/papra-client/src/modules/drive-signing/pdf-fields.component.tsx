@@ -21,6 +21,7 @@ type FieldActions = {
   onRemove?: (id: string) => void;
   labels?: (field: SigningField) => string;
   onError?: () => void;
+  onActivate?: (field: SigningField) => void;
 };
 export function PdfFields(
   props: { url: string; fields: SigningField[]; onReady?: () => void } & FieldActions,
@@ -29,7 +30,10 @@ export function PdfFields(
   const [message, setMessage] = createSignal('Loading PDF…');
   const [zoom, setZoom] = createSignal(100);
   const pages = new Map<number, HTMLDivElement>();
+  const fieldElements = new Map<string, HTMLDivElement>();
+  const [jumpPage, setJumpPage] = createSignal(1);
   function goToPage(page: number) {
+    setJumpPage(page);
     pages.get(page)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
   createEffect(() => {
@@ -75,6 +79,7 @@ export function PdfFields(
                 <select
                   class="ml-2 rounded border bg-background p-1"
                   aria-label="Go to PDF page"
+                  value={jumpPage()}
                   onChange={(e) => goToPage(+e.currentTarget.value)}
                 >
                   <For each={Array.from({ length: d().numPages }, (_, i) => i + 1)}>
@@ -103,7 +108,13 @@ export function PdfFields(
                 <button
                   type="button"
                   class="underline"
-                  onClick={() => goToPage(props.fields.find((f) => f.type === 'signature')!.page)}
+                  onClick={() => {
+                    const field = props.fields.find((f) => f.type === 'signature')!;
+                    setJumpPage(field.page);
+                    fieldElements
+                      .get(field.id)
+                      ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  }}
                 >
                   Go to signature
                 </button>
@@ -115,6 +126,7 @@ export function PdfFields(
                   <div style={{ width: `${zoom()}%` }}>
                     <PdfPage
                       {...props}
+                      registerField={(id, el) => fieldElements.set(id, el)}
                       pdf={d()}
                       page={page}
                       fields={props.fields.filter((f) => f.page === page)}
@@ -130,7 +142,12 @@ export function PdfFields(
   );
 }
 function PdfPage(
-  props: { pdf: PDFDocumentProxy; page: number; fields: SigningField[] } & FieldActions,
+  props: {
+    pdf: PDFDocumentProxy;
+    page: number;
+    fields: SigningField[];
+    registerField?: (id: string, el: HTMLDivElement) => void;
+  } & FieldActions,
 ) {
   // oxlint-disable-next-line no-unassigned-vars -- assigned via Solid JSX ref
   let canvas!: HTMLCanvasElement;
@@ -213,6 +230,16 @@ function PdfPage(
         <Index each={props.fields}>
           {(field) => (
             <div
+              ref={(el) => createEffect(() => props.registerField?.(field().id, el))}
+              role={props.onActivate ? 'button' : undefined}
+              tabIndex={props.onActivate ? 0 : undefined}
+              aria-label={props.onActivate ? `Edit your ${field().type}` : undefined}
+              onKeyDown={(e) => {
+                if (props.onActivate && ['Enter', ' '].includes(e.key)) {
+                  e.preventDefault();
+                  props.onActivate(field());
+                }
+              }}
               class="absolute border-2 border-blue-500 bg-blue-100/70 text-blue-950 flex items-center justify-between px-1 text-xs select-none overflow-hidden"
               style={{
                 'left': `${field().x * 100}%`,
@@ -220,10 +247,13 @@ function PdfPage(
                 'width': `${field().width * 100}%`,
                 'height': `${field().height * 100}%`,
                 'touch-action': 'none',
-                'cursor': props.onMove ? 'move' : 'default',
+                'cursor': props.onMove ? 'move' : props.onActivate ? 'pointer' : 'default',
               }}
               onPointerDown={(e) => move(e, field())}
-              onClick={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                props.onActivate?.(field());
+              }}
             >
               <span class="truncate">
                 {props.labels?.(field()) || field().label || field().type}

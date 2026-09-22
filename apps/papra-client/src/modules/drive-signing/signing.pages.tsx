@@ -643,6 +643,23 @@ export function PublicSigningPage() {
               <PdfFields
                 url={`${base()}/file${r().status === 'completed' ? '?signed=true' : ''}`}
                 fields={r().status === 'completed' ? [] : r().fields}
+                onActivate={
+                  r().status === 'pending' && !r().recipient.signedAt
+                    ? (field) => {
+                        const input = document.getElementById(
+                          field.type === 'text'
+                            ? `signing-text-${field.id}`
+                            : field.type === 'date'
+                              ? 'signing-date'
+                              : field.type === 'name'
+                                ? 'signing-name'
+                                : 'signing-signature',
+                        );
+                        input?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        input?.focus({ preventScroll: true });
+                      }
+                    : undefined
+                }
                 onReady={() => setReady(true)}
                 onError={() => setReady(false)}
                 labels={(f) =>
@@ -690,6 +707,7 @@ export function PublicSigningPage() {
                     Your name
                     <input
                       class={inputClass}
+                      id="signing-name"
                       value={name() || r().recipient.name}
                       maxLength={100}
                       onInput={(e) => setName(e.currentTarget.value)}
@@ -699,6 +717,7 @@ export function PublicSigningPage() {
                     Your signature
                     <input
                       class={`${inputClass} text-xl italic`}
+                      id="signing-signature"
                       value={signature() || name() || r().recipient.name}
                       maxLength={100}
                       onInput={(e) => setSignature(e.currentTarget.value)}
@@ -709,6 +728,7 @@ export function PublicSigningPage() {
                       Date signed
                       <input
                         class={inputClass}
+                        id="signing-date"
                         value={signedDate()}
                         readOnly
                         aria-describedby="signing-date-help"
@@ -724,6 +744,7 @@ export function PublicSigningPage() {
                         {f.label || 'Text field'}
                         <input
                           class={inputClass}
+                          id={`signing-text-${f.id}`}
                           value={values()[f.id] || ''}
                           maxLength={500}
                           onInput={(e) => setValues({ ...values(), [f.id]: e.currentTarget.value })}
