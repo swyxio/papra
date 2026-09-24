@@ -161,7 +161,7 @@ async function fixture() {
     expect(response.status).toBe(201);
     return ((await response.json()) as { shareLink: ShareDto }).shareLink;
   };
-  return { DB, env, request, create };
+  return { DB, env, request, create, identities };
 }
 
 describe('Worker share link permission and revocation', () => {
@@ -183,17 +183,59 @@ describe('Worker share link permission and revocation', () => {
     await DB.prepare('UPDATE share_links SET is_enabled=0 WHERE id=?').bind(share.id).run();
     expect((await pageMetadata(env, path)).title).toBe('Share unavailable — SwyxDrive');
     expect((await pageMetadata(env, '/orgs/private/documents/private')).title).toBe(
+      'Private document · rivate — SwyxDrive',
+    );
+  });
+
+  test('internal unfurls use document permissions and never turn an active share into public metadata', async () => {
+    const { env, DB, create, identities } = await fixture();
+    await create();
+    const path = '/orgs/team/documents/open';
+    const anonymous = await pageMetadata(env, path);
+    expect(anonymous.title).toBe('Private document · open — SwyxDrive');
+    expect(anonymous.description).not.toContain('PDF');
+    expect(anonymous.image).toBe(`${env.APP_URL}/og-private-document.png`);
+    expect(
+      (await pageMetadata(env, '/organizations/org_42b6b2a0d04c28134c4d1e22/documents/open')).url,
+    ).toBe(`${env.APP_URL}/orgs/LS/documents/open`);
+    expect(await pageMetadata(env, path, identities.outsider)).toEqual(anonymous);
+    expect((await pageMetadata(env, path, identities.member)).title).toBe('open file — SwyxDrive');
+    expect(
+      (await pageMetadata(env, '/organizations/team/documents/open', identities.member)).url,
+    ).toBe(`${env.APP_URL}/orgs/team/documents/open`);
+    expect((await pageMetadata(env, '/orgs/wrong/documents/open', identities.owner)).title).toBe(
+      anonymous.title,
+    );
+    expect(
+      (await pageMetadata(env, '/orgs/team/documents/secret', identities.member)).title,
+    ).not.toContain('secret file');
+    expect(
+      (await pageMetadata(env, '/orgs/personal/documents/private', identities.outsider)).title,
+    ).not.toContain('private file');
+    await DB.prepare('UPDATE documents SET is_deleted=1 WHERE id=?').bind('open').run();
+    expect(await pageMetadata(env, path, identities.owner)).toEqual(anonymous);
+    // No existence lookup at all for anonymous requests, including a guessed ID.
+    expect(
+      (
+        await pageMetadata(
+          { ...env, DB: undefined } as unknown as Env,
+          '/orgs/LS/documents/doc_missing',
+        )
+      ).title,
+    ).toBe('Private document · issing — SwyxDrive');
+    expect((await pageMetadata(env, '/orgs/team/documents/new')).title).toBe(
       'SwyxDrive — Documents, sharing & signing',
     );
   });
 
   test('real HTMLRewriter emits crawler-visible tags and escapes hostile filenames', async () => {
     const shell =
-      '<html><head><title>Default</title><meta name="title" content="Default"><meta name="description" content="Default"><meta property="og:title" content="Default"><meta property="og:description" content="Default"><meta property="og:url" content="Default"><meta name="twitter:title" content="Default"><link rel="canonical" href="https://papra.app/"></head><body>App</body></html>';
+      '<html><head><title>Default</title><meta name="title" content="Default"><meta name="description" content="Default"><meta property="og:title" content="Default"><meta property="og:description" content="Default"><meta property="og:url" content="Default"><meta property="og:image" content="Default"><meta name="twitter:image" content="Default"><meta name="twitter:title" content="Default"><link rel="canonical" href="https://papra.app/"></head><body>App</body></html>';
     const metadata = {
       title: '</title><script>alert("x")</script> — SwyxDrive',
       description: 'File & sharing',
       url: 'https://drive.example/s/abcdefghijklmnop',
+      image: 'https://drive.example/og-private-document.png',
     };
     const instance = new Miniflare({
       modules: true,
@@ -213,6 +255,9 @@ describe('Worker share link permission and revocation', () => {
     expect(response.headers.get('cache-control')).toBe('private, no-store');
     expect(response.headers.get('x-robots-tag')).toContain('noindex');
     expect(response.headers.get('etag')).toBeNull();
+    expect(response.headers.get('vary')).toContain('Cookie');
+    expect(html).toContain(`property="og:image" content="${metadata.image}"`);
+    expect(html).toContain(`name="twitter:image" content="${metadata.image}"`);
   });
 
   test('sharing lists expose actual manage permission without inviting members to forbidden actions', async () => {

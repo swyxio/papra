@@ -16,7 +16,7 @@ import { registerReviewRoutes } from './reviews';
 import { registerAuthoringRoutes } from './authoring';
 import { registerGoogleDocumentRoutes } from './google-docs';
 import { registerSigningRoutes, processSigning, repairSigning } from './signing';
-import { pageMetadata, rewritePageMetadata } from './page-metadata';
+import { isDocumentPage, pageMetadata, rewritePageMetadata } from './page-metadata';
 import { registerTemplateRoutes } from './templates';
 
 export { ImageProcessorContainer, ContainerProxy } from '../native/container';
@@ -121,7 +121,8 @@ app.all('/api/*', (c) => c.json({ message: 'API route not found' }, 404));
 app.all('*', async (c) => {
   const response = await c.env.ASSETS.fetch(c.req.raw);
   if (!response.headers.get('Content-Type')?.includes('text/html')) return response;
-  return rewritePageMetadata(response, await pageMetadata(c.env, c.req.path));
+  const identity = isDocumentPage(c.req.path) ? await getIdentity(c.req.raw, c.env) : null;
+  return rewritePageMetadata(response, await pageMetadata(c.env, c.req.path, identity));
 });
 app.onError((err, c) => {
   if (err instanceof HTTPException) return c.json({ message: err.message }, err.status);
