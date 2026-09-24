@@ -48,6 +48,8 @@ export function DriveExport(props: { organizationId: string }) {
             method: 'GET',
             path: `/api/organizations/${props.organizationId}/documents/${document.id}/export`,
           });
+          // Export filenames must exclude filesystem control characters.
+          // eslint-disable-next-line no-control-regex
           let name = document.name.replace(/[\\/\x00-\x1f]/g, '_') || document.id;
           if (names.has(name)) name = `${document.id}-${name}`;
           names.add(name);
@@ -95,7 +97,7 @@ export function DriveExport(props: { organizationId: string }) {
   return (
     <div class="flex flex-wrap items-center gap-3 text-sm">
       <Button variant="outline" disabled={busy()} onClick={exportFiles}>
-        Export files
+        Export space
       </Button>
       <span role="status" class="text-muted-foreground">
         {status()}

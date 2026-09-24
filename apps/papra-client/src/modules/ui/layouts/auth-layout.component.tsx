@@ -1,5 +1,5 @@
 import type { ParentComponent } from 'solid-js';
-import { A } from '@solidjs/router';
+import { PublicHeader } from './public.layout';
 import { useI18n } from '@/modules/i18n/i18n.provider';
 import { cn } from '@/modules/shared/style/cn';
 import { ThemeSwitcher } from '@/modules/theme/theme-switcher.component';
@@ -18,15 +18,7 @@ export const AuthLayout: ParentComponent = (props) => {
 
   return (
     <div class="h-screen w-full flex flex-col">
-      <div class="p-6 flex justify-between items-center gap-2">
-        <A
-          href="/"
-          class="group text-base text-muted-foreground flex gap-2 font-semibold hover:text-foreground transition"
-        >
-          <div class="i-tabler-file-text size-6 text-primary transform rotate-12deg group-hover:rotate-25deg transition" />
-          SwyxDrive
-        </A>
-
+      <PublicHeader hideSignIn>
         <div class="flex gap-2">
           <DropdownMenu>
             <DropdownMenuTrigger
@@ -61,7 +53,7 @@ export const AuthLayout: ParentComponent = (props) => {
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-      </div>
+      </PublicHeader>
 
       <div class="flex-1">{props.children}</div>
     </div>

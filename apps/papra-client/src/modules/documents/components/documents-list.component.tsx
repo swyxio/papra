@@ -207,6 +207,12 @@ export const DocumentsPaginatedList: Component<{
                   .filter(Boolean)
                   .join(' - ')}{' '}
                 - <RelativeTime date={data.row.original.createdAt} />
+                <Show when={data.row.original.isShortcut}>
+                  <span class="ml-2 inline-flex items-center gap-1">
+                    <span class="i-tabler-arrow-up-right size-3" />
+                    Shortcut
+                  </span>
+                </Show>
               </div>
             </div>
           </div>

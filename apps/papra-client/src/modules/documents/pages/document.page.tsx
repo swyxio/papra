@@ -1,3 +1,10 @@
+import {
+  Sheet,
+  SheetTrigger,
+  SheetContent,
+  SheetTitle,
+  SheetDescription,
+} from '@/modules/ui/components/sheet';
 import { DocumentReviews } from '@/modules/drive-signing/review.pages';
 import { GoogleDocsSource } from '@/modules/google-docs/google-docs-source.component';
 import { googleDocMimeType } from '@/modules/google-docs/google-docs.services';
@@ -37,6 +44,7 @@ import { Button } from '@/modules/ui/components/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/modules/ui/components/dropdown-menu';
 import { Separator } from '@/modules/ui/components/separator';
@@ -331,6 +339,11 @@ export const DocumentPage: Component = () => {
   };
 
   const [getTab, setTab] = createSignal<Tab>(getInitialTab());
+  const [detailsOpen, setDetailsOpen] = createSignal(getInitialTab() !== 'info');
+  const openPanel = (tab: Tab) => {
+    setTab(tab);
+    setDetailsOpen(true);
+  };
   const [selectedAnchor, setSelectedAnchor] = createSignal<DocumentSelectionAnchor>();
   const [focusAnchor, setFocusAnchor] = createSignal<DocumentSelectionAnchor>();
   const documentScope = createMemo(() => `${params.organizationId}/${params.documentId}`);
@@ -398,409 +411,478 @@ export const DocumentPage: Component = () => {
   };
 
   return (
-    <div class="p-6 flex gap-6 h-full flex-col md:flex-row max-w-7xl mx-auto">
-      <div class="md:flex-1 md:min-w-0 md:border-r">
-        <Show when={documentQuery.data?.document}>
-          {(getDocument) => (
-            <div class="flex gap-4 md:pr-6">
-              <div class="flex-1 min-w-0">
+    <main class="p-4 sm:p-6 max-w-6xl mx-auto space-y-5 min-w-0" aria-label="File viewer">
+      <Show when={documentQuery.isError}>
+        <div role="alert" class="border rounded-lg p-6">
+          <p>Could not load this file.</p>
+          <Button variant="outline" class="mt-3" onClick={() => void documentQuery.refetch()}>
+            Try again
+          </Button>
+        </div>
+      </Show>
+      <Show when={documentQuery.isPending}>
+        <p role="status">Loading file…</p>
+      </Show>
+      <Show when={documentQuery.data?.document}>
+        {(doc) => (
+          <>
+            <A
+              href={`/organizations/${params.organizationId}/documents`}
+              class="text-sm text-muted-foreground hover:underline"
+            >
+              ← Documents
+            </A>
+            <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div class="min-w-0">
+                <h1 class="text-xl sm:text-2xl font-semibold break-words leading-tight">
+                  {doc().name}
+                </h1>
+                <p class="mt-2 text-sm text-muted-foreground">
+                  {formatBytes({ bytes: doc().originalSize, base: 1000 })} ·{' '}
+                  {doc().mimeType.startsWith('video/')
+                    ? 'Video'
+                    : doc().mimeType.startsWith('audio/')
+                      ? 'Audio'
+                      : doc().mimeType === 'application/pdf'
+                        ? 'PDF'
+                        : doc().mimeType === googleDocMimeType
+                          ? 'Google Doc'
+                          : doc().mimeType}
+                </p>
+              </div>
+              <div class="flex gap-2 shrink-0" aria-label="File actions">
                 <Button
-                  variant="ghost"
-                  class="flex items-center gap-2 group bg-transparent! px-0 text-left h-auto max-w-full"
                   onClick={() =>
-                    openRenameDialog({
-                      documentId: getDocument().id,
+                    openShareDialog({
+                      documentId: doc().id,
                       organizationId: params.organizationId,
-                      documentName: getDocument().name,
+                      documentName: doc().name,
                     })
                   }
+                  class="h-11"
                 >
-                  <h1
-                    class="text-xl font-semibold lh-tight min-w-0 break-all"
-                    title={getDocument().name}
-                  >
-                    {getDocument().name}
-                  </h1>
-
-                  <div class="i-tabler-pencil size-4 text-muted-foreground group-hover:text-foreground transition-colors flex-shrink-0" />
+                  <span class="i-tabler-share mr-2" />
+                  Share
                 </Button>
-                <p class="text-sm text-muted-foreground mb-2">{getDocument().id}</p>
-                <Suspense>
-                  <GoogleDocsSource
-                    organizationId={params.organizationId}
-                    documentId={getDocument().id}
-                  />
-                </Suspense>
-                <Show when={getDocument().mimeType !== googleDocMimeType}>
-                  <Suspense
-                    fallback={
-                      <p class="text-xs text-muted-foreground mb-4">
-                        Checking backup and search status…
-                      </p>
-                    }
-                  >
-                    <DocumentProcessingStatus
-                      organizationId={params.organizationId}
-                      documentId={getDocument().id}
-                    />
-                  </Suspense>
-                </Show>
-
-                <div class="flex gap-2 mb-2">
-                  <Show when={getDocument().mimeType !== googleDocMimeType}>
-                    <Button
-                      onClick={async () =>
-                        downloadDocument({
-                          organizationId: getDocument().organizationId,
-                          documentId: getDocument().id,
-                          fileName: getDocument().name,
-                          size: getDocument().originalSize,
-                        })
-                      }
-                      variant="outline"
-                      size="sm"
-                    >
-                      <div class="i-tabler-download size-4 mr-2" />
-                      {t('documents.actions.download.title')}
-                    </Button>
-                  </Show>
-
-                  <Suspense
-                    fallback={
-                      <p class="text-xs text-muted-foreground my-3" role="status">
-                        Loading document controls…
-                      </p>
-                    }
-                  >
-                    <DocumentOpenWithDropdown
-                      document={getDocument()}
-                      organizationId={params.organizationId}
-                    />
-                  </Suspense>
-
+                <Show when={doc().mimeType !== googleDocMimeType}>
                   <Button
-                    onClick={() =>
-                      openShareDialog({
-                        documentId: getDocument().id,
-                        organizationId: params.organizationId,
-                        documentName: getDocument().name,
+                    variant="outline"
+                    class="h-11"
+                    onClick={async () =>
+                      downloadDocument({
+                        organizationId: doc().organizationId,
+                        documentId: doc().id,
+                        fileName: doc().name,
+                        size: doc().originalSize,
                       })
                     }
-                    variant="outline"
-                    size="sm"
                   >
-                    <div class="i-tabler-share size-4 mr-2" />
-                    {t('document-share-links.share-action')}
+                    <span class="i-tabler-download mr-2" />
+                    <span class="hidden min-[400px]:inline">Download</span>
+                    <span class="sr-only min-[400px]:hidden">Download</span>
                   </Button>
-
-                  {getDocument().isDeleted ? (
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={async () => restore({ document: getDocument() })}
-                      isLoading={getIsRestoring()}
-                    >
-                      <div class="i-tabler-refresh size-4 mr-2" />
-                      {t('documents.actions.restore')}
-                    </Button>
-                  ) : (
-                    <Button variant="destructive" size="sm" onClick={deleteDoc}>
-                      <div class="i-tabler-trash size-4 mr-2" />
-                      {t('documents.actions.delete')}
-                    </Button>
-                  )}
-                </div>
-                <Separator class="my-3" />
-
-                <Show when={!getDocument().isDeleted}>
-                  <Suspense
-                    fallback={
-                      <p class="text-xs text-muted-foreground my-3" role="status">
-                        Loading reviews…
-                      </p>
-                    }
-                  >
-                    <DocumentReviews
-                      organizationId={params.organizationId}
-                      documentId={params.documentId}
-                    />
-                  </Suspense>
                 </Show>
-                <Suspense
-                  fallback={
-                    <p class="text-xs text-muted-foreground my-3" role="status">
-                      Loading document controls…
-                    </p>
-                  }
+                <Sheet open={detailsOpen()} onOpenChange={setDetailsOpen}>
+                  <SheetTrigger as={Button} variant="outline" class="h-11">
+                    Details
+                  </SheetTrigger>
+                  <SheetContent class="w-full sm:max-w-xl overflow-y-auto">
+                    <SheetTitle>File details</SheetTitle>
+                    <SheetDescription class="text-sm text-muted-foreground mt-1 mb-5">
+                      Metadata, organization and document history.
+                    </SheetDescription>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      class="absolute right-3 top-3"
+                      aria-label="Close file details"
+                      onClick={() => setDetailsOpen(false)}
+                    >
+                      <span class="i-tabler-x" />
+                    </Button>
+                    <Show when={documentQuery.data?.document}>
+                      {(getDocument) => (
+                        <div class="min-w-0">
+                          <div class="flex-1 min-w-0">
+                            <DocumentProcessingStatus
+                              organizationId={params.organizationId}
+                              documentId={getDocument().id}
+                            />
+                            <DocumentOpenWithDropdown
+                              document={getDocument()}
+                              organizationId={params.organizationId}
+                            />
+
+                            <Suspense
+                              fallback={
+                                <p class="text-xs text-muted-foreground my-3" role="status">
+                                  Loading document controls…
+                                </p>
+                              }
+                            >
+                              <DocumentFolderPicker
+                                documentId={params.documentId}
+                                organizationId={params.organizationId}
+                              />
+                            </Suspense>
+
+                            <Suspense
+                              fallback={
+                                <p class="text-xs text-muted-foreground my-3" role="status">
+                                  Loading document controls…
+                                </p>
+                              }
+                            >
+                              <DocumentTagsList
+                                documentId={params.documentId}
+                                organizationId={params.organizationId}
+                                tags={getDocument().tags}
+                                asLink
+                              />
+                            </Suspense>
+
+                            {getDocument().isDeleted && (
+                              <Alert variant="destructive" class="mt-6">
+                                {t('documents.deleted.message', {
+                                  days:
+                                    getDaysBeforePermanentDeletion({
+                                      document: getDocument(),
+                                      deletedDocumentsRetentionDays:
+                                        config.documents.deletedDocumentsRetentionDays,
+                                    }) ?? 0,
+                                })}
+                              </Alert>
+                            )}
+
+                            <Separator class="my-3" />
+
+                            <Tabs value={getTab()} onChange={setTab} class="w-full">
+                              <TabsList class="w-full h-11">
+                                <TabsTrigger
+                                  class="px-1 text-xs sm:text-sm h-9 min-w-0"
+                                  value="info"
+                                >
+                                  {t('documents.tabs.info')}
+                                </TabsTrigger>
+                                <TabsTrigger
+                                  class="px-1 text-xs sm:text-sm h-9 min-w-0"
+                                  value="content"
+                                >
+                                  {t('documents.tabs.content')}
+                                </TabsTrigger>
+                                <TabsTrigger
+                                  class="px-1 text-xs sm:text-sm h-9 min-w-0"
+                                  value="versions"
+                                >
+                                  Versions
+                                </TabsTrigger>
+                                <TabsTrigger
+                                  class="px-1 text-xs sm:text-sm h-9 min-w-0"
+                                  value="comments"
+                                >
+                                  Comments
+                                </TabsTrigger>
+                                <TabsTrigger
+                                  class="px-1 text-xs sm:text-sm h-9 min-w-0"
+                                  value="activity"
+                                >
+                                  {t('documents.tabs.activity')}
+                                </TabsTrigger>
+                                <TabsIndicator />
+                              </TabsList>
+
+                              <TabsContent value="info">
+                                <Suspense
+                                  fallback={
+                                    <p class="text-sm text-muted-foreground py-4" role="status">
+                                      Loading this panel…
+                                    </p>
+                                  }
+                                >
+                                  <div class="grid grid-cols-[max-content_minmax(0,1fr)]">
+                                    <KeyValues
+                                      data={[
+                                        {
+                                          label: t('documents.info.id'),
+                                          value: getDocument().id,
+                                          icon: 'i-tabler-id',
+                                        },
+                                        {
+                                          label: t('documents.info.name'),
+                                          value: (
+                                            <Button
+                                              variant="ghost"
+                                              class="flex items-center gap-2 group bg-transparent! p-0 h-auto text-left max-w-full"
+                                              onClick={() =>
+                                                openRenameDialog({
+                                                  documentId: getDocument().id,
+                                                  organizationId: params.organizationId,
+                                                  documentName: getDocument().name,
+                                                })
+                                              }
+                                            >
+                                              <span class="truncate" title={getDocument().name}>
+                                                {getDocument().name}
+                                              </span>
+
+                                              <div class="i-tabler-pencil size-4 text-muted-foreground group-hover:text-foreground transition-colors flex-shrink-0" />
+                                            </Button>
+                                          ),
+                                          icon: 'i-tabler-file-text',
+                                        },
+                                        {
+                                          label: t('documents.info.type'),
+                                          value: getDocument().mimeType,
+                                          icon: 'i-tabler-file-unknown',
+                                        },
+                                        {
+                                          label: t('documents.info.size'),
+                                          value: formatBytes({
+                                            bytes: getDocument().originalSize,
+                                            base: 1000,
+                                          }),
+                                          icon: 'i-tabler-weight',
+                                        },
+                                        {
+                                          label: t('documents.info.document-date'),
+                                          value: (
+                                            <DocumentDatePicker
+                                              document={getDocument()}
+                                              organizationId={params.organizationId}
+                                            />
+                                          ),
+                                          icon: 'i-tabler-calendar-event',
+                                        },
+                                        {
+                                          label: t('documents.info.created-at'),
+                                          value: formatRelativeTime(getDocument().createdAt),
+                                          icon: 'i-tabler-calendar',
+                                        },
+                                        {
+                                          label: t('documents.info.updated-at'),
+                                          value: getDocument().updatedAt ? (
+                                            formatRelativeTime(getDocument().updatedAt!)
+                                          ) : (
+                                            <span class="text-muted-foreground">
+                                              {t('documents.info.never')}
+                                            </span>
+                                          ),
+                                          icon: 'i-tabler-calendar',
+                                        },
+                                      ]}
+                                    />
+
+                                    <Show
+                                      when={
+                                        customPropertyDefinitionsQuery.data?.propertyDefinitions
+                                      }
+                                    >
+                                      {(getDefinitions) => (
+                                        <DocumentCustomPropertiesPanel
+                                          document={getDocument()}
+                                          organizationId={params.organizationId}
+                                          propertyDefinitions={getDefinitions()}
+                                        />
+                                      )}
+                                    </Show>
+                                  </div>
+                                  <DocumentNotes
+                                    documentId={getDocument().id}
+                                    organizationId={params.organizationId}
+                                    notes={getDocument().notes}
+                                  />
+                                </Suspense>
+                              </TabsContent>
+
+                              <TabsContent value="content">
+                                <Suspense
+                                  fallback={
+                                    <p class="text-sm text-muted-foreground py-4" role="status">
+                                      Loading this panel…
+                                    </p>
+                                  }
+                                >
+                                  <DocumentContentEditionPanel
+                                    documentId={getDocument().id}
+                                    organizationId={params.organizationId}
+                                    content={getDocument().content}
+                                  />
+                                </Suspense>
+                              </TabsContent>
+                              <TabsContent value="versions">
+                                <Suspense
+                                  fallback={
+                                    <p class="text-sm text-muted-foreground py-4" role="status">
+                                      Loading this panel…
+                                    </p>
+                                  }
+                                >
+                                  <DriveDocumentCapabilities
+                                    organizationId={params.organizationId}
+                                    documentId={params.documentId}
+                                    onChanged={() => {
+                                      void documentQuery.refetch();
+                                    }}
+                                  />
+                                </Suspense>
+                              </TabsContent>
+                              <TabsContent value="comments">
+                                <Suspense
+                                  fallback={
+                                    <p class="text-sm text-muted-foreground py-4" role="status">
+                                      Loading this panel…
+                                    </p>
+                                  }
+                                >
+                                  <DocumentComments
+                                    currentVersionId={documentQuery.data?.document.currentVersionId}
+                                    selectionAnchor={selectedAnchor()}
+                                    onClearSelection={() => setSelectedAnchor(undefined)}
+                                    onActivateAnchor={(anchor) => setFocusAnchor({ ...anchor })}
+                                    documentId={params.documentId}
+                                    organizationId={params.organizationId}
+                                  />
+                                </Suspense>
+                              </TabsContent>
+
+                              <TabsContent value="activity">
+                                <Suspense
+                                  fallback={
+                                    <p class="text-sm text-muted-foreground py-4" role="status">
+                                      Loading this panel…
+                                    </p>
+                                  }
+                                >
+                                  <Show when={activityQuery.data?.pages}>
+                                    {(getActivitiesPages) => (
+                                      <div class="flex flex-col">
+                                        <For each={getActivitiesPages() ?? []}>
+                                          {(activities) => (
+                                            <For each={activities}>
+                                              {(activity) => <ActivityItem activity={activity} />}
+                                            </For>
+                                          )}
+                                        </For>
+
+                                        <Show
+                                          when={activityQuery.hasNextPage}
+                                          fallback={
+                                            <div class="text-sm text-muted-foreground text-center py-4">
+                                              {t('activity.no-more-activities')}
+                                            </div>
+                                          }
+                                        >
+                                          <Button
+                                            variant="outline"
+                                            onClick={async () => activityQuery.fetchNextPage()}
+                                            isLoading={activityQuery.isFetchingNextPage}
+                                          >
+                                            {t('activity.load-more')}
+                                          </Button>
+                                        </Show>
+                                      </div>
+                                    )}
+                                  </Show>
+                                </Suspense>
+                              </TabsContent>
+                            </Tabs>
+                          </div>
+                        </div>
+                      )}
+                    </Show>
+                  </SheetContent>
+                </Sheet>
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    as={Button}
+                    variant="outline"
+                    class="h-11 w-11 p-0"
+                    aria-label="More file actions"
+                  >
+                    <span class="i-tabler-dots" />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent class="min-w-48">
+                    <DropdownMenuItem
+                      onSelect={() =>
+                        openRenameDialog({
+                          documentId: doc().id,
+                          organizationId: params.organizationId,
+                          documentName: doc().name,
+                        })
+                      }
+                    >
+                      Rename
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => openPanel('comments')}>
+                      Comments
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => openPanel('versions')}>
+                      Versions
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => openPanel('activity')}>
+                      Activity
+                    </DropdownMenuItem>
+                    <Show
+                      when={doc().isDeleted}
+                      fallback={
+                        <DropdownMenuItem class="text-destructive" onSelect={deleteDoc}>
+                          Delete file…
+                        </DropdownMenuItem>
+                      }
+                    >
+                      <DropdownMenuItem
+                        disabled={getIsRestoring()}
+                        onSelect={() => void restore({ document: doc() })}
+                      >
+                        Restore file
+                      </DropdownMenuItem>
+                    </Show>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </div>
+            <Show when={doc().isDeleted}>
+              <Alert variant="destructive">
+                This file is in the trash. Restore it to open its contents.
+              </Alert>
+            </Show>
+            <Show when={doc().mimeType === googleDocMimeType}>
+              <GoogleDocsSource organizationId={params.organizationId} documentId={doc().id} />
+            </Show>
+            <Show when={doc().mimeType === 'application/pdf' && !doc().isDeleted}>
+              <div class="space-y-3">
+                <NativeDocumentAction
+                  organizationId={params.organizationId}
+                  documentId={params.documentId}
+                />
+                <Button
+                  as={A}
+                  variant="outline"
+                  href={`/organizations/${params.organizationId}/documents/${doc().id}/pdf-viewer`}
                 >
-                  <NativeDocumentAction
+                  Open PDF viewer
+                </Button>
+                <details class="border rounded-lg px-4 py-3">
+                  <summary class="cursor-pointer font-medium text-sm">
+                    Review and signatures
+                  </summary>
+                  <DocumentReviews
                     organizationId={params.organizationId}
                     documentId={params.documentId}
                   />
-                </Suspense>
-                <Suspense
-                  fallback={
-                    <p class="text-xs text-muted-foreground my-3" role="status">
-                      Loading document controls…
-                    </p>
-                  }
-                >
                   <DocumentSigning
                     organizationId={params.organizationId}
                     documentId={params.documentId}
-                    mimeType={getDocument().mimeType}
-                    isDeleted={!!getDocument().isDeleted}
+                    mimeType={doc().mimeType}
+                    isDeleted={!!doc().isDeleted}
                   />
-                </Suspense>
-
-                <Suspense
-                  fallback={
-                    <p class="text-xs text-muted-foreground my-3" role="status">
-                      Loading document controls…
-                    </p>
-                  }
-                >
-                  <DocumentFolderPicker
-                    documentId={params.documentId}
-                    organizationId={params.organizationId}
-                  />
-                </Suspense>
-
-                <Suspense
-                  fallback={
-                    <p class="text-xs text-muted-foreground my-3" role="status">
-                      Loading document controls…
-                    </p>
-                  }
-                >
-                  <DocumentTagsList
-                    documentId={params.documentId}
-                    organizationId={params.organizationId}
-                    tags={getDocument().tags}
-                    asLink
-                  />
-                </Suspense>
-
-                {getDocument().isDeleted && (
-                  <Alert variant="destructive" class="mt-6">
-                    {t('documents.deleted.message', {
-                      days:
-                        getDaysBeforePermanentDeletion({
-                          document: getDocument(),
-                          deletedDocumentsRetentionDays:
-                            config.documents.deletedDocumentsRetentionDays,
-                        }) ?? 0,
-                    })}
-                  </Alert>
-                )}
-
-                <Separator class="my-3" />
-
-                <Tabs value={getTab()} onChange={setTab} class="w-full">
-                  <TabsList class="w-full h-8">
-                    <TabsTrigger value="info">{t('documents.tabs.info')}</TabsTrigger>
-                    <TabsTrigger value="content">{t('documents.tabs.content')}</TabsTrigger>
-                    <TabsTrigger value="versions">Versions</TabsTrigger>
-                    <TabsTrigger value="comments">Comments</TabsTrigger>
-                    <TabsTrigger value="activity">{t('documents.tabs.activity')}</TabsTrigger>
-                    <TabsIndicator />
-                  </TabsList>
-
-                  <TabsContent value="info">
-                    <Suspense
-                      fallback={
-                        <p class="text-sm text-muted-foreground py-4" role="status">
-                          Loading this panel…
-                        </p>
-                      }
-                    >
-                      <div class="grid grid-cols-[max-content_1fr]">
-                        <KeyValues
-                          data={[
-                            {
-                              label: t('documents.info.id'),
-                              value: getDocument().id,
-                              icon: 'i-tabler-id',
-                            },
-                            {
-                              label: t('documents.info.name'),
-                              value: (
-                                <Button
-                                  variant="ghost"
-                                  class="flex items-center gap-2 group bg-transparent! p-0 h-auto text-left max-w-full"
-                                  onClick={() =>
-                                    openRenameDialog({
-                                      documentId: getDocument().id,
-                                      organizationId: params.organizationId,
-                                      documentName: getDocument().name,
-                                    })
-                                  }
-                                >
-                                  <span class="truncate" title={getDocument().name}>
-                                    {getDocument().name}
-                                  </span>
-
-                                  <div class="i-tabler-pencil size-4 text-muted-foreground group-hover:text-foreground transition-colors flex-shrink-0" />
-                                </Button>
-                              ),
-                              icon: 'i-tabler-file-text',
-                            },
-                            {
-                              label: t('documents.info.type'),
-                              value: getDocument().mimeType,
-                              icon: 'i-tabler-file-unknown',
-                            },
-                            {
-                              label: t('documents.info.size'),
-                              value: formatBytes({ bytes: getDocument().originalSize, base: 1000 }),
-                              icon: 'i-tabler-weight',
-                            },
-                            {
-                              label: t('documents.info.document-date'),
-                              value: (
-                                <DocumentDatePicker
-                                  document={getDocument()}
-                                  organizationId={params.organizationId}
-                                />
-                              ),
-                              icon: 'i-tabler-calendar-event',
-                            },
-                            {
-                              label: t('documents.info.created-at'),
-                              value: formatRelativeTime(getDocument().createdAt),
-                              icon: 'i-tabler-calendar',
-                            },
-                            {
-                              label: t('documents.info.updated-at'),
-                              value: getDocument().updatedAt ? (
-                                formatRelativeTime(getDocument().updatedAt!)
-                              ) : (
-                                <span class="text-muted-foreground">
-                                  {t('documents.info.never')}
-                                </span>
-                              ),
-                              icon: 'i-tabler-calendar',
-                            },
-                          ]}
-                        />
-
-                        <Show when={customPropertyDefinitionsQuery.data?.propertyDefinitions}>
-                          {(getDefinitions) => (
-                            <DocumentCustomPropertiesPanel
-                              document={getDocument()}
-                              organizationId={params.organizationId}
-                              propertyDefinitions={getDefinitions()}
-                            />
-                          )}
-                        </Show>
-                      </div>
-                      <DocumentNotes
-                        documentId={getDocument().id}
-                        organizationId={params.organizationId}
-                        notes={getDocument().notes}
-                      />
-                    </Suspense>
-                  </TabsContent>
-
-                  <TabsContent value="content">
-                    <Suspense
-                      fallback={
-                        <p class="text-sm text-muted-foreground py-4" role="status">
-                          Loading this panel…
-                        </p>
-                      }
-                    >
-                      <DocumentContentEditionPanel
-                        documentId={getDocument().id}
-                        organizationId={params.organizationId}
-                        content={getDocument().content}
-                      />
-                    </Suspense>
-                  </TabsContent>
-                  <TabsContent value="versions">
-                    <Suspense
-                      fallback={
-                        <p class="text-sm text-muted-foreground py-4" role="status">
-                          Loading this panel…
-                        </p>
-                      }
-                    >
-                      <DriveDocumentCapabilities
-                        organizationId={params.organizationId}
-                        documentId={params.documentId}
-                        onChanged={() => {
-                          void documentQuery.refetch();
-                        }}
-                      />
-                    </Suspense>
-                  </TabsContent>
-                  <TabsContent value="comments">
-                    <Suspense
-                      fallback={
-                        <p class="text-sm text-muted-foreground py-4" role="status">
-                          Loading this panel…
-                        </p>
-                      }
-                    >
-                      <DocumentComments
-                        currentVersionId={documentQuery.data?.document.currentVersionId}
-                        selectionAnchor={selectedAnchor()}
-                        onClearSelection={() => setSelectedAnchor(undefined)}
-                        onActivateAnchor={(anchor) => setFocusAnchor({ ...anchor })}
-                        documentId={params.documentId}
-                        organizationId={params.organizationId}
-                      />
-                    </Suspense>
-                  </TabsContent>
-
-                  <TabsContent value="activity">
-                    <Suspense
-                      fallback={
-                        <p class="text-sm text-muted-foreground py-4" role="status">
-                          Loading this panel…
-                        </p>
-                      }
-                    >
-                      <Show when={activityQuery.data?.pages}>
-                        {(getActivitiesPages) => (
-                          <div class="flex flex-col">
-                            <For each={getActivitiesPages() ?? []}>
-                              {(activities) => (
-                                <For each={activities}>
-                                  {(activity) => <ActivityItem activity={activity} />}
-                                </For>
-                              )}
-                            </For>
-
-                            <Show
-                              when={activityQuery.hasNextPage}
-                              fallback={
-                                <div class="text-sm text-muted-foreground text-center py-4">
-                                  {t('activity.no-more-activities')}
-                                </div>
-                              }
-                            >
-                              <Button
-                                variant="outline"
-                                onClick={async () => activityQuery.fetchNextPage()}
-                                isLoading={activityQuery.isFetchingNextPage}
-                              >
-                                {t('activity.load-more')}
-                              </Button>
-                            </Show>
-                          </div>
-                        )}
-                      </Show>
-                    </Suspense>
-                  </TabsContent>
-                </Tabs>
+                </details>
               </div>
-            </div>
-          )}
-        </Show>
-      </div>
-
-      <div class="flex-1 min-h-50vh">
+            </Show>
+          </>
+        )}
+      </Show>
+      <div class="min-w-0">
         <Suspense
           fallback={
             <div
@@ -811,7 +893,13 @@ export const DocumentPage: Component = () => {
             </div>
           }
         >
-          <Show when={documentQuery.data?.document}>
+          <Show
+            when={
+              documentQuery.data?.document && !documentQuery.data.document.isDeleted
+                ? documentQuery.data.document
+                : undefined
+            }
+          >
             {(getDocument) => (
               <Show
                 when={getDocument().mimeType !== googleDocMimeType}
@@ -827,7 +915,7 @@ export const DocumentPage: Component = () => {
                   focusAnchor={focusAnchor()}
                   onTextSelected={(anchor) => {
                     setSelectedAnchor(anchor);
-                    setTab('comments');
+                    openPanel('comments');
                   }}
                 />
               </Show>
@@ -835,6 +923,6 @@ export const DocumentPage: Component = () => {
           </Show>
         </Suspense>
       </div>
-    </div>
+    </main>
   );
 };

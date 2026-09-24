@@ -2,6 +2,8 @@ import type { AppEnv, Env, Identity } from './types';
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { Miniflare } from 'miniflare';
+import { registerSpaceRoutes } from './spaces';
+import { registerDocumentRoutes } from './documents';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { readFile } from 'node:fs/promises';
 import { URL } from 'node:url';
@@ -18,7 +20,12 @@ import {
   registerCollaborationRoutes,
 } from './collaboration';
 
-vi.mock('./jobs', () => ({ enqueueVersion: vi.fn(async () => {}) }));
+vi.mock('@cloudflare/containers', () => ({ getContainer: vi.fn() }));
+vi.mock('./jobs', () => ({
+  enqueueVersion: vi.fn(async () => {}),
+  enrichmentKey: (version: string, kind: string) =>
+    `derived/${version}/${kind.replaceAll(':', '-')}.json`,
+}));
 const instances: Miniflare[] = [];
 afterEach(async () => {
   for (const instance of instances.splice(0)) await instance.dispose();
@@ -33,7 +40,15 @@ async function fixture() {
   instances.push(instance);
   const DB = await instance.getD1Database('DB');
   await DB.exec(await readFile(new URL('../schema.sql', import.meta.url), 'utf8'));
-  const env = { DB } as Env;
+  const filesGet = vi.fn();
+  const env = {
+    DB,
+    FILES: { get: filesGet },
+    R2_ENDPOINT: 'https://r2.example',
+    R2_BUCKET: 'private',
+    R2_ACCESS_KEY_ID: 'test',
+    R2_SECRET_ACCESS_KEY: 'test-secret',
+  } as unknown as Env;
   const team = 'org_team';
   const personal = 'org_personal';
   const other = 'org_other';
@@ -154,6 +169,8 @@ async function fixture() {
     await next();
   });
   registerCollaborationRoutes(app);
+  registerDocumentRoutes(app);
+  registerSpaceRoutes(app);
   const request = async (path: string, method = 'GET', body?: unknown, user = 'owner') =>
     app.request(
       path,
@@ -165,6 +182,7 @@ async function fixture() {
       env,
     );
   return {
+    filesGet,
     DB,
     env,
     app,
@@ -182,6 +200,289 @@ async function fixture() {
 }
 
 describe('D1 collaboration authorization and actual routes', () => {
+  test('space and folder summaries count only live readable original files, with shortcuts separate', async () => {
+    const f = await fixture();
+    await f.DB.prepare('UPDATE documents SET updated_at=200 WHERE id=?').bind('doc_secret').run();
+    await f.DB.prepare(
+      'INSERT INTO document_shortcuts(id,document_id,folder_id,created_by,created_at) VALUES(?,?,?,?,1)',
+    )
+      .bind('shortcut-secret', 'doc_secret', f.open, 'owner')
+      .run();
+    await f.DB.prepare(
+      'INSERT INTO document_shortcuts(id,document_id,folder_id,created_by,created_at) VALUES(?,?,?,?,1)',
+    )
+      .bind('shortcut-public', 'doc_public', f.open, 'owner')
+      .run();
+    const blocked = (await (
+      await f.request('/api/organizations', 'GET', undefined, 'blocked')
+    ).json()) as any;
+    expect(blocked.organizations).toHaveLength(1);
+    expect(blocked.organizations[0]).toMatchObject({
+      isPersonal: false,
+      role: 'member',
+      documentsCount: 1,
+      documentsSize: 1024,
+      lastActivityAt: new Date(1).toISOString(),
+    });
+    const reader = (await (
+      await f.request('/api/organizations', 'GET', undefined, 'reader')
+    ).json()) as any;
+    expect(reader.organizations.find((o: any) => o.id === f.team)).toMatchObject({
+      documentsCount: 3,
+      documentsSize: 3072,
+      lastActivityAt: new Date(200).toISOString(),
+    });
+    expect(reader.organizations.find((o: any) => o.id === f.personal)).toMatchObject({
+      isPersonal: true,
+      role: 'owner',
+      documentsCount: 1,
+    });
+    const owner = (await (await f.request('/api/organizations')).json()) as any;
+    expect(owner.organizations.some((o: any) => o.id === f.personal)).toBe(false);
+    const folders = (await (
+      await f.request(`${f.base}/folders`, 'GET', undefined, 'blocked')
+    ).json()) as any;
+    expect(folders.folders.find((o: any) => o.id === f.open)).toMatchObject({
+      documentsCount: 0,
+      documentsSize: 0,
+      shortcutsCount: 1,
+      lastActivityAt: new Date(1).toISOString(),
+    });
+    const readableFolders = (await (
+      await f.request(`${f.base}/folders`, 'GET', undefined, 'reader')
+    ).json()) as any;
+    expect(readableFolders.folders.find((o: any) => o.id === f.open)).toMatchObject({
+      shortcutsCount: 2,
+      documentsSize: 0,
+      lastActivityAt: new Date(200).toISOString(),
+    });
+    expect(readableFolders.folders.find((o: any) => o.id === f.deep)).toMatchObject({
+      effectiveRestricted: true,
+    });
+    await f.DB.prepare('UPDATE documents SET is_deleted=1 WHERE id=?').bind('doc_secret').run();
+    const afterDelete = (await (
+      await f.request('/api/organizations', 'GET', undefined, 'reader')
+    ).json()) as any;
+    expect(afterDelete.organizations.find((o: any) => o.id === f.team).documentsCount).toBe(2);
+  });
+
+  test('overview summaries honor current membership and folder-scoped service grants', async () => {
+    const f = await fixture();
+    f.identities.owner!.serviceScope = {
+      organizationId: f.team,
+      folderId: f.secret,
+      permissions: ['read'],
+    };
+    const spaces = (await (await f.request('/api/organizations')).json()) as any;
+    expect(spaces.organizations).toHaveLength(1);
+    expect(spaces.organizations[0]).toMatchObject({ documentsCount: 2, documentsSize: 2048 });
+    const folders = (await (await f.request(`${f.base}/folders`)).json()) as any;
+    expect(folders.folders.map((o: any) => o.id).sort()).toEqual([f.secret, f.deep].sort());
+    expect(folders.folders.every((o: any) => o.effectiveRestricted && !o.canWrite)).toBe(true);
+    f.identities.owner!.serviceScope.permissions = ['write'];
+    expect((await f.request('/api/organizations')).status).toBe(403);
+    delete f.identities.owner!.serviceScope;
+    await f.DB.prepare('DELETE FROM organization_members WHERE organization_id=? AND user_id=?')
+      .bind(f.team, 'owner')
+      .run();
+    const revoked = (await (await f.request('/api/organizations')).json()) as any;
+    expect(revoked.organizations.some((o: any) => o.id === f.team)).toBe(false);
+  });
+
+  test('folder-scoped file listing and all-matching batch actions preserve source permissions', async () => {
+    const f = await fixture();
+    await f.DB.prepare(
+      'INSERT INTO document_shortcuts(id,document_id,folder_id,created_by,created_at) VALUES(?,?,?,?,1)',
+    )
+      .bind('shortcut-secret', 'doc_secret', f.open, 'owner')
+      .run();
+    const blocked = (await (
+      await f.request(`${f.base}/documents?folderId=${f.open}`, 'GET', undefined, 'blocked')
+    ).json()) as any;
+    expect(blocked.documentsCount).toBe(0);
+    const reader = (await (
+      await f.request(`${f.base}/documents?folderId=${f.open}`, 'GET', undefined, 'reader')
+    ).json()) as any;
+    expect(reader.documentsCount).toBe(1);
+    expect(reader.documents[0].id).toBe('doc_secret');
+    expect(reader.documents[0].isShortcut).toBe(true);
+    const homeFiles = (await (
+      await f.request(`${f.base}/documents?folderId=${f.home}`)
+    ).json()) as any;
+    expect(homeFiles.documents[0].isShortcut).toBe(false);
+    expect(
+      (await f.request(`${f.base}/documents?folderId=${f.secret}`, 'GET', undefined, 'blocked'))
+        .status,
+    ).toBe(404);
+    expect(
+      (await f.request(`${f.base}/documents/batch/trash`, 'POST', { filter: { folderId: f.open } }))
+        .status,
+    ).toBe(204);
+    expect(
+      (
+        (await f.DB.prepare('SELECT is_deleted FROM documents WHERE id=?')
+          .bind('doc_secret')
+          .first()) as any
+      ).is_deleted,
+    ).toBe(1);
+    expect(
+      (
+        (await f.DB.prepare('SELECT is_deleted FROM documents WHERE id=?')
+          .bind('doc_public')
+          .first()) as any
+      ).is_deleted,
+    ).toBe(0);
+  });
+
+  test('private media URLs are inline range-capable, current-version pinned and never create shares', async () => {
+    const f = await fixture();
+    await f.DB.prepare('UPDATE documents SET mime_type=? WHERE id=?')
+      .bind('video/quicktime', 'doc_public')
+      .run();
+    await f.DB.prepare('UPDATE versions SET size=? WHERE id=?')
+      .bind(6 * 1024 ** 3, 'version:doc_public')
+      .run();
+    const response = await f.request(
+      `${f.base}/documents/doc_public/media`,
+      'GET',
+      undefined,
+      'blocked',
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+    const media = (await response.json()) as any;
+    const url = new URL(media.url);
+    expect(url.pathname).toBe('/private/private/doc_public');
+    expect(url.searchParams.get('response-content-type')).toBe('video/quicktime');
+    expect(url.searchParams.get('response-content-disposition')).toBe('inline');
+    expect(url.searchParams.get('X-Amz-Expires')).toBe('900');
+    expect(url.searchParams.get('X-Amz-SignedHeaders')).toBe('host'); // Range can vary without invalidating the signature.
+    expect(media.versionId).toBe('version:doc_public');
+    expect(f.filesGet).not.toHaveBeenCalled(); // No original buffering, even at 6 GB.
+    expect(((await f.DB.prepare('SELECT count(*) n FROM share_links').first()) as any).n).toBe(0);
+    expect(
+      (await f.request(`${f.base}/documents/doc_secret/media`, 'GET', undefined, 'blocked')).status,
+    ).toBe(404);
+    expect(
+      (await f.request(`/api/organizations/${f.other}/documents/doc_public/media`)).status,
+    ).toBe(404);
+    expect(
+      (await f.request(`${f.base}/documents/doc_public/media`, 'GET', undefined, 'outsider'))
+        .status,
+    ).toBe(403);
+    await f.DB.prepare(
+      'INSERT INTO versions (id,document_id,storage_key,original_name,size,created_by,created_at) VALUES(?,?,?,?,?,?,2)',
+    )
+      .bind(
+        'version:replacement',
+        'doc_public',
+        'private/replacement',
+        'replacement.mov',
+        1024,
+        'owner',
+      )
+      .run();
+    await f.DB.prepare('UPDATE documents SET current_version_id=? WHERE id=?')
+      .bind('version:replacement', 'doc_public')
+      .run();
+    const replaced = (await (
+      await f.request(`${f.base}/documents/doc_public/media`)
+    ).json()) as any;
+    expect(new URL(replaced.url).pathname).toBe('/private/private/replacement');
+    expect(replaced.versionId).toBe('version:replacement');
+    await f.DB.prepare('UPDATE documents SET is_deleted=1 WHERE id=?').bind('doc_public').run();
+    expect((await f.request(`${f.base}/documents/doc_public/media`)).status).toBe(404);
+  });
+
+  test('inline PDF URLs support large originals without file buffering; unsafe HTML stays attachment-only', async () => {
+    const f = await fixture();
+    await f.DB.prepare('UPDATE documents SET mime_type=? WHERE id=?')
+      .bind('application/pdf', 'doc_public')
+      .run();
+    await f.DB.prepare('UPDATE versions SET size=? WHERE id=?')
+      .bind(6 * 1024 ** 3, 'version:doc_public')
+      .run();
+    const response = await f.request(`${f.base}/documents/doc_public/file?direct=inline`);
+    expect(response.status).toBe(200);
+    expect(
+      new URL(((await response.json()) as any).url).searchParams.get('response-content-type'),
+    ).toBe('application/pdf');
+    expect(f.filesGet).not.toHaveBeenCalled();
+    expect((await f.request(`${f.base}/documents/doc_public/file`)).status).toBe(413);
+    await f.DB.prepare('UPDATE documents SET mime_type=? WHERE id=?')
+      .bind('text/html', 'doc_public')
+      .run();
+    expect((await f.request(`${f.base}/documents/doc_public/file?direct=inline`)).status).toBe(400);
+    await f.DB.prepare('UPDATE documents SET mime_type=?,current_version_id=? WHERE id=?')
+      .bind('video/quicktime', 'version:doc_secret', 'doc_public')
+      .run();
+    expect((await f.request(`${f.base}/documents/doc_public/media`)).status).toBe(404);
+    expect((await f.request(`${f.base}/documents/doc_public/transcript`)).status).toBe(404);
+  });
+
+  test('private transcripts preserve timestamp DTOs and never read an old version after replacement', async () => {
+    const f = await fixture();
+    await f.DB.prepare('UPDATE documents SET mime_type=? WHERE id=?')
+      .bind('audio/mpeg', 'doc_public')
+      .run();
+    await f.DB.prepare(
+      "INSERT INTO jobs(id,version_id,kind,status,generation,created_at,updated_at) VALUES(?,?,?,'done',0,1,1)",
+    )
+      .bind('transcript-job', 'version:doc_public', 'transcribe:0:0')
+      .run();
+    f.filesGet.mockResolvedValue({
+      size: 200,
+      json: async () => ({
+        text: 'Hello world',
+        chunks: [
+          { text: 'Hello', startSeconds: 3 },
+          { text: 'world', startSeconds: 7 },
+        ],
+      }),
+    } as any);
+    const transcript = (await (
+      await f.request(`${f.base}/documents/doc_public/transcript`, 'GET', undefined, 'blocked')
+    ).json()) as any;
+    expect(transcript).toMatchObject({
+      versionId: 'version:doc_public',
+      transcript: {
+        text: 'Hello world',
+        segments: [
+          { text: 'Hello', startSeconds: 3 },
+          { text: 'world', startSeconds: 7 },
+        ],
+      },
+    });
+    f.filesGet.mockClear();
+    expect(
+      (await f.request(`${f.base}/documents/doc_secret/transcript`, 'GET', undefined, 'blocked'))
+        .status,
+    ).toBe(404);
+    expect(f.filesGet).not.toHaveBeenCalled();
+    await f.DB.prepare(
+      'INSERT INTO versions (id,document_id,storage_key,original_name,size,created_by,created_at) VALUES(?,?,?,?,?,?,2)',
+    )
+      .bind(
+        'version:replacement',
+        'doc_public',
+        'private/replacement',
+        'replacement.mov',
+        1024,
+        'owner',
+      )
+      .run();
+    await f.DB.prepare('UPDATE documents SET current_version_id=? WHERE id=?')
+      .bind('version:replacement', 'doc_public')
+      .run();
+    const replaced = (await (
+      await f.request(`${f.base}/documents/doc_public/transcript`)
+    ).json()) as any;
+    expect(replaced.transcript.text).toBe('');
+    expect(f.filesGet).not.toHaveBeenCalled();
+    await f.DB.prepare('UPDATE documents SET is_deleted=1 WHERE id=?').bind('doc_public').run();
+    expect((await f.request(`${f.base}/documents/doc_public/transcript`)).status).toBe(404);
+  });
+
   test('restricts ancestors before full-text rows, snippets and counts; personal ownership beats elevated foreign membership', async () => {
     const f = await fixture();
     expect(await allowedDocumentIds(f.env, f.identities.blocked!, f.team)).toEqual(['doc_public']);

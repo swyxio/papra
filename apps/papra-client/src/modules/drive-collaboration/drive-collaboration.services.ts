@@ -8,6 +8,13 @@ export type DriveFolder = {
   isHome: boolean;
   isRestricted: boolean;
   canWrite: boolean;
+  createdAt: string;
+  updatedAt: string;
+  documentsCount: number;
+  documentsSize: number;
+  shortcutsCount: number;
+  lastActivityAt: string | null;
+  effectiveRestricted: boolean;
 };
 export type DriveComment = {
   id: string;

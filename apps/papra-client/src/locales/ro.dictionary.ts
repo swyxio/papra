@@ -244,7 +244,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'organizations.create-first.default-name': 'Organizația mea',
   'organizations.create-first.user-name': 'Organizația lui {{ name }}',
 
-  'organization.settings.title': 'Setările organizației',
   'organization.settings.page.title': 'Setările organizației',
   'organization.settings.page.description': 'Gestionează setarile organizației aici.',
   'organization.settings.name.title': 'Numele organizației',
@@ -355,17 +354,12 @@ export const translations: Partial<TranslationsDictionary> = {
 
   // Documents
 
-  'documents.list.title': 'Documente',
-  'documents.list.no-documents.title': 'Niciun document',
-  'documents.list.no-documents.description':
-    'Încă nu există documente în aceasta organizație. Începe prin a încarca câteva documente.',
   'documents.list.no-results': 'Nu au fost găsite documente',
   'documents.list.table.headers.file-name': 'Nume fișier',
   'documents.list.table.headers.created': 'Creat la',
   'documents.list.table.headers.deleted': 'Șters la',
   'documents.list.table.headers.actions': 'Acțiuni',
   'documents.list.table.headers.tags': 'Etichete',
-  'documents.list.search.placeholder': 'Caută documente...',
   'documents.list.search.total-count-with-query':
     '{{ count }} {{ count, =1:document, documente }} corespunzător acestei căutări',
   'documents.list.search.total-count-no-query':
@@ -411,7 +405,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'documents.actions.download.title': 'Descarcă',
   'documents.actions.download.error': 'Nu s-a putut descărca documentul',
   'documents.actions.restore': 'Restaurează',
-  'documents.actions.delete': 'Șterge',
   'documents.actions.edit': 'Editează',
   'documents.actions.cancel': 'Anulează',
   'documents.actions.save': 'Salvează',
@@ -1040,9 +1033,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'layout.menu.deleted-documents': 'Documente șterse',
   'layout.menu.organization-settings': 'Setări organizație',
   'layout.menu.api-keys': 'Chei API',
-  'layout.menu.settings': 'Setări',
-  'layout.menu.account': 'Cont',
-  'layout.menu.general-settings': 'Setări generale',
   'layout.menu.usage': 'Utilizare',
   'layout.menu.intake-emails': 'Email-uri de primire',
   'layout.menu.webhooks': 'Webhook-uri',

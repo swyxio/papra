@@ -243,7 +243,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'organizations.create-first.default-name': 'Min organisation',
   'organizations.create-first.user-name': '{{ name }}s organisation',
 
-  'organization.settings.title': 'Organisationsinställningar',
   'organization.settings.page.title': 'Organisationsinställningar',
   'organization.settings.page.description': 'Hantera dina organisationsinställningar här.',
   'organization.settings.name.title': 'Organisationsnamn',
@@ -354,17 +353,12 @@ export const translations: Partial<TranslationsDictionary> = {
 
   // Documents
 
-  'documents.list.title': 'Dokument',
-  'documents.list.no-documents.title': 'Inga dokument',
-  'documents.list.no-documents.description':
-    'Det finns inga dokument i denna organisation ännu. Börja med att ladda upp några dokument.',
   'documents.list.no-results': 'Inga dokument hittades',
   'documents.list.table.headers.file-name': 'Filnamn',
   'documents.list.table.headers.created': 'Skapad',
   'documents.list.table.headers.deleted': 'Raderad',
   'documents.list.table.headers.actions': 'Åtgärder',
   'documents.list.table.headers.tags': 'Taggar',
-  'documents.list.search.placeholder': 'Sök dokument...',
   'documents.list.search.total-count-with-query':
     '{{ count }} {{ count, =1:dokument, dokument }} matchar denna sökning',
   'documents.list.search.total-count-no-query':
@@ -408,7 +402,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'documents.actions.download.title': 'Ladda ner',
   'documents.actions.download.error': 'Det gick inte att ladda ner dokumentet',
   'documents.actions.restore': 'Återställ',
-  'documents.actions.delete': 'Radera',
   'documents.actions.edit': 'Redigera',
   'documents.actions.cancel': 'Avbryt',
   'documents.actions.save': 'Spara',
@@ -1018,9 +1011,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'layout.menu.deleted-documents': 'Raderade dokument',
   'layout.menu.organization-settings': 'Inställningar',
   'layout.menu.api-keys': 'API-nycklar',
-  'layout.menu.settings': 'Inställningar',
-  'layout.menu.account': 'Konto',
-  'layout.menu.general-settings': 'Allmänna inställningar',
   'layout.menu.usage': 'Användning',
   'layout.menu.intake-emails': 'Inmatningsadresser',
   'layout.menu.webhooks': 'Webhooks',

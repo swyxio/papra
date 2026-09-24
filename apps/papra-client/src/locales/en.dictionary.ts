@@ -237,7 +237,6 @@ export const translations = {
   'organizations.create-first.default-name': 'My organization',
   'organizations.create-first.user-name': "{{ name }}'s organization",
 
-  'organization.settings.title': 'Organization Settings',
   'organization.settings.page.title': 'Organization settings',
   'organization.settings.page.description': 'Manage your organization settings here.',
   'organization.settings.name.title': 'Organization name',
@@ -365,10 +364,6 @@ export const translations = {
 
   // Documents
 
-  'documents.list.title': 'Documents',
-  'documents.list.no-documents.title': 'No documents',
-  'documents.list.no-documents.description':
-    'There are no documents in this organization yet. Start by uploading some documents.',
   'documents.list.no-results': 'No documents found',
   'documents.list.table.headers.file-name': 'File name',
   'documents.list.table.headers.document-date': 'Date',
@@ -376,7 +371,6 @@ export const translations = {
   'documents.list.table.headers.deleted': 'Deleted',
   'documents.list.table.headers.actions': 'Actions',
   'documents.list.table.headers.tags': 'Tags',
-  'documents.list.search.placeholder': 'Search documents...',
   'documents.list.search.total-count-with-query':
     '{{ count }} {{ count, =1:document, documents }} matching this query',
   'documents.list.search.total-count-no-query':
@@ -420,7 +414,6 @@ export const translations = {
   'documents.actions.download.title': 'Download',
   'documents.actions.download.error': 'Failed to download document',
   'documents.actions.restore': 'Restore',
-  'documents.actions.delete': 'Delete',
   'documents.actions.edit': 'Edit',
   'documents.actions.cancel': 'Cancel',
   'documents.actions.save': 'Save',
@@ -1038,9 +1031,6 @@ export const translations = {
   'layout.menu.deleted-documents': 'Deleted documents',
   'layout.menu.organization-settings': 'Settings',
   'layout.menu.api-keys': 'API keys',
-  'layout.menu.settings': 'Settings',
-  'layout.menu.account': 'Account',
-  'layout.menu.general-settings': 'General settings',
   'layout.menu.auto-tagging': 'Auto tagging',
   'layout.menu.usage': 'Usage',
   'layout.menu.intake-emails': 'Intake emails',

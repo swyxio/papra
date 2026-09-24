@@ -564,7 +564,11 @@ test('shared transcript requires existing delegation and returns only current-ge
     accessToken,
   );
   expect(media.status).toBe(200);
-  expect(new URL(((await media.json()) as any).url).searchParams.get('X-Amz-Expires')).toBe('900');
+  const mediaUrl = new URL(((await media.json()) as any).url);
+  expect(mediaUrl.searchParams.get('X-Amz-Expires')).toBe('900');
+  expect(mediaUrl.searchParams.get('response-content-type')).toBe('video/mp4');
+  expect(mediaUrl.searchParams.get('response-content-disposition')).toBe('inline');
+  expect(mediaUrl.searchParams.get('X-Amz-SignedHeaders')).toBe('host');
   await request(`/api/organizations/team/share-links/${share.id}`, 'PATCH', { isEnabled: false });
   expect((await request(path, 'GET', undefined, 'owner', accessToken)).status).toBe(410);
 });

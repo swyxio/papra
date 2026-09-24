@@ -245,7 +245,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'organizations.create-first.default-name': 'Mijn organisatie',
   'organizations.create-first.user-name': "{{ name }}'s organisatie",
 
-  'organization.settings.title': 'Organisatie-instellingen',
   'organization.settings.page.title': 'Organisatie-instellingen',
   'organization.settings.page.description': 'Beheer hier uw organisatie-instellingen.',
   'organization.settings.name.title': 'Organisatienaam',
@@ -357,17 +356,12 @@ export const translations: Partial<TranslationsDictionary> = {
 
   // Documents
 
-  'documents.list.title': 'Documenten',
-  'documents.list.no-documents.title': 'Geen documenten',
-  'documents.list.no-documents.description':
-    'Er staan nog geen documenten in deze organisatie. Begin met het uploaden van documenten.',
   'documents.list.no-results': 'Geen documenten gevonden',
   'documents.list.table.headers.file-name': 'Bestandsnaam',
   'documents.list.table.headers.created': 'Aangemaakt op',
   'documents.list.table.headers.deleted': 'Verwijderd op',
   'documents.list.table.headers.actions': 'Acties',
   'documents.list.table.headers.tags': 'Tags',
-  'documents.list.search.placeholder': 'Zoek documenten...',
   'documents.list.search.total-count-with-query':
     '{{ count }} {{ count, =1:document, documenten }} komen overeen met deze zoekopdracht',
   'documents.list.search.total-count-no-query':
@@ -413,7 +407,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'documents.actions.download.title': 'Downloaden',
   'documents.actions.download.error': 'Document kon niet worden gedownload',
   'documents.actions.restore': 'Herstellen',
-  'documents.actions.delete': 'Verwijderen',
   'documents.actions.edit': 'Bewerken',
   'documents.actions.cancel': 'Annuleren',
   'documents.actions.save': 'Opslaan',
@@ -1032,9 +1025,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'layout.menu.deleted-documents': 'Verwijderde documenten',
   'layout.menu.organization-settings': 'Instellingen',
   'layout.menu.api-keys': 'API-sleutels',
-  'layout.menu.settings': 'Instellingen',
-  'layout.menu.account': 'Account',
-  'layout.menu.general-settings': 'Algemene instellingen',
   'layout.menu.usage': 'Gebruik',
   'layout.menu.intake-emails': 'Intake-e-mails',
   'layout.menu.webhooks': 'Webhooks',

@@ -2,7 +2,8 @@ import type { Component, ParentComponent } from 'solid-js';
 
 import type { Organization } from '@/modules/organizations/organizations.types';
 
-import { useNavigate, useParams } from '@solidjs/router';
+import { authPagesPaths } from '@/modules/auth/auth.constants';
+import { A, useNavigate, useParams } from '@solidjs/router';
 import { useQuery } from '@tanstack/solid-query';
 import { createEffect, on, Show } from 'solid-js';
 import { fetchDocumentViews } from '@/modules/document-views/document-views.services';
@@ -39,13 +40,14 @@ import { useCommandPalette } from '@/modules/command-palette/command-palette.pro
 import { GlobalDropArea } from '@/modules/documents/components/global-drop-area.component';
 import { UserSettingsDropdown } from '@/modules/users/components/user-settings.component';
 
-const OrganizationLayoutSideNav: Component = () => {
+const OrganizationLayoutSideNav: Component<{ accountReady: boolean }> = (props) => {
   const navigate = useNavigate();
   const params = useParams();
   const { t } = useI18n();
 
   const documentViewsQuery = useQuery(() => ({
     queryKey: ['organizations', params.organizationId, 'document-views'],
+    enabled: props.accountReady && Boolean(params.organizationId),
     queryFn: async () => fetchDocumentViews({ organizationId: params.organizationId }),
   }));
 
@@ -69,58 +71,70 @@ const OrganizationLayoutSideNav: Component = () => {
   };
 
   const getMainMenuItems = () => [
-    {
-      items: [
-        {
-          label: t('layout.menu.home'),
-          icon: 'i-tabler-home',
-          href: `/organizations/${params.organizationId}`,
-        },
-        {
-          label: t('layout.menu.documents'),
-          icon: 'i-tabler-file-text',
-          href: `/organizations/${params.organizationId}/documents`,
-        },
-        {
-          label: t('layout.menu.tags'),
-          icon: 'i-tabler-tag',
-          href: `/organizations/${params.organizationId}/tags`,
-        },
-        {
-          label: t('layout.menu.custom-properties'),
-          icon: 'i-tabler-forms',
-          href: `/organizations/${params.organizationId}/custom-properties`,
-        },
-        {
-          label: t('layout.menu.members'),
-          icon: 'i-tabler-users',
-          href: `/organizations/${params.organizationId}/members`,
-        },
-      ],
-    },
-    ...getDocumentViewsSections(),
+    { items: [{ label: 'Your spaces', icon: 'i-tabler-layout-grid', href: '/organizations' }] },
+    ...(props.accountReady && params.organizationId
+      ? [
+          {
+            items: [
+              {
+                label: t('layout.menu.home'),
+                icon: 'i-tabler-home',
+                href: `/organizations/${params.organizationId}`,
+              },
+              {
+                label: t('layout.menu.documents'),
+                icon: 'i-tabler-file-text',
+                href: `/organizations/${params.organizationId}/documents`,
+              },
+              {
+                label: t('layout.menu.tags'),
+                icon: 'i-tabler-tag',
+                href: `/organizations/${params.organizationId}/tags`,
+              },
+              {
+                label: t('layout.menu.custom-properties'),
+                icon: 'i-tabler-forms',
+                href: `/organizations/${params.organizationId}/custom-properties`,
+              },
+              {
+                label: t('layout.menu.members'),
+                icon: 'i-tabler-users',
+                href: `/organizations/${params.organizationId}/members`,
+              },
+            ],
+          },
+          ...getDocumentViewsSections(),
+        ]
+      : []),
   ];
 
   const getFooterMenuItems = () => [
-    {
-      label: t('layout.menu.deleted-documents'),
-      icon: 'i-tabler-trash',
-      href: `/organizations/${params.organizationId}/deleted`,
-    },
-    {
-      label: t('layout.menu.organization-settings'),
-      icon: 'i-tabler-settings',
-      href: `/organizations/${params.organizationId}/settings`,
-    },
+    { label: 'Account settings', icon: 'i-tabler-user', href: '/settings' },
+    ...(props.accountReady && params.organizationId
+      ? [
+          {
+            label: t('layout.menu.deleted-documents'),
+            icon: 'i-tabler-trash',
+            href: `/organizations/${params.organizationId}/deleted`,
+          },
+          {
+            label: t('layout.menu.organization-settings'),
+            icon: 'i-tabler-settings',
+            href: `/organizations/${params.organizationId}/settings`,
+          },
+        ]
+      : []),
   ];
 
   const organizationsQuery = useQuery(() => ({
     queryKey: ['organizations'],
+    enabled: props.accountReady,
     queryFn: fetchOrganizations,
   }));
 
   const organizationQuery = useQuery(() => ({
     queryKey: ['organizations', params.organizationId],
+    enabled: props.accountReady && Boolean(params.organizationId),
     queryFn: async () => fetchOrganization({ organizationId: params.organizationId }),
   }));
 
@@ -152,61 +166,74 @@ const OrganizationLayoutSideNav: Component = () => {
       header={() => (
         <div class="p-4 pb-0 min-w-0 max-w-full">
           <Show
-            when={organizationsQuery.data}
+            when={props.accountReady && params.organizationId}
             fallback={
-              <div class="flex items-center gap-2 min-w-0 p-2 border rounded-lg">
-                <span class="p-1.5 rounded text-lg font-bold flex items-center bg-muted light:border dark:bg-primary/10 text-primary flex-shrink-0">
-                  <div class="i-tabler-file-text size-5.5" />
-                </span>
-
-                <Skeleton class="h-4 flex-1" />
-              </div>
+              <A
+                href="/organizations"
+                class="flex items-center gap-2 px-2 py-3 font-semibold text-lg"
+              >
+                <div class="i-tabler-file-text size-6 text-primary" />
+                SwyxDrive
+              </A>
             }
           >
-            <Select
-              class="w-full"
-              options={organizationsQuery.data?.organizations ?? []}
-              optionValue="id"
-              optionTextValue="name"
-              value={organizationsQuery.data?.organizations.find(
-                (organization) => organization.id === params.organizationId,
-              )}
-              onChange={(value) => {
-                if (!value || value.id === params.organizationId) {
-                  return;
-                }
+            <Show
+              when={organizationsQuery.data}
+              fallback={
+                <div class="flex items-center gap-2 min-w-0 p-2 border rounded-lg">
+                  <span class="p-1.5 rounded text-lg font-bold flex items-center bg-muted light:border dark:bg-primary/10 text-primary flex-shrink-0">
+                    <div class="i-tabler-file-text size-5.5" />
+                  </span>
 
-                navigate(`/organizations/${value.id}`);
-              }}
-              itemComponent={(props) => (
-                <SelectItem class="cursor-pointer" item={props.item}>
-                  {props.item.rawValue.name}
-                </SelectItem>
-              )}
+                  <Skeleton class="h-4 flex-1" />
+                </div>
+              }
             >
-              <SelectTrigger
-                class="hover:bg-accent/50 transition rounded-lg h-auto pl-2"
-                caretIcon={
-                  <div class="i-tabler-chevron-down size-4 opacity-50 ml-2 flex-shrink-0" />
-                }
+              <Select
+                class="w-full"
+                options={organizationsQuery.data?.organizations ?? []}
+                optionValue="id"
+                optionTextValue="name"
+                value={organizationsQuery.data?.organizations.find(
+                  (organization) => organization.id === params.organizationId,
+                )}
+                onChange={(value) => {
+                  if (!value || value.id === params.organizationId) {
+                    return;
+                  }
+
+                  navigate(`/organizations/${value.id}/documents`);
+                }}
+                itemComponent={(props) => (
+                  <SelectItem class="cursor-pointer" item={props.item}>
+                    {props.item.rawValue.name}
+                  </SelectItem>
+                )}
               >
-                <SelectValue<Organization | undefined> class="flex items-center gap-2 min-w-0">
-                  {(state) => (
-                    <>
-                      <span class="p-1.5 rounded text-lg font-bold flex items-center bg-muted light:border dark:bg-primary/10 text-primary transition flex-shrink-0">
-                        <div class="i-tabler-file-text size-5.5" />
-                      </span>
+                <SelectTrigger
+                  class="hover:bg-accent/50 transition rounded-lg h-auto pl-2"
+                  caretIcon={
+                    <div class="i-tabler-chevron-down size-4 opacity-50 ml-2 flex-shrink-0" />
+                  }
+                >
+                  <SelectValue<Organization | undefined> class="flex items-center gap-2 min-w-0">
+                    {(state) => (
+                      <>
+                        <span class="p-1.5 rounded text-lg font-bold flex items-center bg-muted light:border dark:bg-primary/10 text-primary transition flex-shrink-0">
+                          <div class="i-tabler-file-text size-5.5" />
+                        </span>
 
-                      <span class="truncate text-base font-medium">
-                        {state.selectedOption()?.name}
-                      </span>
-                    </>
-                  )}
-                </SelectValue>
-              </SelectTrigger>
+                        <span class="truncate text-base font-medium">
+                          {state.selectedOption()?.name}
+                        </span>
+                      </>
+                    )}
+                  </SelectValue>
+                </SelectTrigger>
 
-              <SelectContent />
-            </Select>
+                <SelectContent />
+              </Select>
+            </Show>
           </Show>
         </div>
       )}
@@ -214,7 +241,8 @@ const OrganizationLayoutSideNav: Component = () => {
   );
 };
 
-export const OrganizationLayout: ParentComponent = (props) => {
+export const AppLayout: ParentComponent<{ accountReady?: boolean }> = (props) => {
+  const accountReady = () => props.accountReady !== false;
   const params = useParams();
   const navigate = useNavigate();
   const { openCommandPalette } = useCommandPalette();
@@ -222,6 +250,7 @@ export const OrganizationLayout: ParentComponent = (props) => {
 
   const query = useQuery(() => ({
     queryKey: ['organizations', params.organizationId],
+    enabled: accountReady() && Boolean(params.organizationId),
     queryFn: async () => fetchOrganization({ organizationId: params.organizationId }),
   }));
 
@@ -242,13 +271,20 @@ export const OrganizationLayout: ParentComponent = (props) => {
   );
 
   return (
-    <DocumentUploadProvider organizationId={params.organizationId}>
-      <SidenavLayout
-        children={props.children}
-        sideNav={OrganizationLayoutSideNav}
-        header={() => (
-          <div class="flex justify-between w-full">
-            <div class="flex items-center">
+    <SidenavLayout
+      children={props.children}
+      sideNav={() => <OrganizationLayoutSideNav accountReady={accountReady()} />}
+      header={() => (
+        <div class="flex justify-between w-full">
+          <div class="flex items-center min-w-0">
+            <Show
+              when={accountReady() && params.organizationId}
+              fallback={
+                <A href="/organizations" class="font-semibold truncate">
+                  Your spaces
+                </A>
+              }
+            >
               <Button
                 variant="outline"
                 class="lg:min-w-64 justify-start gap-2 px-2.5 sm:px-4"
@@ -257,16 +293,36 @@ export const OrganizationLayout: ParentComponent = (props) => {
                 <div class="i-tabler-search size-4" />
                 <span class="hidden sm:inline">{t('layout.search.placeholder')}</span>
               </Button>
-            </div>
-
-            <div class="flex items-center gap-2">
-              <OrganizationLayoutImportButton />
-
-              <UserSettingsDropdown />
-            </div>
+            </Show>
           </div>
-        )}
-      />
+
+          <div class="flex items-center gap-2">
+            <Show when={accountReady() && params.organizationId}>
+              <OrganizationLayoutImportButton />
+            </Show>
+
+            <Show
+              when={accountReady()}
+              fallback={
+                <Button as={A} href={authPagesPaths.login} variant="outline">
+                  Sign in
+                </Button>
+              }
+            >
+              <UserSettingsDropdown />
+            </Show>
+          </div>
+        </div>
+      )}
+    />
+  );
+};
+
+export const OrganizationLayout: ParentComponent = (props) => {
+  const params = useParams();
+  return (
+    <DocumentUploadProvider organizationId={params.organizationId}>
+      <AppLayout>{props.children}</AppLayout>
     </DocumentUploadProvider>
   );
 };

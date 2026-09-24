@@ -7,6 +7,7 @@ export type Document = {
   id: string;
   organizationId: string;
   currentVersionId?: string;
+  isShortcut?: boolean;
   name: string;
   mimeType: string;
   originalSize: number;

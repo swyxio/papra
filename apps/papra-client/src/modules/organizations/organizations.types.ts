@@ -6,6 +6,11 @@ export type Organization = {
   name: string;
   createdAt: Date;
   updatedAt: Date;
+  isPersonal?: boolean;
+  role?: OrganizationMemberRole;
+  documentsCount?: number;
+  documentsSize?: number;
+  lastActivityAt?: string | null;
   deletedAt?: Date | null;
   deletedBy?: string | null;
   scheduledPurgeAt?: Date | null;

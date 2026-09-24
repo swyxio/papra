@@ -246,7 +246,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'organizations.create-first.default-name': 'La mia organizzazione',
   'organizations.create-first.user-name': 'Organizzazione di {{ name }}',
 
-  'organization.settings.title': 'Impostazioni organizzazione',
   'organization.settings.page.title': 'Impostazioni organizzazione',
   'organization.settings.page.description':
     'Gestisci qui le impostazioni della tua organizzazione.',
@@ -358,17 +357,12 @@ export const translations: Partial<TranslationsDictionary> = {
 
   // Documents
 
-  'documents.list.title': 'Documenti',
-  'documents.list.no-documents.title': 'Nessun documento',
-  'documents.list.no-documents.description':
-    'Non ci sono ancora documenti in questa organizzazione. Inizia caricando dei documenti.',
   'documents.list.no-results': 'Nessun documento trovato',
   'documents.list.table.headers.file-name': 'Nome file',
   'documents.list.table.headers.created': 'Creato il',
   'documents.list.table.headers.deleted': 'Eliminato il',
   'documents.list.table.headers.actions': 'Azioni',
   'documents.list.table.headers.tags': 'Tag',
-  'documents.list.search.placeholder': 'Cerca documenti...',
   'documents.list.search.total-count-with-query':
     '{{ count }} {{ count, =1:documento, documenti }} corrispondente a questa ricerca',
   'documents.list.search.total-count-no-query':
@@ -414,7 +408,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'documents.actions.download.title': 'Scarica',
   'documents.actions.download.error': 'Impossibile scaricare il documento',
   'documents.actions.restore': 'Ripristina',
-  'documents.actions.delete': 'Elimina',
   'documents.actions.edit': 'Modifica',
   'documents.actions.cancel': 'Annulla',
   'documents.actions.save': 'Salva',
@@ -1036,9 +1029,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'layout.menu.deleted-documents': 'Documenti eliminati',
   'layout.menu.organization-settings': 'Impostazioni',
   'layout.menu.api-keys': 'Chiavi API',
-  'layout.menu.settings': 'Impostazioni',
-  'layout.menu.account': 'Account',
-  'layout.menu.general-settings': 'Impostazioni generali',
   'layout.menu.usage': 'Utilizzo',
   'layout.menu.intake-emails': 'Email di acquisizione',
   'layout.menu.webhooks': 'Webhook',

@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from 'vitest';
-import { uploadDocument } from './documents.services';
+import { fetchOrganizationDocuments, uploadDocument } from './documents.services';
 
 const api = vi.hoisted(() => vi.fn());
 vi.mock('../shared/http/api-client', () => ({ apiClient: api }));
@@ -72,4 +72,20 @@ test('cancelling a duplicate decision never starts another upload', async () => 
     }),
   ).rejects.toThrow('existing file was kept');
   expect(f.attempts).toHaveLength(1);
+});
+
+test('folder listings pass folder scope and pagination to the document endpoint', async () => {
+  api.mockResolvedValue({ documents: [], documentsCount: 0 });
+  await fetchOrganizationDocuments({
+    organizationId: 'org',
+    folderId: 'folder',
+    pageIndex: 2,
+    pageSize: 15,
+  });
+  expect(api).toHaveBeenCalledWith(
+    expect.objectContaining({
+      path: '/api/organizations/org/documents',
+      query: expect.objectContaining({ folderId: 'folder', pageIndex: 2, pageSize: 15 }),
+    }),
+  );
 });

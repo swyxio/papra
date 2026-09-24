@@ -1,3 +1,4 @@
+import { DocumentMediaPreview } from './document-media-preview.component';
 import type { Component } from 'solid-js';
 import type { Document } from '../documents.types';
 import { useQuery } from '@tanstack/solid-query';
@@ -283,7 +284,7 @@ export const DocumentPreview: Component<{
       page,
     };
     const text = element?.closest('[data-extracted-text]');
-    if (text) {
+    if (text && !isMedia()) {
       const before = range.cloneRange();
       before.selectNodeContents(text);
       before.setEnd(range.startContainer, range.startOffset);
@@ -292,6 +293,7 @@ export const DocumentPreview: Component<{
     }
     props.onTextSelected(anchor);
   }
+  const isMedia = () => /^(video|audio)\//.test(props.document.mimeType);
   const useDerivative = () =>
     props.document.originalSize > 32 * 1024 ** 2 ||
     props.document.mimeType.startsWith('image/') ||
@@ -304,7 +306,7 @@ export const DocumentPreview: Component<{
       props.document.id,
       'preview',
     ],
-    enabled: useDerivative(),
+    enabled: useDerivative() && !isMedia(),
     queryFn: async () =>
       apiClient<{
         status: 'pending' | 'processing' | 'ready' | 'unavailable' | 'failed';
@@ -330,7 +332,7 @@ export const DocumentPreview: Component<{
       'file',
       props.document.currentVersionId,
     ],
-    enabled: !useDerivative(),
+    enabled: !useDerivative() && !isMedia(),
     staleTime: Infinity,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
@@ -355,78 +357,89 @@ export const DocumentPreview: Component<{
       }}
     >
       <Show
-        when={useDerivative()}
+        when={isMedia()}
         fallback={
           <>
-            <Show when={query.isError && !query.data}>
-              <Card class="p-6 text-sm">
-                <p>Could not load this document preview.</p>
-                <Button
-                  class="mt-3"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => void query.refetch()}
-                >
-                  Try again
-                </Button>
-              </Card>
-            </Show>
-            <Show when={query.data}>
-              {(blob) => <DocumentBlobPreview blob={blob()} mimeType={props.document.mimeType} />}
+            <Show
+              when={useDerivative()}
+              fallback={
+                <>
+                  <Show when={query.isError && !query.data}>
+                    <Card class="p-6 text-sm">
+                      <p>Could not load this document preview.</p>
+                      <Button
+                        class="mt-3"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void query.refetch()}
+                      >
+                        Try again
+                      </Button>
+                    </Card>
+                  </Show>
+                  <Show when={query.data}>
+                    {(blob) => (
+                      <DocumentBlobPreview blob={blob()} mimeType={props.document.mimeType} />
+                    )}
+                  </Show>
+                </>
+              }
+            >
+              <Switch>
+                <Match when={preview.isError && !preview.data}>
+                  <Card class="p-6 text-sm">Could not load preview status.</Card>
+                </Match>
+                <Match when={preview.data?.status === 'ready' && preview.data.url}>
+                  <img
+                    src={previewUrl()?.url}
+                    alt={`Preview of ${props.document.name}`}
+                    class="max-w-full max-h-800px object-contain mx-auto"
+                  />
+                  <p class="text-xs text-muted-foreground mt-2">Preview · first page or frame</p>
+                </Match>
+                <Match when={['unavailable', 'failed'].includes(preview.data?.status ?? '')}>
+                  <Card class="p-6 text-sm text-muted-foreground">
+                    {preview.data?.reason ?? 'Preview unavailable.'} Use Download to stream the
+                    original directly from storage.
+                  </Card>
+                </Match>
+                <Match when={true}>
+                  <Card class="p-6 text-sm text-muted-foreground">
+                    Generating a small preview in the background…
+                  </Card>
+                </Match>
+              </Switch>
+              <Show when={props.onTextSelected && props.document.content}>
+                <details class="mt-4 rounded-md border p-3">
+                  <summary class="cursor-pointer text-sm">Select extracted text to comment</summary>
+                  <pre
+                    data-extracted-text
+                    class="mt-3 whitespace-pre-wrap text-sm max-h-96 overflow-auto"
+                  >
+                    {props.document.content}
+                  </pre>
+                </details>
+              </Show>
+              <Show when={preview.isError && preview.data}>
+                <p role="status" class="text-xs text-muted-foreground mt-2">
+                  Could not refresh preview status. Your current preview is still open.
+                </p>
+              </Show>
+              <Show when={preview.data}>
+                <p class="text-xs text-muted-foreground mt-3">
+                  Integrity:{' '}
+                  {preview.data?.integrityStatus === 'verified'
+                    ? 'SHA-256 computed; stored size checked'
+                    : preview.data?.integrityStatus === 'failed'
+                      ? 'Verification failed; original retained'
+                      : 'Verifying original in background'}
+                </p>
+              </Show>
             </Show>
           </>
         }
       >
-        <Switch>
-          <Match when={preview.isError && !preview.data}>
-            <Card class="p-6 text-sm">Could not load preview status.</Card>
-          </Match>
-          <Match when={preview.data?.status === 'ready' && preview.data.url}>
-            <img
-              src={previewUrl()?.url}
-              alt={`Preview of ${props.document.name}`}
-              class="max-w-full max-h-800px object-contain mx-auto"
-            />
-            <p class="text-xs text-muted-foreground mt-2">Preview · first page or frame</p>
-          </Match>
-          <Match when={['unavailable', 'failed'].includes(preview.data?.status ?? '')}>
-            <Card class="p-6 text-sm text-muted-foreground">
-              {preview.data?.reason ?? 'Preview unavailable.'} Use Download to stream the original
-              directly from storage.
-            </Card>
-          </Match>
-          <Match when={true}>
-            <Card class="p-6 text-sm text-muted-foreground">
-              Generating a small preview in the background…
-            </Card>
-          </Match>
-        </Switch>
-        <Show when={props.onTextSelected && props.document.content}>
-          <details class="mt-4 rounded-md border p-3">
-            <summary class="cursor-pointer text-sm">Select extracted text to comment</summary>
-            <pre
-              data-extracted-text
-              class="mt-3 whitespace-pre-wrap text-sm max-h-96 overflow-auto"
-            >
-              {props.document.content}
-            </pre>
-          </details>
-        </Show>
-        <Show when={preview.isError && preview.data}>
-          <p role="status" class="text-xs text-muted-foreground mt-2">
-            Could not refresh preview status. Your current preview is still open.
-          </p>
-        </Show>
-        <Show when={preview.data}>
-          <p class="text-xs text-muted-foreground mt-3">
-            Integrity:{' '}
-            {preview.data?.integrityStatus === 'verified'
-              ? 'SHA-256 computed; stored size checked'
-              : preview.data?.integrityStatus === 'failed'
-                ? 'Verification failed; original retained'
-                : 'Verifying original in background'}
-          </p>
-        </Show>
+        <DocumentMediaPreview document={props.document} />
       </Show>
     </div>
   );

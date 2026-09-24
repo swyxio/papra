@@ -1,10 +1,11 @@
+import { PublicHeader } from '@/modules/ui/layouts/public.layout';
 import { SharedTranscriptPanel } from '../components/shared-transcript.component';
 import type { PublicSharedDocument } from '../document-share-links.types';
 import { TranscriptionProgress } from '@/modules/documents/components/transcription-progress.component';
 import { transcriptionActive } from '@/modules/documents/document-processing.services';
 import type { Component } from 'solid-js';
 import { formatBytes } from '@corentinth/chisels';
-import { A, useParams } from '@solidjs/router';
+import { useParams } from '@solidjs/router';
 import { useMutation, useQuery } from '@tanstack/solid-query';
 import { createEffect, createSignal, onCleanup, Match, Show, Switch } from 'solid-js';
 import { DocumentBlobPreview } from '@/modules/documents/components/document-preview.component';
@@ -367,59 +368,47 @@ export const SharedDocumentPage: Component = () => {
 
   return (
     <div>
-      <div class="border-b">
-        <div class="px-6 py-4 flex items-center justify-between gap-2 max-w-5xl mx-auto">
-          <A
-            href="/"
-            class="group text-base text-muted-foreground flex gap-2 font-semibold hover:text-foreground transition"
+      <PublicHeader>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            as={Button}
+            variant="outline"
+            aria-label={t('user-menu.trigger.label')}
+            size="icon"
           >
-            <div class="i-tabler-file-text size-6 text-primary transform rotate-12deg group-hover:rotate-25deg transition" />
-            SwyxDrive
-          </A>
+            <div class="i-tabler-dots size-4" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent class="min-w-48">
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger class="flex items-center gap-2 cursor-pointer">
+                <div class="i-tabler-language size-4 text-muted-foreground" />
+                {t('user-menu.language')}
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent class="min-w-48">
+                <LanguageSwitcher />
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
 
-          <div class="flex gap-2">
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                as={Button}
-                variant="outline"
-                aria-label={t('user-menu.trigger.label')}
-                size="icon"
-              >
-                <div class="i-tabler-dots size-4" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent class="min-w-48">
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger class="flex items-center gap-2 cursor-pointer">
-                    <div class="i-tabler-language size-4 text-muted-foreground" />
-                    {t('user-menu.language')}
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent class="min-w-48">
-                    <LanguageSwitcher />
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger class="flex items-center gap-2 cursor-pointer">
+                <div class="i-tabler-sun-moon size-4 text-muted-foreground" />
+                {t('user-menu.theme')}
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent class="min-w-48">
+                <ThemeSwitcher />
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
 
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger class="flex items-center gap-2 cursor-pointer">
-                    <div class="i-tabler-sun-moon size-4 text-muted-foreground" />
-                    {t('user-menu.theme')}
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent class="min-w-48">
-                    <ThemeSwitcher />
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
-
-                <DropdownMenuItem
-                  onClick={() => aboutDialog.open()}
-                  class="flex items-center gap-2 cursor-pointer"
-                >
-                  <div class="i-tabler-info-circle size-4 text-muted-foreground" />
-                  {t('user-menu.about')}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </div>
-      </div>
+            <DropdownMenuItem
+              onClick={() => aboutDialog.open()}
+              class="flex items-center gap-2 cursor-pointer"
+            >
+              <div class="i-tabler-info-circle size-4 text-muted-foreground" />
+              {t('user-menu.about')}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </PublicHeader>
 
       <Switch>
         <Match when={documentQuery.isPending}>

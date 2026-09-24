@@ -240,7 +240,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'organizations.create-first.default-name': 'Моя организация',
   'organizations.create-first.user-name': 'Организация {{ name }}',
 
-  'organization.settings.title': 'Настройки организации',
   'organization.settings.page.title': 'Настройки организации',
   'organization.settings.page.description': 'Управляйте настройками вашей организации здесь.',
   'organization.settings.name.title': 'Название организации',
@@ -350,17 +349,12 @@ export const translations: Partial<TranslationsDictionary> = {
 
   // Documents
 
-  'documents.list.title': 'Документы',
-  'documents.list.no-documents.title': 'Нет документов',
-  'documents.list.no-documents.description':
-    'В этой организации пока нет документов. Загрузите первый документ.',
   'documents.list.no-results': 'Документы не найдены',
   'documents.list.table.headers.file-name': 'Имя файла',
   'documents.list.table.headers.created': 'Создан',
   'documents.list.table.headers.deleted': 'Удалён',
   'documents.list.table.headers.actions': 'Действия',
   'documents.list.table.headers.tags': 'Теги',
-  'documents.list.search.placeholder': 'Поиск документов...',
   'documents.list.search.total-count-with-query':
     '{{ count }} {{ count, =1:документ, [2-4]:документа, документов }} соответствует этому запросу',
   'documents.list.search.total-count-no-query':
@@ -406,7 +400,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'documents.actions.download.title': 'Скачать',
   'documents.actions.download.error': 'Не удалось загрузить документ',
   'documents.actions.restore': 'Восстановить',
-  'documents.actions.delete': 'Удалить',
   'documents.actions.edit': 'Редактировать',
   'documents.actions.cancel': 'Отмена',
   'documents.actions.save': 'Сохранить',
@@ -1029,9 +1022,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'layout.menu.deleted-documents': 'Удалённые документы',
   'layout.menu.organization-settings': 'Настройки',
   'layout.menu.api-keys': 'API ключи',
-  'layout.menu.settings': 'Настройки',
-  'layout.menu.account': 'Аккаунт',
-  'layout.menu.general-settings': 'Общие настройки',
   'layout.menu.usage': 'Использование',
   'layout.menu.intake-emails': 'Email для импорта',
   'layout.menu.webhooks': 'Webhooks',

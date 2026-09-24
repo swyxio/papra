@@ -13,6 +13,7 @@ export function SharedTranscriptPanel(props: {
   transcript: SharedTranscript;
   name: string;
   onSeek?: (seconds: number) => void;
+  class?: string;
 }) {
   const [copied, setCopied] = createSignal(false);
   const copy = async () => {
@@ -37,7 +38,10 @@ export function SharedTranscriptPanel(props: {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
   return (
-    <section aria-label="Transcript" class="max-w-5xl mx-auto px-6 pb-12 pt-6 space-y-6">
+    <section
+      aria-label="Transcript"
+      class={props.class ?? 'max-w-5xl mx-auto px-6 pb-12 pt-6 space-y-6'}
+    >
       <div class="flex flex-wrap items-center justify-between gap-3">
         <h2 class="text-lg font-semibold">Transcript</h2>
         <Show when={props.transcript.text}>
@@ -55,7 +59,7 @@ export function SharedTranscriptPanel(props: {
         when={props.transcript.text}
         fallback={<p class="text-sm text-muted-foreground">No speech was detected.</p>}
       >
-        <div class="space-y-5 leading-relaxed">
+        <div data-extracted-text class="space-y-5 leading-relaxed max-w-3xl">
           <For each={props.transcript.segments}>
             {(segment) => (
               <div class="flex items-start gap-4">

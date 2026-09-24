@@ -1,6 +1,6 @@
 import type { Component } from 'solid-js';
 import { A, useSearchParams } from '@solidjs/router';
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/solid-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/solid-query';
 import { createEffect, createSignal, For, Show } from 'solid-js';
 import { formatBytes } from '@corentinth/chisels';
 import { apiClient } from '../shared/http/api-client';
@@ -44,8 +44,9 @@ export const DocumentFolderPicker: Component<{ organizationId: string; documentI
   const invalidate = () => {
     void client.invalidateQueries({ queryKey: key() });
     void client.invalidateQueries({
-      queryKey: ['organizations', props.organizationId, 'folder-documents'],
+      queryKey: ['organizations', props.organizationId, 'documents'],
     });
+    void client.invalidateQueries({ queryKey: ['organizations', props.organizationId, 'folders'] });
     void client.invalidateQueries({
       queryKey: ['organizations', props.organizationId, 'documents', props.documentId, 'activity'],
     });
@@ -306,28 +307,15 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
   const current = () => folders.data?.folders.find((folder) => folder.id === folderId());
   const children = () =>
     folders.data?.folders.filter((folder) => folder.parentId === folderId()) ?? [];
-  const documents = useInfiniteQuery(() => ({
-    enabled: Boolean(current()),
-    queryKey: ['organizations', props.organizationId, 'folder-documents', folderId()],
-    queryFn: async ({ pageParam }) =>
-      apiClient<{
-        documents: { id: string; name: string; originalSize: number; isShortcut: boolean }[];
-        hasMore: boolean;
-      }>({
-        path: `${driveBase(props.organizationId)}/folders/${folderId()}/documents`,
-        query: { pageIndex: pageParam },
-      }),
-    initialPageParam: 0,
-    getNextPageParam: (last, _pages, page) => (last.hasMore ? page + 1 : undefined),
-  }));
   createEffect(() => {
     if (folders.data && folderId() && !current()) setParams({ folder: undefined });
   });
   const invalidate = () => {
     void client.invalidateQueries({ queryKey: key() });
     void client.invalidateQueries({
-      queryKey: ['organizations', props.organizationId, 'folder-documents'],
+      queryKey: ['organizations', props.organizationId, 'documents'],
     });
+    void client.invalidateQueries({ queryKey: ['organizations', props.organizationId, 'folders'] });
   };
   const create = useMutation(() => ({
     mutationFn: async () =>
@@ -381,168 +369,214 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
           'Only empty folders can be deleted. Move files, shortcuts and subfolders out first.',
       }),
   }));
+  const ancestors = () => {
+    const result = [];
+    const visited = new Set<string>();
+    let folder = current();
+    while (folder && !visited.has(folder.id)) {
+      visited.add(folder.id);
+      result.unshift(folder);
+      folder = folders.data?.folders.find((candidate) => candidate.id === folder!.parentId);
+    }
+    return result;
+  };
+  const openFolder = (id: string) =>
+    setParams({ folder: id, scope: undefined, query: undefined, page: undefined });
+  const accessLabel = (restricted: boolean) =>
+    restricted
+      ? 'Restricted access'
+      : folders.data?.isPersonal
+        ? 'Private to you'
+        : 'Shared with this team';
   return (
     <>
       <DriveInbox organizationId={props.organizationId} />
-      <section class="border rounded-lg p-4 mb-6" aria-label="Folders">
-        <div class="flex flex-wrap items-center gap-2 mb-3">
-          <h2 class="font-semibold">Folders</h2>
-          <Show when={current()}>
-            {(folder) => (
-              <>
-                <span class="text-sm text-muted-foreground">
-                  {folderPath(folder(), folders.data?.folders ?? [])}
-                </span>
-                <Show when={!folder().isHome}>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setParams({ folder: folder().parentId ?? undefined })}
-                  >
-                    Up
-                  </Button>
-                  <Show when={folder().canWrite}>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={remove.isPending}
-                      onClick={() => remove.mutate()}
-                    >
-                      Delete empty folder
-                    </Button>
+      <section class="mb-5 space-y-3" aria-label="Folder browser">
+        <div class="flex items-center justify-between gap-3">
+          <nav
+            aria-label="Folder breadcrumbs"
+            class="flex min-w-0 items-center gap-1 overflow-x-auto text-sm"
+          >
+            <For each={ancestors()}>
+              {(folder, index) => (
+                <>
+                  <Show when={index() > 0}>
+                    <span class="text-muted-foreground">/</span>
                   </Show>
+                  <button
+                    class="shrink-0 rounded px-1 py-1 hover:underline focus-visible:outline"
+                    onClick={() => openFolder(folder.id)}
+                    aria-current={folder.id === folderId() ? 'page' : undefined}
+                  >
+                    {folder.name}
+                  </button>
+                </>
+              )}
+            </For>
+          </nav>
+          <Show when={current()?.canWrite || folders.data?.canManageAccess}>
+            <details class="relative shrink-0 text-sm">
+              <summary class="cursor-pointer rounded-md border px-3 py-2">Manage folder</summary>
+              <div class="absolute right-0 z-20 mt-2 w-80 max-w-[calc(100vw-4rem)] space-y-3 rounded-lg border bg-background p-3 shadow-lg">
+                <Show when={current()?.canWrite}>
+                  <form
+                    class="flex gap-2"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      if (name().trim()) create.mutate();
+                    }}
+                  >
+                    <input
+                      aria-label="New folder name"
+                      class="min-w-0 w-44 border rounded-md bg-transparent px-3 text-sm"
+                      maxLength={200}
+                      value={name()}
+                      onInput={(event) => setName(event.currentTarget.value)}
+                      placeholder="New folder name"
+                    />
+                    <Button
+                      type="submit"
+                      variant="outline"
+                      size="sm"
+                      disabled={!name().trim()}
+                      isLoading={create.isPending}
+                    >
+                      Create folder
+                    </Button>
+                  </form>
                 </Show>
-                <Show when={folder().isRestricted}>
-                  <span class="text-xs border rounded px-2 py-1">Restricted</span>
+                <Show when={current() && !current()?.isHome && current()?.canWrite}>
+                  <div class="flex gap-2">
+                    <input
+                      aria-label="Rename current folder"
+                      class="min-w-0 w-44 border rounded-md bg-transparent px-3 text-sm"
+                      maxLength={200}
+                      value={rename()}
+                      onInput={(event) => setRename(event.currentTarget.value)}
+                      placeholder={current()?.name}
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={!rename().trim() || update.isPending}
+                      onClick={() => update.mutate({ name: rename() })}
+                    >
+                      Rename
+                    </Button>
+                  </div>
+                  <label class="block space-y-1">
+                    <span class="block text-xs text-muted-foreground">Move folder to</span>
+                    <select
+                      aria-label="Move current folder"
+                      class="w-full max-w-80 border rounded-md bg-background p-2 text-sm"
+                      value={current()?.parentId ?? ''}
+                      disabled={update.isPending}
+                      onChange={(event) => update.mutate({ parentId: event.currentTarget.value })}
+                    >
+                      <For
+                        each={folders.data?.folders.filter(
+                          (candidate) =>
+                            candidate.canWrite &&
+                            !folderIsDescendant(
+                              candidate,
+                              folderId()!,
+                              folders.data?.folders ?? [],
+                            ),
+                        )}
+                      >
+                        {(candidate) => (
+                          <option value={candidate.id}>
+                            {folderPath(candidate, folders.data?.folders ?? [])}
+                          </option>
+                        )}
+                      </For>
+                    </select>
+                  </label>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={remove.isPending}
+                    onClick={() => remove.mutate()}
+                  >
+                    Delete empty folder
+                  </Button>
                 </Show>
-              </>
-            )}
+                <Show
+                  when={
+                    current() &&
+                    !current()?.isHome &&
+                    folders.data?.canManageAccess &&
+                    !folders.data.isPersonal
+                  }
+                >
+                  <FolderAccessPanel organizationId={props.organizationId} folderId={folderId()!} />
+                </Show>
+              </div>
+            </details>
           </Show>
         </div>
-        <Show when={folders.isError}>
-          <p role="alert">Could not load folders.</p>
-        </Show>
-        <div class="flex flex-wrap gap-2 mb-3">
-          <For each={children()}>
-            {(folder) => (
-              <Button variant="outline" size="sm" onClick={() => setParams({ folder: folder.id })}>
-                <span
-                  class={folder.isRestricted ? 'i-tabler-folder-lock mr-2' : 'i-tabler-folder mr-2'}
-                />
-                {folder.name}
-              </Button>
-            )}
-          </For>
-        </div>
-        <Show when={current()?.canWrite}>
-          <form
-            class="flex gap-2 mb-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (name().trim()) create.mutate();
-            }}
-          >
-            <input
-              aria-label="New folder name"
-              class="border rounded-md bg-transparent px-3 text-sm"
-              maxLength={200}
-              value={name()}
-              onInput={(event) => setName(event.currentTarget.value)}
-              placeholder="New folder name"
-            />
-            <Button
-              type="submit"
-              variant="outline"
-              size="sm"
-              disabled={!name().trim()}
-              isLoading={create.isPending}
-            >
-              Create folder
-            </Button>
-          </form>
-        </Show>
-        <Show when={current() && !current()?.isHome && current()?.canWrite}>
-          <div class="flex flex-wrap gap-2 mb-3">
-            <input
-              aria-label="Rename current folder"
-              class="border rounded-md bg-transparent px-3 text-sm"
-              maxLength={200}
-              value={rename()}
-              onInput={(event) => setRename(event.currentTarget.value)}
-              placeholder={current()?.name}
-            />
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!rename().trim() || update.isPending}
-              onClick={() => update.mutate({ name: rename() })}
-            >
-              Rename
-            </Button>
-            <select
-              aria-label="Move current folder"
-              class="border rounded-md bg-background p-2 text-sm"
-              value={current()?.parentId ?? ''}
-              disabled={update.isPending}
-              onChange={(event) => update.mutate({ parentId: event.currentTarget.value })}
-            >
-              <For
-                each={folders.data?.folders.filter(
-                  (candidate) =>
-                    candidate.canWrite &&
-                    !folderIsDescendant(candidate, folderId()!, folders.data?.folders ?? []),
-                )}
-              >
-                {(candidate) => (
-                  <option value={candidate.id}>
-                    {folderPath(candidate, folders.data?.folders ?? [])}
-                  </option>
-                )}
-              </For>
-            </select>
-            <Show when={folders.data?.canManageAccess && !folders.data.isPersonal}>
-              <FolderAccessPanel organizationId={props.organizationId} folderId={folderId()!} />
-            </Show>
-          </div>
-        </Show>
         <Show when={current()}>
-          <div class="divide-y">
-            <For each={documents.data?.pages.flatMap((page) => page.documents)}>
-              {(file) => (
-                <A
-                  class="flex justify-between gap-4 py-2 text-sm hover:underline"
-                  href={`/organizations/${props.organizationId}/documents/${file.id}`}
+          {(folder) => (
+            <p class="text-xs text-muted-foreground">
+              {accessLabel(folder().effectiveRestricted)} · {folder().documentsCount} files
+              <Show when={folder().shortcutsCount > 0}>
+                {' '}
+                · {folder().shortcutsCount} shortcuts
+              </Show>{' '}
+              · {formatBytes({ bytes: folder().documentsSize })}
+            </p>
+          )}
+        </Show>
+        <Show when={folders.isPending}>
+          <p class="text-sm text-muted-foreground" role="status">
+            Loading folders…
+          </p>
+        </Show>
+        <Show when={folders.isError}>
+          <p role="alert" class="text-sm">
+            Could not load folders.{' '}
+            <button class="underline" onClick={() => void folders.refetch()}>
+              Retry
+            </button>
+          </p>
+        </Show>
+        <Show when={children().length > 0}>
+          <div class="divide-y rounded-lg border">
+            <For each={children()}>
+              {(folder) => (
+                <button
+                  class="flex w-full items-center gap-3 px-3 py-3 text-left hover:bg-muted/40 focus-visible:outline"
+                  onClick={() => openFolder(folder.id)}
                 >
-                  <span class="break-all">
-                    {file.isShortcut && (
-                      <span class="i-tabler-arrow-up-right mr-1" aria-label="Shortcut" />
-                    )}
-                    {file.name}
-                  </span>
-                  <span class="text-muted-foreground whitespace-nowrap">
-                    {formatBytes({ bytes: file.originalSize })}
-                  </span>
-                </A>
+                  <span
+                    class={
+                      folder.effectiveRestricted
+                        ? 'i-tabler-folder-lock size-5 shrink-0 text-muted-foreground'
+                        : 'i-tabler-folder size-5 shrink-0 text-muted-foreground'
+                    }
+                  />
+                  <div class="min-w-0 flex-1">
+                    <span class="block truncate text-sm font-medium">{folder.name}</span>
+                    <span class="block text-xs text-muted-foreground">
+                      {folder.documentsCount} files
+                      <Show when={folder.shortcutsCount > 0}>
+                        {' '}
+                        · {folder.shortcutsCount} shortcuts
+                      </Show>{' '}
+                      · {formatBytes({ bytes: folder.documentsSize })} ·{' '}
+                      {accessLabel(folder.effectiveRestricted)}
+                    </span>
+                  </div>
+                  <Show when={folder.lastActivityAt}>
+                    <span class="hidden sm:block shrink-0 text-xs text-muted-foreground">
+                      {new Date(folder.lastActivityAt!).toLocaleDateString()}
+                    </span>
+                  </Show>
+                  <span class="i-tabler-chevron-right size-4 shrink-0 text-muted-foreground" />
+                </button>
               )}
             </For>
           </div>
-          <Show when={documents.isError}>
-            <p role="alert">Could not load files in this folder.</p>
-          </Show>
-          <Show when={documents.hasNextPage}>
-            <Button
-              variant="outline"
-              size="sm"
-              isLoading={documents.isFetchingNextPage}
-              onClick={async () => documents.fetchNextPage()}
-            >
-              Load more files
-            </Button>
-          </Show>
-          <p class="text-xs text-muted-foreground mt-3">
-            Move files from each file’s File home selector. Search below covers the files you can
-            access in this space.
-          </p>
         </Show>
       </section>
     </>

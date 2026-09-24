@@ -8,7 +8,7 @@ import { shareUrl, newShareId, validShareId } from './share-urls';
 import { pendingUploadShare } from './upload-shares';
 import { fetchTranscript } from './transcripts';
 import { fetchTranscriptionStatus } from './processing';
-import { s3, signedDownload } from './storage';
+import { s3, signedDownload, signedMedia } from './storage';
 
 type ShareRow = {
   id: string;
@@ -503,7 +503,7 @@ export function registerShareRoutes(app: App) {
       if (!/^(audio|video)\//.test(doc.mime_type))
         return fail(400, 'This file is not audio or video');
       return context.json({
-        url: await s3(context.env).getPresignedUrl('GET', doc.original_storage_key, 900),
+        url: await signedMedia(context.env, doc.original_storage_key, doc.mime_type),
       });
     }
     if (context.req.query('direct') === 'preview') {

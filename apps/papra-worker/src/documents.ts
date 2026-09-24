@@ -1,10 +1,15 @@
 import type { App, Env, Identity } from './types';
 import { getContainer } from '@cloudflare/containers';
 import { all, first, run, id, error, camel, formatDocument, getDocument } from './db';
-import { ensureDocumentAccess, permittedDocumentPredicateSQL } from './collaboration';
-import { signedDownload, s3 } from './storage';
+import {
+  ensureDocumentAccess,
+  permittedDocumentPredicateSQL,
+  canReadFolder,
+} from './collaboration';
+import { signedDownload, signedMedia, s3 } from './storage';
 import { enqueueVersion } from './jobs';
 import { keywordPredicate } from './keyword';
+import { fetchTranscript } from './transcripts';
 
 const base = '/api/organizations/:org/documents';
 const smallFileLimit = 32 * 1024 ** 2;
@@ -35,6 +40,30 @@ async function document(
   if (d.organization_id !== org || d.is_deleted === 2) throw error(404, 'Document not found');
   return (await getDocument(env, doc))!;
 }
+async function currentFileDocument(env: Env, user: Identity, org: string, doc: string) {
+  const result = await document(env, user, org, doc);
+  if (result.is_deleted) throw error(404, 'Document not found');
+  if (
+    !result.current_version_id ||
+    !result.original_storage_key ||
+    !(await first(
+      env,
+      'SELECT id FROM versions WHERE id=? AND document_id=?',
+      result.current_version_id,
+      result.id,
+    ))
+  )
+    throw error(404, 'File not found');
+  return result;
+}
+async function inlineFile(env: Env, doc: Record<string, any>) {
+  return {
+    url: await signedMedia(env, doc.original_storage_key, doc.mime_type),
+    mimeType: doc.mime_type,
+    versionId: doc.current_version_id,
+    expiresAt: new Date(Date.now() + 900000).toISOString(),
+  };
+}
 export async function documentFilter(
   env: Env,
   user: Identity,
@@ -42,10 +71,19 @@ export async function documentFilter(
   query = '',
   deleted = 0,
   mode: 'read' | 'write' = 'read',
+  folderId?: string,
 ) {
   const access = await permittedDocumentPredicateSQL(env, user, org, 'd', mode),
     bindings: any[] = [org, deleted, ...access.bindings];
   let sql = `d.organization_id=? AND d.is_deleted=? AND (${access.sql})`;
+  if (folderId !== undefined) {
+    if (typeof folderId !== 'string' || !folderId) throw error(400, 'Invalid folder');
+    const folder = await canReadFolder(env, user, folderId);
+    if (folder.organization_id !== org) throw error(404, 'Folder not found');
+    sql +=
+      ' AND (d.home_folder_id=? OR EXISTS(SELECT 1 FROM document_shortcuts s WHERE s.document_id=d.id AND s.folder_id=?))';
+    bindings.push(folderId, folderId);
+  }
   if (query.trim()) {
     const keyword = keywordPredicate(query);
     sql += ` AND (${keyword.sql})`;
@@ -120,6 +158,8 @@ export function registerDocumentRoutes(app: App) {
           c.req.param('org'),
           q.searchQuery || '',
           deleted,
+          'read',
+          q.folderId,
         ),
         size = Math.min(100, Math.max(1, Number(q.pageSize) || 20)),
         page = Math.max(0, Number(q.pageIndex) || 0),
@@ -136,7 +176,8 @@ export function registerDocumentRoutes(app: App) {
         direction = q.sortOrder === 'asc' ? 'ASC' : 'DESC';
       const rows = await all(
         c.env,
-        `SELECT d.*,coalesce(v.size,0) original_size FROM documents d LEFT JOIN versions v ON v.id=d.current_version_id WHERE ${f.sql} ORDER BY ${sort} ${direction},d.id LIMIT ? OFFSET ?`,
+        `SELECT d.*,${q.folderId ? 'CASE WHEN d.home_folder_id=? THEN 0 ELSE 1 END' : '0'} is_shortcut,coalesce(v.size,0) original_size FROM documents d LEFT JOIN versions v ON v.id=d.current_version_id WHERE ${f.sql} ORDER BY ${sort} ${direction},d.id LIMIT ? OFFSET ?`,
+        ...(q.folderId ? [q.folderId] : []),
         ...f.bindings,
         size,
         page * size,
@@ -147,7 +188,12 @@ export function registerDocumentRoutes(app: App) {
         ...f.bindings,
       );
       return c.json({
-        documents: await Promise.all(rows.map(async (d) => formatDocument(c.env, d))),
+        documents: await Promise.all(
+          rows.map(async (d) => ({
+            ...(await formatDocument(c.env, d)),
+            isShortcut: !!d.is_shortcut,
+          })),
+        ),
         documentsCount: count!.n,
       });
     });
@@ -185,6 +231,32 @@ export function registerDocumentRoutes(app: App) {
       ),
     }),
   );
+  app.get(`${base}/:doc/media`, async (c) => {
+    const doc = await currentFileDocument(
+      c.env,
+      c.get('identity'),
+      c.req.param('org'),
+      c.req.param('doc'),
+    );
+    if (!/^(audio|video)\//.test(doc.mime_type))
+      throw error(400, 'This file is not audio or video');
+    c.header('Cache-Control', 'private, no-store');
+    return c.json(await inlineFile(c.env, doc));
+  });
+  app.get(`${base}/:doc/transcript`, async (c) => {
+    const doc = await currentFileDocument(
+      c.env,
+      c.get('identity'),
+      c.req.param('org'),
+      c.req.param('doc'),
+    );
+    if (!/^(audio|video)\//.test(doc.mime_type) || !doc.current_version_id)
+      throw error(404, 'No transcript for this file');
+    const transcript = await fetchTranscript(c.env, doc.current_version_id);
+    if (!transcript) throw error(503, 'Transcript is not available yet');
+    c.header('Cache-Control', 'private, no-store');
+    return c.json({ transcript, versionId: doc.current_version_id });
+  });
   app.patch(`${base}/:doc`, async (c) => {
     const d = await document(
         c.env,
@@ -294,6 +366,18 @@ export function registerDocumentRoutes(app: App) {
     return c.redirect(await signedDownload(c.env, d.original_storage_key, d.original_name), 302);
   });
   app.get(`${base}/:doc/file`, async (c) => {
+    if (c.req.query('direct') === 'inline') {
+      const doc = await currentFileDocument(
+        c.env,
+        c.get('identity'),
+        c.req.param('org'),
+        c.req.param('doc'),
+      );
+      if (!/^(audio|video|image)\//.test(doc.mime_type) && doc.mime_type !== 'application/pdf')
+        throw error(400, 'This file cannot be displayed inline');
+      c.header('Cache-Control', 'private, no-store');
+      return c.json(await inlineFile(c.env, doc));
+    }
     const d = await document(c.env, c.get('identity'), c.req.param('org'), c.req.param('doc'));
     if (d.is_deleted) throw error(404, 'Document is in trash');
     if (!d.current_version_id) throw error(409, 'Convert this Google document to PDF first');
@@ -411,6 +495,7 @@ export function registerDocumentRoutes(app: App) {
           b.filter?.query || '',
           0,
           'write',
+          b.filter?.folderId,
         );
       let ds = await all(
         c.env,

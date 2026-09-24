@@ -33,7 +33,8 @@ import { AboutPage } from './modules/shared/pages/about.page';
 import { NotFoundPage } from './modules/shared/pages/not-found.page';
 import { TagsPage } from './modules/tags/pages/tags.page';
 import { OrganizationSettingsLayout } from './modules/ui/layouts/organization-settings.layout';
-import { OrganizationLayout } from './modules/ui/layouts/organization.layout';
+import { AppLayout, OrganizationLayout } from './modules/ui/layouts/organization.layout';
+import { PublicLayout } from './modules/ui/layouts/public.layout';
 import { SettingsLayout } from './modules/ui/layouts/settings.layout';
 import { CurrentUserProvider } from './modules/users/composables/useCurrentUser';
 import { UserSettingsPage } from './modules/users/pages/user-settings.page';
@@ -54,7 +55,21 @@ export const routes: RouteDefinition[] = [
           }));
 
           return (
-            <Show when={query.data?.organizations}>
+            <Show
+              when={query.data?.organizations}
+              fallback={
+                <AppLayout>
+                  <div class="p-6" role="status">
+                    <Show when={query.isError} fallback="Loading your spaces…">
+                      <p>Your spaces could not be loaded.</p>
+                      <button class="underline mt-3" onClick={() => void query.refetch()}>
+                        Try again
+                      </button>
+                    </Show>
+                  </div>
+                </AppLayout>
+              }
+            >
               {(getOrgs) => (
                 <Switch>
                   <Match
@@ -63,11 +78,11 @@ export const routes: RouteDefinition[] = [
                       getOrgs().some((org) => org.id === getLatestOrganizationId())
                     }
                   >
-                    <Navigate href={`/organizations/${getLatestOrganizationId()}`} />
+                    <Navigate href={`/organizations/${getLatestOrganizationId()}/documents`} />
                   </Match>
 
                   <Match when={getOrgs().length === 1}>
-                    <Navigate href={`/organizations/${getOrgs()[0]?.id ?? ''}`} />
+                    <Navigate href={`/organizations/${getOrgs()[0]?.id ?? ''}/documents`} />
                   </Match>
 
                   <Match when={getOrgs().length > 0}>
@@ -75,10 +90,7 @@ export const routes: RouteDefinition[] = [
                   </Match>
 
                   <Match when={getOrgs().length === 0}>
-                    <p class="p-6" role="status">
-                      No spaces are assigned to this account. Sign out and sign in again with your
-                      approved Google account.
-                    </p>
+                    <Navigate href="/organizations" />
                   </Match>
                 </Switch>
               )}
@@ -192,7 +204,11 @@ export const routes: RouteDefinition[] = [
   },
   {
     path: '/',
-    component: SettingsLayout,
+    component: (props) => (
+      <CurrentUserProvider>
+        <SettingsLayout>{props.children}</SettingsLayout>
+      </CurrentUserProvider>
+    ),
     children: [
       {
         path: '/settings',
@@ -206,19 +222,35 @@ export const routes: RouteDefinition[] = [
   },
   {
     path: '/about',
-    component: AboutPage,
+    component: () => (
+      <PublicLayout>
+        <AboutPage />
+      </PublicLayout>
+    ),
   },
   {
     path: '/sign/:token',
-    component: PublicSigningPage,
+    component: () => (
+      <PublicLayout>
+        <PublicSigningPage />
+      </PublicLayout>
+    ),
   },
   {
     path: '/sign',
-    component: PublicSigningHomePage,
+    component: () => (
+      <PublicLayout>
+        <PublicSigningHomePage />
+      </PublicLayout>
+    ),
   },
   {
     path: '/review/:token',
-    component: PublicReviewPage,
+    component: () => (
+      <PublicLayout>
+        <PublicReviewPage />
+      </PublicLayout>
+    ),
   },
   {
     // Public document share page — accessible to anyone (logged in or not), no auth guard.
@@ -227,6 +259,10 @@ export const routes: RouteDefinition[] = [
   },
   {
     path: '*404',
-    component: NotFoundPage,
+    component: () => (
+      <PublicLayout>
+        <NotFoundPage />
+      </PublicLayout>
+    ),
   },
 ];

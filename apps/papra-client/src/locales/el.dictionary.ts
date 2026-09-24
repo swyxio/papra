@@ -247,7 +247,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'organizations.create-first.default-name': 'Ο οργανισμός μου',
   'organizations.create-first.user-name': 'Ο οργανισμός του/της {{ name }}',
 
-  'organization.settings.title': 'Ρυθμίσεις οργανισμού',
   'organization.settings.page.title': 'Ρυθμίσεις οργανισμού',
   'organization.settings.page.description': 'Διαχειριστείτε τις ρυθμίσεις του οργανισμού σας εδώ.',
   'organization.settings.name.title': 'Όνομα οργανισμού',
@@ -353,17 +352,12 @@ export const translations: Partial<TranslationsDictionary> = {
 
   // Documents
 
-  'documents.list.title': 'Έγγραφα',
-  'documents.list.no-documents.title': 'Δεν υπάρχουν έγγραφα',
-  'documents.list.no-documents.description':
-    'Δεν υπάρχουν ακόμη έγγραφα σε αυτόν τον οργανισμό. Ξεκινήστε ανεβάζοντας μερικά.',
   'documents.list.no-results': 'Δεν βρέθηκαν έγγραφα',
   'documents.list.table.headers.file-name': 'Όνομα αρχείου',
   'documents.list.table.headers.created': 'Ημερομηνία δημιουργίας',
   'documents.list.table.headers.deleted': 'Ημερομηνία διαγραφής',
   'documents.list.table.headers.actions': 'Ενέργειες',
   'documents.list.table.headers.tags': 'Ετικέτες',
-  'documents.list.search.placeholder': 'Αναζήτηση εγγράφων...',
   'documents.list.search.total-count-with-query':
     '{{ count }} {{ count, =1:έγγραφο, έγγραφα }} που ταιριάζουν σε αυτό το ερώτημα',
   'documents.list.search.total-count-no-query':
@@ -409,7 +403,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'documents.actions.download.title': 'Λήψη',
   'documents.actions.download.error': 'Αποτυχία λήψης εγγράφου',
   'documents.actions.restore': 'Επαναφορά',
-  'documents.actions.delete': 'Διαγραφή',
   'documents.actions.edit': 'Επεξεργασία',
   'documents.actions.cancel': 'Ακύρωση',
   'documents.actions.save': 'Αποθήκευση',
@@ -1035,9 +1028,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'layout.menu.deleted-documents': 'Διαγεγραμμένα έγγραφα',
   'layout.menu.organization-settings': 'Ρυθμίσεις',
   'layout.menu.api-keys': 'API keys',
-  'layout.menu.settings': 'Ρυθμίσεις',
-  'layout.menu.account': 'Λογαριασμός',
-  'layout.menu.general-settings': 'Γενικές ρυθμίσεις',
   'layout.menu.usage': 'Χρήση',
   'layout.menu.intake-emails': 'Email εισαγωγής',
   'layout.menu.webhooks': 'Webhooks',

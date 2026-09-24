@@ -16,7 +16,7 @@ export const NotFoundPage: Component = () => {
   };
 
   return (
-    <div class="h-screen flex flex-col items-center justify-center p-6">
+    <div class="min-h-[calc(100dvh-65px)] flex flex-col items-center justify-center p-6">
       <div class="flex items-center flex-row sm:gap-24">
         <div class="max-w-350px">
           <h1 class="text-xl mr-4 py-2">{t('not-found.title')}</h1>

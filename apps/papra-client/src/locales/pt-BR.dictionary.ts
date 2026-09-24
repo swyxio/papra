@@ -242,7 +242,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'organizations.create-first.default-name': 'Minha organização',
   'organizations.create-first.user-name': 'Organização de {{ name }}',
 
-  'organization.settings.title': 'Configurações da Organização',
   'organization.settings.page.title': 'Configurações da organização',
   'organization.settings.page.description': 'Gerencie aqui as configurações da sua organização.',
   'organization.settings.name.title': 'Nome da organização',
@@ -353,17 +352,12 @@ export const translations: Partial<TranslationsDictionary> = {
 
   // Documents
 
-  'documents.list.title': 'Documentos',
-  'documents.list.no-documents.title': 'Nenhum documento',
-  'documents.list.no-documents.description':
-    'Ainda não há documentos nesta organização. Comece enviando documentos.',
   'documents.list.no-results': 'Nenhum documento encontrado',
   'documents.list.table.headers.file-name': 'Nome do arquivo',
   'documents.list.table.headers.created': 'Criado em',
   'documents.list.table.headers.deleted': 'Excluído em',
   'documents.list.table.headers.actions': 'Ações',
   'documents.list.table.headers.tags': 'Tags',
-  'documents.list.search.placeholder': 'Buscar documentos...',
   'documents.list.search.total-count-with-query':
     '{{ count }} {{ count, =1:documento, documentos }} correspondente a esta busca',
   'documents.list.search.total-count-no-query':
@@ -409,7 +403,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'documents.actions.download.title': 'Baixar',
   'documents.actions.download.error': 'Falha ao baixar o documento',
   'documents.actions.restore': 'Restaurar',
-  'documents.actions.delete': 'Excluir',
   'documents.actions.edit': 'Editar',
   'documents.actions.cancel': 'Cancelar',
   'documents.actions.save': 'Salvar',
@@ -1029,9 +1022,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'layout.menu.deleted-documents': 'Documentos excluídos',
   'layout.menu.organization-settings': 'Configurações',
   'layout.menu.api-keys': 'Chaves de API',
-  'layout.menu.settings': 'Configurações',
-  'layout.menu.account': 'Conta',
-  'layout.menu.general-settings': 'Configurações gerais',
   'layout.menu.usage': 'Uso',
   'layout.menu.intake-emails': 'E-mails de entrada',
   'layout.menu.webhooks': 'Webhooks',

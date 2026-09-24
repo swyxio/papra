@@ -251,7 +251,6 @@ export const translations = {
   'organizations.create-first.default-name': 'La meva organització',
   'organizations.create-first.user-name': "L'organització de {{ name }}",
 
-  'organization.settings.title': "Configuració de l'organització",
   'organization.settings.page.title': "Configuració de l'organització",
   'organization.settings.page.description':
     'Gestiona la configuració de la teva organització aquí.',
@@ -380,10 +379,6 @@ export const translations = {
 
   // Documents
 
-  'documents.list.title': 'Documents',
-  'documents.list.no-documents.title': 'No hi ha documents',
-  'documents.list.no-documents.description':
-    'Encara no hi ha documents en aquesta organització. Comença pujant-ne alguns.',
   'documents.list.no-results': "No s'han trobat documents",
   'documents.list.table.headers.file-name': 'Nom del fitxer',
   'documents.list.table.headers.document-date': 'Data',
@@ -391,7 +386,6 @@ export const translations = {
   'documents.list.table.headers.deleted': 'Suprimit',
   'documents.list.table.headers.actions': 'Accions',
   'documents.list.table.headers.tags': 'Etiquetes',
-  'documents.list.search.placeholder': 'Cerca documents...',
   'documents.list.search.total-count-with-query':
     '{{ count }} {{ count, =1:document que coincideix, documents que coincideixen }} amb aquesta cerca',
   'documents.list.search.total-count-no-query':
@@ -438,7 +432,6 @@ export const translations = {
   'documents.actions.download.title': 'Descarrega',
   'documents.actions.download.error': "No s'ha pogut descarregar el document",
   'documents.actions.restore': 'Restaura',
-  'documents.actions.delete': 'Suprimeix',
   'documents.actions.edit': 'Edita',
   'documents.actions.cancel': 'Cancel·la',
   'documents.actions.save': 'Desa',
@@ -1073,9 +1066,6 @@ export const translations = {
   'layout.menu.deleted-documents': 'Documents suprimits',
   'layout.menu.organization-settings': 'Configuració',
   'layout.menu.api-keys': 'Claus API',
-  'layout.menu.settings': 'Configuració',
-  'layout.menu.account': 'Compte',
-  'layout.menu.general-settings': 'Configuració general',
   'layout.menu.auto-tagging': 'Etiquetatge automàtic',
   'layout.menu.usage': 'Ús',
   'layout.menu.intake-emails': "Correus electrònics d'entrada",

@@ -228,7 +228,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'organizations.create-first.default-name': '我的组织',
   'organizations.create-first.user-name': '{{ name }}的组织',
 
-  'organization.settings.title': '组织设置',
   'organization.settings.page.title': '组织设置',
   'organization.settings.page.description': '在此管理您的组织设置。',
   'organization.settings.name.title': '组织名称',
@@ -331,16 +330,12 @@ export const translations: Partial<TranslationsDictionary> = {
 
   // Documents
 
-  'documents.list.title': '文档',
-  'documents.list.no-documents.title': '没有文档',
-  'documents.list.no-documents.description': '该组织中尚无文档。您可以开始上传一些文档。',
   'documents.list.no-results': '未找到文档',
   'documents.list.table.headers.file-name': '文件名',
   'documents.list.table.headers.created': '创建时间',
   'documents.list.table.headers.deleted': '删除时间',
   'documents.list.table.headers.actions': '操作',
   'documents.list.table.headers.tags': '标签',
-  'documents.list.search.placeholder': '搜索文档...',
   'documents.list.search.total-count-with-query': '{{ count }} 个文档与此搜索匹配',
   'documents.list.search.total-count-no-query': '共 {{ count }} 个文档',
   'documents.list.batch.selected-count': '已选择 {{ count }} 个文档',
@@ -374,7 +369,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'documents.actions.download.title': '下载',
   'documents.actions.download.error': '文档下载失败',
   'documents.actions.restore': '恢复',
-  'documents.actions.delete': '删除',
   'documents.actions.edit': '编辑',
   'documents.actions.cancel': '取消',
   'documents.actions.save': '保存',
@@ -957,9 +951,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'layout.menu.deleted-documents': '已删除文档',
   'layout.menu.organization-settings': '设置',
   'layout.menu.api-keys': 'API 密钥',
-  'layout.menu.settings': '设置',
-  'layout.menu.account': '账户',
-  'layout.menu.general-settings': '常规设置',
   'layout.menu.usage': '使用情况',
   'layout.menu.intake-emails': '接收邮箱',
   'layout.menu.webhooks': 'Webhook',

@@ -249,7 +249,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'organizations.create-first.default-name': 'Meine Organisation',
   'organizations.create-first.user-name': 'Organisation von "{{ name }}"',
 
-  'organization.settings.title': 'Organisationseinstellungen',
   'organization.settings.page.title': 'Organisationseinstellungen',
   'organization.settings.page.description': 'Verwalten Sie hier Ihre Organisationseinstellungen.',
   'organization.settings.name.title': 'Name der Organisation',
@@ -363,17 +362,12 @@ export const translations: Partial<TranslationsDictionary> = {
 
   // Documents
 
-  'documents.list.title': 'Dokumente',
-  'documents.list.no-documents.title': 'Keine Dokumente',
-  'documents.list.no-documents.description':
-    'Es sind noch keine Dokumente in dieser Organisation vorhanden. Beginnen Sie mit dem Hochladen von Dokumenten.',
   'documents.list.no-results': 'Keine Dokumente gefunden',
   'documents.list.table.headers.file-name': 'Dateiname',
   'documents.list.table.headers.created': 'Erstellt am',
   'documents.list.table.headers.deleted': 'Gelöscht am',
   'documents.list.table.headers.actions': 'Aktionen',
   'documents.list.table.headers.tags': 'Tags',
-  'documents.list.search.placeholder': 'Dokumente durchsuchen...',
   'documents.list.search.total-count-with-query':
     '{{ count }} {{ count, =1:Dokument, Dokumente }} entsprechen dieser Suche',
   'documents.list.search.total-count-no-query':
@@ -420,7 +414,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'documents.actions.download.title': 'Herunterladen',
   'documents.actions.download.error': 'Dokument konnte nicht heruntergeladen werden',
   'documents.actions.restore': 'Wiederherstellen',
-  'documents.actions.delete': 'Löschen',
   'documents.actions.edit': 'Bearbeiten',
   'documents.actions.cancel': 'Abbrechen',
   'documents.actions.save': 'Speichern',
@@ -1052,9 +1045,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'layout.menu.deleted-documents': 'Gelöschte Dokumente',
   'layout.menu.organization-settings': 'Einstellungen',
   'layout.menu.api-keys': 'API-Schlüssel',
-  'layout.menu.settings': 'Einstellungen',
-  'layout.menu.account': 'Konto',
-  'layout.menu.general-settings': 'Allgemeine Einstellungen',
   'layout.menu.usage': 'Nutzung',
   'layout.menu.intake-emails': 'E-Mail-Eingang',
   'layout.menu.webhooks': 'Webhooks',

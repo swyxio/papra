@@ -1,6 +1,10 @@
 import type { App } from './types';
 import { all, first, run, id, error, camel, admin } from './db';
-import { ensureOrganizationMember, ensureDocumentAccess } from './collaboration';
+import {
+  ensureOrganizationMember,
+  ensureDocumentAccess,
+  documentPermissionPredicate,
+} from './collaboration';
 
 const base = '/api/organizations';
 export function registerSpaceRoutes(app: App) {
@@ -36,13 +40,48 @@ export function registerSpaceRoutes(app: App) {
     });
   });
   app.get(base, async (c) => {
-    const ids = c.get('identity').organizations.map((o) => o.id);
-    const rows = [];
-    for (const org of ids) {
-      const row = await first(c.env, 'SELECT * FROM organizations WHERE id=?', org);
-      if (row) rows.push(camel(row));
+    const identity = c.get('identity');
+    // Live membership and personal ownership are authoritative, rather than cached identity grants.
+    const spaces = await all(
+      c.env,
+      `SELECT o.*,m.role FROM organizations o JOIN organization_members m ON m.organization_id=o.id
+       WHERE m.user_id=? AND (o.personal_owner_id IS NULL OR o.personal_owner_id=?)
+       ${identity.serviceScope ? 'AND o.id=?' : ''} ORDER BY o.created_at,o.id`,
+      identity.userId,
+      identity.userId,
+      ...(identity.serviceScope ? [identity.serviceScope.organizationId] : []),
+    );
+    const summaries = new Map<string, Record<string, any>>();
+    if (spaces.length) {
+      const bindings: unknown[] = [];
+      const queries = spaces.map((space) => {
+        const predicate = documentPermissionPredicate(identity, space.id, 'd', 'read', {
+          role: space.role,
+          personalOwnerId: space.personal_owner_id,
+        });
+        bindings.push(space.id, space.id, ...predicate.bindings);
+        return `SELECT ? organization_id,count(*) documents_count,coalesce(sum(v.size),0) documents_size,
+          max(d.updated_at) last_activity_at FROM documents d LEFT JOIN versions v ON v.id=d.current_version_id
+          WHERE d.organization_id=? AND d.is_deleted=0 AND (${predicate.sql})`;
+      });
+      for (const row of await all(c.env, queries.join(' UNION ALL '), ...bindings))
+        summaries.set(row.organization_id, row);
     }
-    return c.json({ organizations: rows });
+    return c.json({
+      organizations: spaces.map((space) => {
+        const summary = summaries.get(space.id);
+        return {
+          ...camel(space),
+          isPersonal: !!space.personal_owner_id,
+          documentsCount: summary?.documents_count ?? 0,
+          documentsSize: summary?.documents_size ?? 0,
+          lastActivityAt:
+            summary?.last_activity_at == null
+              ? null
+              : new Date(summary.last_activity_at).toISOString(),
+        };
+      }),
+    });
   });
   app.get(`${base}/deleted`, (c) => c.json({ organizations: [] }));
   app.post(base, () => {

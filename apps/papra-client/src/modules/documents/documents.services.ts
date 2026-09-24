@@ -68,6 +68,7 @@ export async function fetchOrganizationDocuments({
   pageIndex,
   pageSize,
   searchQuery,
+  folderId,
   sortField,
   sortOrder,
 }: {
@@ -75,6 +76,7 @@ export async function fetchOrganizationDocuments({
   pageIndex: number;
   pageSize: number;
   searchQuery?: string;
+  folderId?: string;
   sortField?: DocumentSearchSortField;
   sortOrder?: DocumentSearchSortOrder;
 }) {
@@ -86,6 +88,7 @@ export async function fetchOrganizationDocuments({
     path: `/api/organizations/${organizationId}/documents`,
     query: {
       searchQuery,
+      folderId,
       pageIndex,
       pageSize,
       sortField,

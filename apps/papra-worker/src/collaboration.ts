@@ -171,6 +171,23 @@ export async function permittedDocumentPredicateSQL(
   const access = await organizationAccess(env, identity, organizationId);
   if (identity.serviceScope && !identity.serviceScope.permissions.includes(mode))
     fail(403, 'Token does not permit this operation');
+  return documentPermissionPredicate(identity, organizationId, alias, mode, access);
+}
+// Used by bounded overview aggregates after membership has been read in one query.
+export function documentPermissionPredicate(
+  identity: Identity,
+  organizationId: string,
+  alias: string,
+  mode: PermissionMode,
+  access: OrganizationAccess,
+): SqlPredicate {
+  if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(alias)) throw new Error('Invalid internal SQL alias');
+  if (
+    identity.serviceScope &&
+    (!identity.serviceScope.permissions.includes(mode) ||
+      identity.serviceScope.organizationId !== organizationId)
+  )
+    fail(403, 'Token does not permit this operation');
   const validHome = `EXISTS (${ancestorCte(alias)} SELECT 1 FROM permission_ancestors a WHERE a.is_home=1 AND a.parent_id IS NULL AND a.id=?)`;
   const bindings = [organizationHomeFolderId(organizationId)];
   const scopedHome = identity.serviceScope?.folderId
@@ -310,10 +327,10 @@ export function registerCollaborationRoutes(app: App) {
     await ensureOrganizationMember(context.env, identity, org);
     const predicate = await permittedDocumentPredicateSQL(context.env, identity, org);
     const { results } = await context.env.DB.prepare(
-      `SELECT d.* FROM (SELECT f.*,f.id AS home_folder_id FROM folders f) d WHERE d.organization_id=? AND (${predicate.sql}) ORDER BY d.name COLLATE NOCASE`,
+      `SELECT d.*,EXISTS (${ancestorCte('d')} SELECT 1 FROM permission_ancestors a WHERE a.is_restricted=1) effective_restricted FROM (SELECT f.*,f.id AS home_folder_id FROM folders f) d WHERE d.organization_id=? AND (${predicate.sql}) ORDER BY d.name COLLATE NOCASE`,
     )
       .bind(org, ...predicate.bindings)
-      .all<FolderRow>();
+      .all<FolderRow & { effective_restricted: number }>();
     const access = await organizationAccess(context.env, identity, org);
     const writableIds = new Set<string>();
     if (!identity.serviceScope || identity.serviceScope.permissions.includes('write')) {
@@ -331,10 +348,38 @@ export function registerCollaborationRoutes(app: App) {
         .all<{ id: string }>();
       for (const folder of writable.results) writableIds.add(folder.id);
     }
+    const summary = await context.env.DB.prepare(`
+      WITH visible_files AS (
+        SELECT d.id,d.home_folder_id,d.updated_at,coalesce(v.size,0) size
+        FROM documents d LEFT JOIN versions v ON v.id=d.current_version_id
+        WHERE d.organization_id=? AND d.is_deleted=0 AND (${predicate.sql})
+      ), entries AS (
+        SELECT home_folder_id folder_id,size,updated_at,0 is_shortcut FROM visible_files
+        UNION ALL
+        SELECT s.folder_id,0,d.updated_at,1 FROM document_shortcuts s JOIN visible_files d ON d.id=s.document_id
+        WHERE s.folder_id<>d.home_folder_id
+      )
+      SELECT folder_id,sum(CASE WHEN is_shortcut=0 THEN 1 ELSE 0 END) documents_count,
+        sum(size) documents_size,sum(is_shortcut) shortcuts_count,max(updated_at) last_activity_at
+      FROM entries GROUP BY folder_id`)
+      .bind(org, ...predicate.bindings)
+      .all<{
+        folder_id: string;
+        documents_count: number;
+        documents_size: number;
+        shortcuts_count: number;
+        last_activity_at: number | null;
+      }>();
+    const summaries = new Map(summary.results.map((row) => [row.folder_id, row]));
     return context.json({
       folders: results.map((folder) => ({
         ...folderDto(folder),
         canWrite: writableIds.has(folder.id),
+        effectiveRestricted: !!folder.effective_restricted,
+        documentsCount: summaries.get(folder.id)?.documents_count ?? 0,
+        documentsSize: summaries.get(folder.id)?.documents_size ?? 0,
+        shortcutsCount: summaries.get(folder.id)?.shortcuts_count ?? 0,
+        lastActivityAt: iso(summaries.get(folder.id)?.last_activity_at ?? null),
       })),
       canManageAccess:
         !identity.serviceScope && (elevated(access.role) || !!access.personalOwnerId),
@@ -519,15 +564,17 @@ export function registerCollaborationRoutes(app: App) {
     const predicate = await permittedDocumentPredicateSQL(context.env, identity, org);
     const page = pageIndex(context.req.query('pageIndex'));
     const { results } =
-      await context.env.DB.prepare(`SELECT d.id,d.name,d.mime_type,coalesce(v.size,0) AS original_size,CASE WHEN d.home_folder_id=? THEN 0 ELSE 1 END AS is_shortcut,
+      await context.env.DB.prepare(`SELECT d.id,d.name,d.mime_type,d.updated_at,u.name AS author_name,coalesce(v.size,0) AS original_size,CASE WHEN d.home_folder_id=? THEN 0 ELSE 1 END AS is_shortcut,
       (SELECT s.id FROM document_shortcuts s WHERE s.document_id=d.id AND s.folder_id=?) AS shortcut_id
-      FROM documents d LEFT JOIN versions v ON v.id=d.current_version_id WHERE d.organization_id=? AND d.is_deleted=0 AND (d.home_folder_id=? OR EXISTS(SELECT 1 FROM document_shortcuts s WHERE s.document_id=d.id AND s.folder_id=?)) AND (${predicate.sql})
+      FROM documents d LEFT JOIN versions v ON v.id=d.current_version_id LEFT JOIN users u ON u.id=d.created_by WHERE d.organization_id=? AND d.is_deleted=0 AND (d.home_folder_id=? OR EXISTS(SELECT 1 FROM document_shortcuts s WHERE s.document_id=d.id AND s.folder_id=?)) AND (${predicate.sql})
       ORDER BY d.name COLLATE NOCASE,d.id LIMIT 101 OFFSET ?`)
         .bind(folder.id, folder.id, org, folder.id, folder.id, ...predicate.bindings, page * 100)
         .all<{
           id: string;
           name: string;
           mime_type: string;
+          updated_at: number;
+          author_name: string | null;
           original_size: number;
           is_shortcut: number;
           shortcut_id: string | null;
@@ -537,6 +584,8 @@ export function registerCollaborationRoutes(app: App) {
         id: file.id,
         name: file.name,
         mimeType: file.mime_type,
+        updatedAt: iso(file.updated_at),
+        authorName: file.author_name,
         originalSize: file.original_size,
         isShortcut: !!file.is_shortcut,
         shortcutId: file.shortcut_id,

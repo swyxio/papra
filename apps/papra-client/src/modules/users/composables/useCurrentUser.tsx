@@ -1,3 +1,7 @@
+import { A } from '@solidjs/router';
+import { authPagesPaths } from '@/modules/auth/auth.constants';
+import { AppLayout } from '@/modules/ui/layouts/organization.layout';
+import { Button } from '@/modules/ui/components/button';
 import type { ParentComponent } from 'solid-js';
 import type { UserMe } from '../users.types';
 import { useQuery } from '@tanstack/solid-query';
@@ -27,7 +31,36 @@ export const CurrentUserProvider: ParentComponent = (props) => {
   }));
 
   return (
-    <Show when={query.data}>
+    <Show
+      when={query.data}
+      fallback={
+        <AppLayout accountReady={false}>
+          <main class="p-6 max-w-2xl mx-auto py-12">
+            <Show
+              when={query.isError}
+              fallback={
+                <p role="status" class="flex items-center gap-3">
+                  <span class="i-tabler-loader-2 size-5 animate-spin" />
+                  Loading your account…
+                </p>
+              }
+            >
+              <h1 class="text-xl font-semibold mb-3">Your account could not be loaded</h1>
+              <p class="text-muted-foreground mb-5" role="alert">
+                Check your connection and try again. If your session has expired, sign in again with
+                Google.
+              </p>
+              <div class="flex gap-3">
+                <Button onClick={() => void query.refetch()}>Try again</Button>
+                <Button as={A} href={authPagesPaths.login} variant="outline">
+                  Sign in
+                </Button>
+              </div>
+            </Show>
+          </main>
+        </AppLayout>
+      }
+    >
       <currentUserContext.Provider
         value={{
           user: query.data!.user,

@@ -248,7 +248,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'organizations.create-first.default-name': 'Mon organisation',
   'organizations.create-first.user-name': "{{ name }}'s organisation",
 
-  'organization.settings.title': "Paramètres de l'organisation",
   'organization.settings.page.title': "Paramètres de l'organisation",
   'organization.settings.page.description': 'Gérez les paramètres de votre organisation ici.',
   'organization.settings.name.title': "Nom de l'organisation",
@@ -359,17 +358,12 @@ export const translations: Partial<TranslationsDictionary> = {
 
   // Documents
 
-  'documents.list.title': 'Documents',
-  'documents.list.no-documents.title': 'Aucun document',
-  'documents.list.no-documents.description':
-    "Il n'y a pas de documents dans cette organisation. Commencez par télécharger des documents.",
   'documents.list.no-results': 'Aucun document trouvé',
   'documents.list.table.headers.file-name': 'Nom du fichier',
   'documents.list.table.headers.created': 'Créé le',
   'documents.list.table.headers.deleted': 'Supprimé le',
   'documents.list.table.headers.actions': 'Actions',
   'documents.list.table.headers.tags': 'Étiquettes',
-  'documents.list.search.placeholder': 'Rechercher des documents...',
   'documents.list.search.total-count-with-query':
     '{{ count }} {{ count, =1:document, documents }} correspondant à cette recherche',
   'documents.list.search.total-count-no-query':
@@ -415,7 +409,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'documents.actions.download.title': 'Télécharger',
   'documents.actions.download.error': 'Impossible de télécharger le document',
   'documents.actions.restore': 'Restaurer',
-  'documents.actions.delete': 'Supprimer',
   'documents.actions.edit': 'Modifier',
   'documents.actions.cancel': 'Annuler',
   'documents.actions.save': 'Enregistrer',
@@ -1038,9 +1031,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'layout.menu.deleted-documents': 'Documents supprimés',
   'layout.menu.organization-settings': 'Paramètres',
   'layout.menu.api-keys': 'API keys',
-  'layout.menu.settings': 'Paramètres',
-  'layout.menu.account': 'Compte',
-  'layout.menu.general-settings': 'Paramètres généraux',
   'layout.menu.usage': 'Utilisation',
   'layout.menu.intake-emails': 'Adresses de réception',
   'layout.menu.webhooks': 'Webhooks',
