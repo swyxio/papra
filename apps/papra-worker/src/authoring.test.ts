@@ -308,3 +308,39 @@ test('sponsorship order preserves commercial parties, delivery sections and unsi
   expect(text).not.toContain('{{');
   expect(text).not.toContain('Deepgram');
 });
+
+test('real sponsorship prefills are private to the member organization and never use the shared catalog', async () => {
+  const f = await fixture();
+  const path = '/api/organizations/org/document-templates/sponsorship-order/presets';
+  expect(await (await f.request(path)).json()).toEqual({ presets: [] });
+  const presets = {
+    presets: [
+      {
+        id: 'fixture-deal',
+        name: 'TEST ONLY deal',
+        sourceName: 'TEST ONLY PDF',
+        values: { 'advertiser-name': 'TEST ONLY sponsor', 'quantity': '4', 'unit-fee': '20000' },
+      },
+    ],
+  };
+  await f.env.FILES.put(
+    'templates/organizations/org/sponsorship-order/presets.json',
+    JSON.stringify(presets),
+  );
+  const response = await f.request(path);
+  expect(response.status).toBe(200);
+  expect(response.headers.get('cache-control')).toBe('private, no-store');
+  expect(await response.json()).toEqual(presets);
+  expect((await f.request(path, undefined, 'outsider')).status).toBe(403);
+  await f.DB.prepare(
+    "INSERT INTO organizations(id,name,created_at,updated_at) VALUES ('other','other',1,1)",
+  ).run();
+  await f.DB.prepare(
+    "INSERT INTO organization_members(id,organization_id,user_id,role,created_at,updated_at) VALUES ('other-owner','other','owner','owner',1,1)",
+  ).run();
+  expect(
+    await (
+      await f.request('/api/organizations/other/document-templates/sponsorship-order/presets')
+    ).json(),
+  ).toEqual({ presets: [] });
+});

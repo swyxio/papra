@@ -15,6 +15,16 @@ export function registerTemplateRoutes(app: App) {
     if (!catalog) throw error(503, 'Agreement templates are temporarily unavailable');
     return c.json(await catalog.json());
   });
+  // Real deal details belong to this organization's private R2 namespace, never shared assets.
+  app.get(`${base}/sponsorship-order/presets`, async (c) => {
+    const org = c.req.param('org');
+    if (!/^[a-zA-Z0-9_-]{1,100}$/.test(org)) throw error(404, 'Space not found');
+    const object = await c.env.FILES.get(
+      `templates/organizations/${org}/sponsorship-order/presets.json`,
+    );
+    c.header('Cache-Control', 'private, no-store');
+    return c.json(object ? await object.json() : { presets: [] });
+  });
   app.get(`${base}/:id`, async (c) => {
     const id = c.req.param('id');
     if (!/^[a-z0-9-]{1,80}$/.test(id)) throw error(404, 'Template not found');

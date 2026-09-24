@@ -1,5 +1,5 @@
 import { A, useNavigate, useParams, useSearchParams } from '@solidjs/router';
-import { createMemo, createResource, createSignal, For, Show } from 'solid-js';
+import { createMemo, createResource, createSignal, createUniqueId, For, Show } from 'solid-js';
 import { apiClient } from '@/modules/shared/http/api-client';
 import { getHttpErrorMessage } from '@/modules/shared/http/http-errors';
 import { Button } from '@/modules/ui/components/button';
@@ -7,6 +7,12 @@ import { Sheet, SheetContent, SheetTitle } from '@/modules/ui/components/sheet';
 import { fillTemplate } from './document-templates';
 import type { DocumentTemplate, TemplateSummary } from './document-templates';
 import { documentStarters } from './document-starters';
+import {
+  sponsorshipCalculatedTotal,
+  sponsorshipNumericFields,
+  validateSponsorshipNumbers,
+} from './sponsorship-form';
+import type { SponsorshipPreset } from './sponsorship-form';
 import { NativeEditor } from './editor.pages';
 import { describeTemplate } from './template-descriptions';
 import { useQuery } from '@tanstack/solid-query';
@@ -41,8 +47,21 @@ export function NewDocumentPage() {
     [error, setError] = createSignal('');
   const [templatesOpen, setTemplatesOpen] = createSignal(false);
   const [detailsOpen, setDetailsOpen] = createSignal(false);
+  const [pendingFieldFocus, setPendingFieldFocus] = createSignal<string>();
   const [expanded, setExpanded] = createSignal(false);
+  const [presetId, setPresetId] = createSignal('');
+  const [beforePreset, setBeforePreset] = createSignal<{
+    values: Record<string, string>;
+    name: string;
+  }>();
   const templateBase = `/api/organizations/${params.organizationId}/document-templates`;
+  const [presets, { refetch: reloadPresets }] = createResource(
+    () => template() === 'sponsorship-order',
+    async () =>
+      apiClient<{ presets: SponsorshipPreset[] }>({
+        path: `${templateBase}/sponsorship-order/presets`,
+      }),
+  );
   const [catalog, { refetch: reloadCatalog }] = createResource(async () =>
     apiClient<{ templates: TemplateSummary[] }>({ path: templateBase }),
   );
@@ -78,6 +97,65 @@ export function NewDocumentPage() {
         )
       : {};
   const fieldValue = (id: string) => values()[id] ?? defaults()[id] ?? '';
+  const numericErrors = createMemo(() =>
+    template() === 'sponsorship-order'
+      ? validateSponsorshipNumbers({ ...defaults(), ...values() })
+      : {},
+  );
+  const calculatedTotal = () => sponsorshipCalculatedTotal(values());
+  function applyPreset(id: string) {
+    const preset = presets()?.presets.find((p) => p.id === id);
+    if (!preset) return;
+    setBeforePreset({ values: { ...values() }, name: name() });
+    setValues({ ...values(), ...preset.values });
+    setPresetId(id);
+    if (!customName())
+      setName(`${preset.values['campaign-name'] || preset.name} — Sponsorship Order`);
+    setError('');
+  }
+  function fieldKeys(event: KeyboardEvent) {
+    if (event.isComposing || busy()) return;
+    if (
+      (event.metaKey || event.ctrlKey) &&
+      event.key === 'Enter' &&
+      !event.altKey &&
+      !event.shiftKey
+    ) {
+      event.preventDefault();
+      void create();
+      return;
+    }
+    const target = event.target as HTMLElement;
+    const step =
+      event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      (event.key === 'ArrowDown' || event.key === 'ArrowUp')
+        ? event.key === 'ArrowUp'
+          ? -1
+          : 1
+        : event.key === 'Enter' &&
+            target.tagName === 'INPUT' &&
+            !event.ctrlKey &&
+            !event.metaKey &&
+            !event.altKey
+          ? event.shiftKey
+            ? -1
+            : 1
+          : 0;
+    if (!step || !target.hasAttribute('data-studio-field')) return;
+    event.preventDefault();
+    const fields = Array.from(
+      event.currentTarget instanceof HTMLElement
+        ? event.currentTarget.querySelectorAll<HTMLElement>('[data-studio-field]')
+        : [],
+    );
+    const next = fields[fields.indexOf(target) + step];
+    if (next) {
+      next.focus();
+      next.scrollIntoView({ block: 'nearest' });
+    }
+  }
   const source = createMemo(() =>
     fillable()
       ? fillTemplate(fillable()!, { ...defaults(), ...values() })
@@ -88,6 +166,8 @@ export function NewDocumentPage() {
       setTemplate(id);
       setSearchParams({ template: id === 'sponsorship-order' ? id : undefined });
       setValues({});
+      setPresetId('');
+      setBeforePreset(undefined);
       setError('');
       if (!customName())
         setName(id === 'blank' ? 'Untitled document' : choices().find((t) => t.id === id)!.name);
@@ -96,6 +176,24 @@ export function NewDocumentPage() {
   }
   async function create() {
     if (!ready() || !source() || busy() || !name().trim()) return;
+    const invalid = Object.keys(numericErrors())[0];
+    if (invalid) {
+      setError('Check the quantities and fees highlighted in Details.');
+      const visibleField = () =>
+        Array.from(document.querySelectorAll<HTMLElement>('[data-studio-field]')).find(
+          (f) => f.dataset.studioField === invalid && f.offsetParent !== null,
+        );
+      if (!visibleField()) {
+        setPendingFieldFocus(invalid);
+        setDetailsOpen(true);
+      } else
+        queueMicrotask(() => {
+          const field = visibleField();
+          field?.focus();
+          field?.scrollIntoView({ block: 'nearest' });
+        });
+      return;
+    }
     setBusy(true);
     setError('');
     try {
@@ -191,136 +289,241 @@ export function NewDocumentPage() {
       </Show>
     </>
   );
-  const details = () => (
-    <div class="space-y-5">
-      <div>
-        <p class="text-xs text-muted-foreground mb-1">Template</p>
-        <h3 class="font-medium">{description().title}</h3>
-        <Show when={description().variant}>
-          <span class="studio-variant">{description().variant}</span>
-        </Show>
-        <p class="text-sm text-muted-foreground mt-2 leading-relaxed">
-          {description().description}
-        </p>
-        <button
-          class="text-sm text-primary mt-2 underline"
-          onClick={() => {
-            setDetailsOpen(false);
-            setTemplatesOpen(true);
-          }}
-        >
-          Change template
-        </button>
-      </div>
-      <label class="block text-sm">
-        Document name
-        <input
-          class="studio-input mt-2"
-          value={name()}
-          disabled={busy()}
-          onInput={(e) => {
-            setName(e.currentTarget.value);
-            setCustomName(true);
-          }}
-        />
-      </label>
-      <Show when={fillable()}>
-        {(t) => (
-          <>
-            <div class="border-t pt-4">
-              <h3 class="text-sm font-medium mb-2">Fill in the details</h3>
-              <p class="text-xs text-muted-foreground">
-                Blank fields keep their original placeholders. Edit all clauses and attachments
-                after creation.
-              </p>
-            </div>
-            <Show when={template() === 'sponsorship-order'}>
-              <p class="text-xs text-muted-foreground">
-                Enter fees and totals manually. Add placement rows and review every term in the
-                editor before sending for signature.
-              </p>
-            </Show>
-            <For each={t().fields}>
-              {(field) => (
-                <div class="text-sm break-words">
-                  <Show when={field.section}>
-                    <h3 class="font-semibold border-t pt-4 mb-3">{field.section}</h3>
+  const details = () => {
+    const fieldPrefix = createUniqueId();
+    return (
+      <div class="space-y-5" onKeyDown={fieldKeys}>
+        <div>
+          <p class="text-xs text-muted-foreground mb-1">Template</p>
+          <h3 class="font-medium">{description().title}</h3>
+          <Show when={description().variant}>
+            <span class="studio-variant">{description().variant}</span>
+          </Show>
+          <p class="text-sm text-muted-foreground mt-2 leading-relaxed">
+            {description().description}
+          </p>
+          <button
+            class="text-sm text-primary mt-2 underline"
+            onClick={() => {
+              setDetailsOpen(false);
+              setTemplatesOpen(true);
+            }}
+          >
+            Change template
+          </button>
+        </div>
+        <label class="block text-sm">
+          Document name
+          <input
+            class="studio-input mt-2"
+            data-studio-field="document-name"
+            value={name()}
+            disabled={busy()}
+            onInput={(e) => {
+              setName(e.currentTarget.value);
+              setCustomName(true);
+            }}
+          />
+        </label>
+        <Show when={fillable()}>
+          {(t) => (
+            <>
+              <div class="border-t pt-4">
+                <h3 class="text-sm font-medium mb-2">Fill in the details</h3>
+                <p class="text-xs text-muted-foreground">
+                  Blank fields keep their original placeholders. Edit all clauses and attachments
+                  after creation.
+                </p>
+              </div>
+              <Show when={template() === 'sponsorship-order'}>
+                <div class="space-y-3 text-xs">
+                  <label class="block text-sm">
+                    Prefill from saved details
+                    <select
+                      class="studio-input mt-2"
+                      value={presetId()}
+                      disabled={busy() || presets.loading}
+                      onChange={(e) => applyPreset(e.currentTarget.value)}
+                    >
+                      <option value="" disabled>
+                        {presets.loading ? 'Loading saved details…' : 'Choose saved details…'}
+                      </option>
+                      <For each={presets()?.presets ?? []}>
+                        {(preset) => <option value={preset.id}>{preset.name}</option>}
+                      </For>
+                    </select>
+                  </label>
+                  <Show when={presets.error}>
+                    <p role="status">
+                      Could not load saved details.{' '}
+                      <button class="underline" onClick={() => void reloadPresets()}>
+                        Retry
+                      </button>
+                    </p>
                   </Show>
-                  <label class="block">
-                    {field.label}
-                    <Show
-                      when={field.multiline}
-                      fallback={
-                        <input
-                          class="studio-input mt-2"
+                  <Show when={!presets.loading && !presets.error && !presets()?.presets.length}>
+                    <p class="text-muted-foreground">No saved deal details in this space.</p>
+                  </Show>
+                  <Show when={presetId()}>
+                    <p role="status">
+                      Filled from {presets()?.presets.find((p) => p.id === presetId())?.sourceName}.
+                      All fields remain editable. Pending terms stay pending.{' '}
+                      <button
+                        class="underline"
+                        disabled={busy()}
+                        onClick={() => {
+                          const previous = beforePreset();
+                          if (previous) {
+                            setValues(previous.values);
+                            setName(previous.name);
+                          }
+                          setPresetId('');
+                          setBeforePreset(undefined);
+                          setError('');
+                        }}
+                      >
+                        Undo prefill
+                      </button>
+                    </p>
+                  </Show>
+                  <p class="text-muted-foreground">
+                    Tab / Shift+Tab: next / previous. Enter: next single-line field. Alt+↓ / ↑: next
+                    / previous field. ⌘/Ctrl+Enter: create draft.
+                  </p>
+                  <p class="text-muted-foreground">
+                    Add additional placement rows in the editor after creation.
+                  </p>
+                </div>
+              </Show>
+              <For each={t().fields}>
+                {(field) => (
+                  <div class="text-sm break-words">
+                    <Show when={field.section}>
+                      <h3 class="font-semibold border-t pt-4 mb-3">{field.section}</h3>
+                    </Show>
+                    <label class="block">
+                      {field.label}
+                      <Show
+                        when={field.multiline}
+                        fallback={
+                          <input
+                            class="studio-input mt-2"
+                            data-studio-field={field.id}
+                            inputMode={
+                              template() === 'sponsorship-order' &&
+                              sponsorshipNumericFields.includes(field.id)
+                                ? field.id === 'quantity'
+                                  ? 'numeric'
+                                  : 'decimal'
+                                : undefined
+                            }
+                            aria-invalid={!!numericErrors()[field.id]}
+                            aria-describedby={
+                              numericErrors()[field.id]
+                                ? `${fieldPrefix}-${field.id}-error`
+                                : undefined
+                            }
+                            value={fieldValue(field.id)}
+                            placeholder={field.original}
+                            disabled={busy()}
+                            onInput={(e) => {
+                              setValues({ ...values(), [field.id]: e.currentTarget.value });
+                              setError('');
+                            }}
+                          />
+                        }
+                      >
+                        <textarea
+                          class="studio-input mt-2 resize-y"
+                          data-studio-field={field.id}
+                          rows={3}
                           value={fieldValue(field.id)}
                           placeholder={field.original}
                           disabled={busy()}
-                          onInput={(e) =>
-                            setValues({ ...values(), [field.id]: e.currentTarget.value })
-                          }
+                          onInput={(e) => {
+                            setValues({ ...values(), [field.id]: e.currentTarget.value });
+                            setError('');
+                          }}
                         />
-                      }
-                    >
-                      <textarea
-                        class="studio-input mt-2 resize-y"
-                        rows={3}
-                        value={fieldValue(field.id)}
-                        placeholder={field.original}
-                        disabled={busy()}
-                        onInput={(e) =>
-                          setValues({ ...values(), [field.id]: e.currentTarget.value })
-                        }
-                      />
+                      </Show>
+                    </label>
+                    <Show when={numericErrors()[field.id]}>
+                      {(message) => (
+                        <p
+                          id={`${fieldPrefix}-${field.id}-error`}
+                          class="text-xs text-destructive mt-2"
+                        >
+                          {message()}
+                        </p>
+                      )}
                     </Show>
-                  </label>
-                  <Show when={/^(employee-name|company-signatory-name)$/.test(field.id)}>
-                    <button
-                      type="button"
-                      class="text-xs text-primary underline mt-2"
-                      disabled={busy()}
-                      onClick={() => setValues({ ...values(), [field.id]: user.name })}
-                    >
-                      Use my name
-                    </button>
-                  </Show>
+                    <Show when={template() === 'sponsorship-order' && field.id === 'unit-fee'}>
+                      <button
+                        type="button"
+                        class="text-xs underline mt-2"
+                        disabled={busy() || calculatedTotal() === undefined}
+                        onClick={() => {
+                          const total = calculatedTotal();
+                          if (total !== undefined) {
+                            setValues({ ...values(), 'line-total': total, 'total-fee': total });
+                            setError('');
+                          }
+                        }}
+                      >
+                        Calculate totals from quantity × unit fee
+                      </button>
+                      <p class="text-xs text-muted-foreground mt-2">
+                        Review payment milestones after changing fees.
+                      </p>
+                    </Show>
+                    <Show when={/^(employee-name|company-signatory-name)$/.test(field.id)}>
+                      <button
+                        type="button"
+                        class="text-xs text-primary underline mt-2"
+                        disabled={busy()}
+                        onClick={() => setValues({ ...values(), [field.id]: user.name })}
+                      >
+                        Use my name
+                      </button>
+                    </Show>
+                  </div>
+                )}
+              </For>
+            </>
+          )}
+        </Show>
+        <Show when={isAtlas() && ready() && selected()}>
+          {(t) => (
+            <section class="border-t pt-4 space-y-3 text-sm">
+              <h3 class="font-medium">Source and version</h3>
+              <a class="block underline" href={`${templateBase}/${t().id}/original`}>
+                Download original .docx
+              </a>
+              <a class="block underline" href={t().url} target="_blank" rel="noreferrer">
+                View in Stripe Atlas ↗
+              </a>
+              <p class="text-xs text-muted-foreground">Imported {t().preparedAt}</p>
+              <details>
+                <summary class="cursor-pointer">Source guidance and drafting notes</summary>
+                <div class="whitespace-pre-wrap mt-3 text-xs leading-relaxed max-h-80 overflow-auto">
+                  {t().guidance}
                 </div>
-              )}
-            </For>
-          </>
-        )}
-      </Show>
-      <Show when={isAtlas() && ready() && selected()}>
-        {(t) => (
-          <section class="border-t pt-4 space-y-3 text-sm">
-            <h3 class="font-medium">Source and version</h3>
-            <a class="block underline" href={`${templateBase}/${t().id}/original`}>
-              Download original .docx
-            </a>
-            <a class="block underline" href={t().url} target="_blank" rel="noreferrer">
-              View in Stripe Atlas ↗
-            </a>
-            <p class="text-xs text-muted-foreground">Imported {t().preparedAt}</p>
-            <details>
-              <summary class="cursor-pointer">Source guidance and drafting notes</summary>
-              <div class="whitespace-pre-wrap mt-3 text-xs leading-relaxed max-h-80 overflow-auto">
-                {t().guidance}
-              </div>
-            </details>
-          </section>
-        )}
-      </Show>
+              </details>
+            </section>
+          )}
+        </Show>
 
-      <Show when={selected.error && isAtlas()}>
-        <p role="alert" class="text-sm text-destructive">
-          Could not load this agreement.{' '}
-          <button class="underline" onClick={() => void reloadTemplate()}>
-            Retry
-          </button>
-        </p>
-      </Show>
-    </div>
-  );
+        <Show when={selected.error && isAtlas()}>
+          <p role="alert" class="text-sm text-destructive">
+            Could not load this agreement.{' '}
+            <button class="underline" onClick={() => void reloadTemplate()}>
+              Retry
+            </button>
+          </p>
+        </Show>
+      </div>
+    );
+  };
   return (
     <div class="document-studio" classList={{ 'studio-expanded': expanded() }}>
       <header class="studio-heading">
@@ -437,7 +640,21 @@ export function NewDocumentPage() {
         </SheetContent>
       </Sheet>
       <Sheet open={detailsOpen()} onOpenChange={setDetailsOpen}>
-        <SheetContent side="bottom" class="studio-sheet rounded-t-xl">
+        <SheetContent
+          side="bottom"
+          class="studio-sheet rounded-t-xl"
+          onOpenAutoFocus={(event) => {
+            const id = pendingFieldFocus();
+            if (!id) return;
+            event.preventDefault();
+            const field = Array.from(
+              document.querySelectorAll<HTMLElement>('[data-studio-field]'),
+            ).find((f) => f.dataset.studioField === id && f.offsetParent !== null);
+            field?.focus();
+            field?.scrollIntoView({ block: 'nearest' });
+            setPendingFieldFocus(undefined);
+          }}
+        >
           <div class="flex justify-between mb-5">
             <SheetTitle>Document details</SheetTitle>
             <Button variant="ghost" onClick={() => setDetailsOpen(false)}>
