@@ -72,7 +72,13 @@ const PermanentlyDeleteTrashDocumentButton: Component<{
     if (
       !(await confirm({
         title: t('trash.delete.confirm.title'),
-        message: t('trash.delete.confirm.description'),
+        message: (
+          <>
+            <span class="font-bold">{props.document.name}</span>
+            <br />
+            {t('trash.delete.confirm.description')}
+          </>
+        ),
         confirmButton: {
           text: t('trash.delete.confirm.label'),
           variant: 'destructive',

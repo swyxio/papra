@@ -440,7 +440,7 @@ export const translations = {
 
   'documents.management.details': 'Document details',
   'documents.management.rename': 'Rename document',
-  'documents.management.delete': 'Delete document',
+  'documents.management.delete': 'Move to trash',
 
   'documents.import.drop-area.title': 'Drop files here',
   'documents.import.drop-area.description': 'Drag and drop files here to import them',
@@ -533,13 +533,13 @@ export const translations = {
   'import-documents.title.none': 'Import documents',
   'import-documents.no-import-in-progress': 'No document import in progress',
 
-  'documents.deleted.title': 'Deleted documents',
-  'documents.deleted.empty.title': 'No deleted documents',
+  'documents.deleted.title': 'Trash',
+  'documents.deleted.empty.title': 'Trash is empty',
   'documents.deleted.empty.description':
-    'You have no deleted documents. Documents that are deleted will be moved to the trash bin for {{ days }} days.',
+    'Files you move to trash stay here for {{ days }} days so you can restore them.',
   'documents.deleted.retention-notice':
-    'All deleted documents are stored in the trash bin for {{ days }} days. Passing this delay, the documents will be permanently deleted, and you will not be able to restore them.',
-  'documents.deleted.deleted-at': 'Deleted',
+    'Files in Trash can be restored for {{ days }} days. After that, they are permanently deleted. You can also choose Delete permanently to remove them sooner.',
+  'documents.deleted.deleted-at': 'Trashed',
   'documents.deleted.restoring': 'Restoring...',
   'documents.deleted.deleting': 'Deleting...',
 
@@ -698,19 +698,19 @@ export const translations = {
   'document-share-links.public.not-found.title': 'Link not found',
   'document-share-links.public.not-found.description': 'This share link does not exist.',
 
-  'trash.delete-all.button': 'Delete all',
+  'trash.delete-all.button': 'Empty trash…',
   'trash.delete-all.confirm.title': 'Permanently delete all documents?',
   'trash.delete-all.confirm.description':
     'Are you sure you want to permanently delete all documents from the trash? This action cannot be undone.',
-  'trash.delete-all.confirm.label': 'Delete',
+  'trash.delete-all.confirm.label': 'Delete permanently',
   'trash.delete-all.confirm.cancel': 'Cancel',
-  'trash.delete.button': 'Delete',
+  'trash.delete.button': 'Delete permanently…',
   'trash.delete.confirm.title': 'Permanently delete document?',
   'trash.delete.confirm.description':
     'Are you sure you want to permanently delete this document from the trash? This action cannot be undone.',
-  'trash.delete.confirm.label': 'Delete',
+  'trash.delete.confirm.label': 'Delete permanently',
   'trash.delete.confirm.cancel': 'Cancel',
-  'trash.deleted.success.title': 'Document deleted',
+  'trash.deleted.success.title': 'Permanently deleted',
   'trash.deleted.success.description': 'The document has been permanently deleted.',
 
   'activity.document.created': 'The document has been created',
@@ -1028,7 +1028,7 @@ export const translations = {
   'layout.menu.custom-properties': 'Custom Properties',
   'layout.menu.tagging-rules': 'Tagging rules',
   'layout.menu.share-links': 'Share links',
-  'layout.menu.deleted-documents': 'Deleted documents',
+  'layout.menu.deleted-documents': 'Trash',
   'layout.menu.organization-settings': 'Settings',
   'layout.menu.api-keys': 'API keys',
   'layout.menu.auto-tagging': 'Auto tagging',

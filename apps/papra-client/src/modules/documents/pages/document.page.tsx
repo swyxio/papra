@@ -826,7 +826,7 @@ export const DocumentPage: Component = () => {
                       when={doc().isDeleted}
                       fallback={
                         <DropdownMenuItem class="text-destructive" onSelect={deleteDoc}>
-                          Delete file…
+                          Move to trash…
                         </DropdownMenuItem>
                       }
                     >
@@ -843,7 +843,10 @@ export const DocumentPage: Component = () => {
             </div>
             <Show when={doc().isDeleted}>
               <Alert variant="destructive">
-                This file is in the trash. Restore it to open its contents.
+                This file is in the trash. Restore it to open its contents.{' '}
+                <A class="underline" href={`/orgs/${params.organizationId}/deleted`}>
+                  Open Trash
+                </A>
               </Alert>
             </Show>
             <Show when={doc().mimeType === googleDocMimeType}>

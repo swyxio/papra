@@ -208,3 +208,100 @@ test('failed purge cancels processing before storage deletion and resumes withou
     id: 'active',
   });
 });
+
+test('default delete preserves bytes and versions for restoration; permanent delete requires trash', async () => {
+  const mf = new Miniflare({
+    modules: true,
+    script: 'export default {fetch(){return new Response("ok")}}',
+    compatibilityDate: '2026-07-21',
+    d1Databases: ['DB'],
+  });
+  instances.push(mf);
+  const DB = await mf.getD1Database('DB');
+  await DB.exec(await readFile(new URL('../schema.sql', import.meta.url), 'utf8'));
+  await DB.batch([
+    DB.prepare(
+      "INSERT INTO users(id,google_sub,email,name,created_at,updated_at) VALUES('u','sub','u@smol.ai','User',1,1)",
+    ),
+    DB.prepare("INSERT INTO organizations(id,name,created_at,updated_at) VALUES('o','Org',1,1)"),
+    DB.prepare(
+      "INSERT INTO organization_members(id,organization_id,user_id,role,created_at,updated_at) VALUES('m','o','u','owner',1,1)",
+    ),
+    DB.prepare(
+      "INSERT INTO folders(id,organization_id,name,is_home,created_by,created_at,updated_at) VALUES('fld_home_o','o','Home',1,'u',1,1)",
+    ),
+    DB.prepare(
+      "INSERT INTO documents(id,organization_id,created_by,name,mime_type,current_version_id,home_folder_id,created_at,updated_at) VALUES('d','o','u','TEST ONLY','text/plain','v','fld_home_o',1,1)",
+    ),
+    DB.prepare(
+      "INSERT INTO versions(id,document_id,storage_key,original_name,size,mime_type,created_by,created_at) VALUES('v','d','originals/v','test.txt',4,'text/plain','u',1)",
+    ),
+    DB.prepare(
+      "INSERT INTO versions(id,document_id,storage_key,original_name,size,mime_type,created_by,created_at) VALUES('old','d','originals/old','test.txt',3,'text/plain','u',1)",
+    ),
+  ]);
+  const filesDelete = vi.fn(),
+    backupsDelete = vi.fn();
+  const env = {
+    DB,
+    FILES: {
+      delete: filesDelete,
+      list: async () => ({ objects: [], truncated: false }),
+      get: async () => ({ body: 'test', size: 4 }),
+    },
+    BACKUPS: { delete: backupsDelete, list: async () => ({ objects: [], truncated: false }) },
+    INDEX: { deleteByIds: vi.fn() },
+  } as unknown as Env;
+  const identity: Identity = {
+    userId: 'u',
+    email: 'u@smol.ai',
+    name: 'User',
+    isOwner: false,
+    organizations: [{ id: 'o', name: 'Org', role: 'owner' }],
+    session: { id: 's', expiresAt: new Date(Date.now() + 3600000) },
+  };
+  const app = new Hono<AppEnv>();
+  app.use('*', async (c, next) => {
+    c.set('identity', identity);
+    await next();
+  });
+  registerDocumentRoutes(app);
+  const base = '/api/organizations/o/documents';
+  const request = async (path: string, method = 'GET') =>
+    app.request(`${base}${path}`, { method }, env);
+  expect((await request('/trash/d', 'DELETE')).status).toBe(409);
+  expect(filesDelete).not.toHaveBeenCalled();
+  expect((await request('/d', 'DELETE')).status).toBe(204);
+  expect(
+    await DB.prepare("SELECT is_deleted,deleted_by FROM documents WHERE id='d'").first(),
+  ).toEqual({ is_deleted: 1, deleted_by: 'u' });
+  expect(await DB.prepare("SELECT count(*) n FROM versions WHERE document_id='d'").first()).toEqual(
+    { n: 2 },
+  );
+  expect(filesDelete).not.toHaveBeenCalled();
+  expect(backupsDelete).not.toHaveBeenCalled();
+  expect(await (await request('')).json()).toMatchObject({ documentsCount: 0 });
+  expect(await (await request('/deleted')).json()).toMatchObject({ documentsCount: 1 });
+  expect((await request('/d/download')).status).toBe(404);
+  await purgeExpiredTrash(env);
+  expect(filesDelete).not.toHaveBeenCalled();
+  expect((await request('/d/restore', 'POST')).status).toBe(204);
+  expect(
+    await DB.prepare("SELECT is_deleted,deleted_at FROM documents WHERE id='d'").first(),
+  ).toEqual({ is_deleted: 0, deleted_at: null });
+  expect(await (await request('')).json()).toMatchObject({ documentsCount: 1 });
+  expect(await (await request('/d/download')).text()).toBe('test');
+  expect(await DB.prepare("SELECT count(*) n FROM versions WHERE document_id='d'").first()).toEqual(
+    { n: 2 },
+  );
+  expect((await request('/d', 'DELETE')).status).toBe(204);
+  expect((await request('/trash/d', 'DELETE')).status).toBe(204);
+  expect(await DB.prepare("SELECT id FROM documents WHERE id='d'").first()).toBeNull();
+  expect(await DB.prepare("SELECT count(*) n FROM versions WHERE document_id='d'").first()).toEqual(
+    { n: 0 },
+  );
+  for (const key of ['originals/v', 'originals/old']) {
+    expect(filesDelete).toHaveBeenCalledWith(key);
+    expect(backupsDelete).toHaveBeenCalledWith(key);
+  }
+});

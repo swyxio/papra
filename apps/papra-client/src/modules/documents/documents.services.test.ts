@@ -1,5 +1,11 @@
 import { afterEach, expect, test, vi } from 'vitest';
-import { fetchOrganizationDocuments, uploadDocument } from './documents.services';
+import {
+  deleteDocument,
+  deleteTrashDocument,
+  restoreDocument,
+  fetchOrganizationDocuments,
+  uploadDocument,
+} from './documents.services';
 
 const api = vi.hoisted(() => vi.fn());
 vi.mock('../shared/http/api-client', () => ({ apiClient: api }));
@@ -88,4 +94,16 @@ test('folder listings pass folder scope and pagination to the document endpoint'
       query: expect.objectContaining({ folderId: 'folder', pageIndex: 2, pageSize: 15 }),
     }),
   );
+});
+
+test('trash, restore and permanent deletion use distinct endpoints', async () => {
+  const document = { organizationId: 'org', documentId: 'test' };
+  await deleteDocument(document);
+  await restoreDocument(document);
+  await deleteTrashDocument(document);
+  expect(api.mock.calls.map(([request]) => request)).toEqual([
+    { method: 'DELETE', path: '/api/organizations/org/documents/test' },
+    { method: 'POST', path: '/api/organizations/org/documents/test/restore' },
+    { method: 'DELETE', path: '/api/organizations/org/documents/trash/test' },
+  ]);
 });

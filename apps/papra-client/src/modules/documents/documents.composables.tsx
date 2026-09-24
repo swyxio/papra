@@ -1,5 +1,6 @@
 import type { Document } from './documents.types';
 import { createSignal } from 'solid-js';
+import { useConfig } from '@/modules/config/config.provider';
 import { useI18n } from '@/modules/i18n/i18n.provider';
 import { downloadStoredFile } from '@/modules/shared/files/download';
 import { useConfirmModal } from '../shared/confirm';
@@ -17,10 +18,11 @@ export async function invalidateOrganizationDocumentsQuery({
   });
 }
 
-function getConfirmMessage(documentName: string) {
+function getConfirmMessage(documentName: string, retentionDays: number) {
   return (
     <>
-      Are you sure you want to delete <span class="font-bold">{documentName}</span>?
+      Move <span class="font-bold">{documentName}</span> to trash? You can restore it from Trash for{' '}
+      {retentionDays} days before it is permanently deleted.
     </>
   );
 }
@@ -52,6 +54,7 @@ export function useDownloadDocument() {
 
 export function useDeleteDocument() {
   const { confirm } = useConfirmModal();
+  const { config } = useConfig();
 
   return {
     deleteDocument: async ({
@@ -64,10 +67,10 @@ export function useDeleteDocument() {
       documentName: string;
     }): Promise<{ hasDeleted: boolean }> => {
       const isConfirmed = await confirm({
-        title: 'Delete document',
-        message: getConfirmMessage(documentName),
+        title: 'Move to trash',
+        message: getConfirmMessage(documentName, config.documents.deletedDocumentsRetentionDays),
         confirmButton: {
-          text: 'Delete document',
+          text: 'Move to trash',
           variant: 'destructive',
         },
         cancelButton: {
@@ -85,7 +88,7 @@ export function useDeleteDocument() {
       });
 
       await invalidateOrganizationDocumentsQuery({ organizationId });
-      createToast({ type: 'success', message: 'Document deleted' });
+      createToast({ type: 'success', message: 'Moved to trash' });
 
       return { hasDeleted: true };
     },
