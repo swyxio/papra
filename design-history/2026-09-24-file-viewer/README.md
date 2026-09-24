@@ -32,4 +32,4 @@ Live verification: Cloudflare health and assets matched the release commit; exis
 
 Memory ledger candidates: Identify automation-specific media safety failures separately from app HTTP/codec failures. Validate actual CSS dimensions under browser zoom before naming a responsive screenshot.
 
-Final desktop thumbnail: CDP JPEG capture at 1440×900 CSS pixels, scaled to 360×225 for the history artifact (quality 20). Full-resolution visual comparisons remain in the task browser outputs. Synthetic video frame is blank because of the automation media URL safety rejection, not because it was replaced by a static preview.
+Capture retention: full-resolution matched comparisons remain in this task's browser outputs. Chrome does not support the browser content-export capability; a separate compact CDP capture contained unpainted areas during a resize and was rejected rather than retained as valid visual evidence. Original and selected references, capture metadata, decisions and critique are retained here.
