@@ -27,3 +27,9 @@ Local native-media playback was intermittently blocked by the computer-use URL s
 Routes: 17 normal signed-in page types share AppLayout via organization/settings/spaces layouts; the remaining signed-in PDF view deliberately retains focus chrome with exit/account. Seven public/system page types use consistent public chrome. Token-specific public signing/review flows are covered by source and backend tests; this release does not send signature requests or change sharing permissions.
 
 Focused and full client/worker tests, both TypeScript checks and production build were run. Full worker suite passed 134 tests. Full client suite passed 281 tests with its existing unused-English-translation check failing; keys newly orphaned by this redesign were removed across locale dictionaries. The baseline failure is not suppressed.
+
+Live verification: Cloudflare health and assets matched the release commit; existing Latent Space account successfully read the real Jev transcript, Details, space role/count/size summaries and folder-scoped file list. Native media playback was also rejected by the automation browser's URL safety checker on the live R2 source. Playback is implemented but cannot be claimed end-to-end verified in this automation session. Final mobile inspection also caught missing accessible names on icon-only quick search and date/created sort controls; corrected without altering their visual presentation.
+
+Memory ledger candidates: Identify automation-specific media safety failures separately from app HTTP/codec failures. Validate actual CSS dimensions under browser zoom before naming a responsive screenshot.
+
+Final desktop thumbnail: CDP JPEG capture at 1440×900 CSS pixels, scaled to 360×225 for the history artifact (quality 20). Full-resolution visual comparisons remain in the task browser outputs. Synthetic video frame is blank because of the automation media URL safety rejection, not because it was replaced by a static preview.

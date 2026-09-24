@@ -289,6 +289,7 @@ export const AppLayout: ParentComponent<{ accountReady?: boolean }> = (props) =>
                 variant="outline"
                 class="lg:min-w-64 justify-start gap-2 px-2.5 sm:px-4"
                 onClick={openCommandPalette}
+                aria-label={t('layout.search.placeholder')}
               >
                 <div class="i-tabler-search size-4" />
                 <span class="hidden sm:inline">{t('layout.search.placeholder')}</span>

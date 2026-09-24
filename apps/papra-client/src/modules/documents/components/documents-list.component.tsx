@@ -78,7 +78,9 @@ const selectionColumn: ColumnDef<Document> = {
 export const documentDateColumn: ColumnDef<Document> = {
   header: () => {
     const { t } = useI18n();
-    return <span class="hidden sm:block">{t('documents.list.table.headers.document-date')}</span>;
+    return (
+      <span class="sr-only sm:not-sr-only">{t('documents.list.table.headers.document-date')}</span>
+    );
   },
   accessorKey: 'documentDate',
   enableSorting: true,
@@ -101,7 +103,7 @@ export const documentDateColumn: ColumnDef<Document> = {
 export const createdAtColumn: ColumnDef<Document> = {
   header: () => {
     const { t } = useI18n();
-    return <span class="hidden sm:block">{t('documents.list.table.headers.created')}</span>;
+    return <span class="sr-only sm:not-sr-only">{t('documents.list.table.headers.created')}</span>;
   },
   accessorKey: 'createdAt',
   enableSorting: true,
@@ -113,7 +115,7 @@ export const createdAtColumn: ColumnDef<Document> = {
 export const deletedAtColumn: ColumnDef<Document> = {
   header: () => {
     const { t } = useI18n();
-    return <span class="hidden sm:block">{t('documents.list.table.headers.deleted')}</span>;
+    return <span class="sr-only sm:not-sr-only">{t('documents.list.table.headers.deleted')}</span>;
   },
   accessorKey: 'deletedAt',
   cell: (data) => (
@@ -138,7 +140,7 @@ export const standardActionsColumn: ColumnDef<Document> = {
 export const tagsColumn: ColumnDef<Document> = {
   header: () => {
     const { t } = useI18n();
-    return <span class="hidden sm:block">{t('documents.list.table.headers.tags')}</span>;
+    return <span class="sr-only sm:not-sr-only">{t('documents.list.table.headers.tags')}</span>;
   },
   accessorKey: 'tags',
   enableSorting: false,
