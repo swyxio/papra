@@ -7,15 +7,20 @@ export type TemplateSummary = {
   preparedAt: string;
   originalSha256: string;
 };
-export type DocumentTemplate = TemplateSummary & {
-  source: JSONContent;
-  fields: { id: string; label: string; marker: string; original: string }[];
-  guidance: string;
+export type TemplateField = {
+  id: string;
+  label: string;
+  marker: string;
+  original: string;
+  section?: string;
+  multiline?: boolean;
 };
+export type FillableTemplate = { source: JSONContent; fields: TemplateField[] };
+export type DocumentTemplate = TemplateSummary & FillableTemplate & { guidance: string };
 
 // Replace only original template markers. Values containing braces cannot replace other fields.
 export function fillTemplate(
-  template: DocumentTemplate,
+  template: FillableTemplate,
   values: Record<string, string>,
 ): JSONContent {
   const replacements = new Map(

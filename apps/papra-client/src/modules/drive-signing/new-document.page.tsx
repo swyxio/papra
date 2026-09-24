@@ -1,4 +1,4 @@
-import { A, useNavigate, useParams } from '@solidjs/router';
+import { A, useNavigate, useParams, useSearchParams } from '@solidjs/router';
 import { createMemo, createResource, createSignal, For, Show } from 'solid-js';
 import { apiClient } from '@/modules/shared/http/api-client';
 import { getHttpErrorMessage } from '@/modules/shared/http/http-errors';
@@ -28,9 +28,13 @@ export function NewDocumentPage() {
     queryFn: async () => fetchOrganization({ organizationId: params.organizationId }),
   }));
   const { user } = useCurrentUser();
-  const [name, setName] = createSignal('Mutual NDA');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialSponsorship = searchParams.template === 'sponsorship-order';
+  const [name, setName] = createSignal(initialSponsorship ? 'Sponsorship Order' : 'Mutual NDA');
   const [customName, setCustomName] = createSignal(false);
-  const [template, setTemplate] = createSignal('atlas:mutual-nda');
+  const [template, setTemplate] = createSignal(
+    initialSponsorship ? 'sponsorship-order' : 'atlas:mutual-nda',
+  );
   const [values, setValues] = createSignal<Record<string, string>>({});
   const [search, setSearch] = createSignal('');
   const [busy, setBusy] = createSignal(false),
@@ -60,23 +64,29 @@ export function NewDocumentPage() {
   const isAtlas = () => template().startsWith('atlas:');
   const ready = () =>
     !isAtlas() || (!selected.loading && !selected.error && selected()?.id === template().slice(6));
+  const fillable = () => {
+    if (isAtlas()) return ready() ? selected() : undefined;
+    const starter = documentStarters.find((t) => t.id === template());
+    return starter?.fields ? { source: starter.source, fields: starter.fields } : undefined;
+  };
   const defaults = () =>
-    isAtlas() && ready()
+    fillable()
       ? templateDefaults(
-          selected()!,
+          fillable()!,
           companyNameForOrganization(organization.data?.organization.name ?? ''),
           user.name,
         )
       : {};
   const fieldValue = (id: string) => values()[id] ?? defaults()[id] ?? '';
   const source = createMemo(() =>
-    isAtlas() && ready()
-      ? fillTemplate(selected()!, { ...defaults(), ...values() })
+    fillable()
+      ? fillTemplate(fillable()!, { ...defaults(), ...values() })
       : documentStarters.find((t) => t.id === template())?.source,
   );
   function choose(id: string) {
     if (id !== template()) {
       setTemplate(id);
+      setSearchParams({ template: id === 'sponsorship-order' ? id : undefined });
       setValues({});
       setError('');
       if (!customName())
@@ -214,7 +224,7 @@ export function NewDocumentPage() {
           }}
         />
       </label>
-      <Show when={isAtlas() && ready() && selected()}>
+      <Show when={fillable()}>
         {(t) => (
           <>
             <div class="border-t pt-4">
@@ -224,18 +234,45 @@ export function NewDocumentPage() {
                 after creation.
               </p>
             </div>
+            <Show when={template() === 'sponsorship-order'}>
+              <p class="text-xs text-muted-foreground">
+                Enter fees and totals manually. Add placement rows and review every term in the
+                editor before sending for signature.
+              </p>
+            </Show>
             <For each={t().fields}>
               {(field) => (
                 <div class="text-sm break-words">
+                  <Show when={field.section}>
+                    <h3 class="font-semibold border-t pt-4 mb-3">{field.section}</h3>
+                  </Show>
                   <label class="block">
                     {field.label}
-                    <input
-                      class="studio-input mt-2"
-                      value={fieldValue(field.id)}
-                      placeholder={field.original}
-                      disabled={busy()}
-                      onInput={(e) => setValues({ ...values(), [field.id]: e.currentTarget.value })}
-                    />
+                    <Show
+                      when={field.multiline}
+                      fallback={
+                        <input
+                          class="studio-input mt-2"
+                          value={fieldValue(field.id)}
+                          placeholder={field.original}
+                          disabled={busy()}
+                          onInput={(e) =>
+                            setValues({ ...values(), [field.id]: e.currentTarget.value })
+                          }
+                        />
+                      }
+                    >
+                      <textarea
+                        class="studio-input mt-2 resize-y"
+                        rows={3}
+                        value={fieldValue(field.id)}
+                        placeholder={field.original}
+                        disabled={busy()}
+                        onInput={(e) =>
+                          setValues({ ...values(), [field.id]: e.currentTarget.value })
+                        }
+                      />
+                    </Show>
                   </label>
                   <Show when={/^(employee-name|company-signatory-name)$/.test(field.id)}>
                     <button
@@ -250,25 +287,30 @@ export function NewDocumentPage() {
                 </div>
               )}
             </For>
-            <section class="border-t pt-4 space-y-3 text-sm">
-              <h3 class="font-medium">Source and version</h3>
-              <a class="block underline" href={`${templateBase}/${t().id}/original`}>
-                Download original .docx
-              </a>
-              <a class="block underline" href={t().url} target="_blank" rel="noreferrer">
-                View in Stripe Atlas ↗
-              </a>
-              <p class="text-xs text-muted-foreground">Imported {t().preparedAt}</p>
-              <details>
-                <summary class="cursor-pointer">Source guidance and drafting notes</summary>
-                <div class="whitespace-pre-wrap mt-3 text-xs leading-relaxed max-h-80 overflow-auto">
-                  {t().guidance}
-                </div>
-              </details>
-            </section>
           </>
         )}
       </Show>
+      <Show when={isAtlas() && ready() && selected()}>
+        {(t) => (
+          <section class="border-t pt-4 space-y-3 text-sm">
+            <h3 class="font-medium">Source and version</h3>
+            <a class="block underline" href={`${templateBase}/${t().id}/original`}>
+              Download original .docx
+            </a>
+            <a class="block underline" href={t().url} target="_blank" rel="noreferrer">
+              View in Stripe Atlas ↗
+            </a>
+            <p class="text-xs text-muted-foreground">Imported {t().preparedAt}</p>
+            <details>
+              <summary class="cursor-pointer">Source guidance and drafting notes</summary>
+              <div class="whitespace-pre-wrap mt-3 text-xs leading-relaxed max-h-80 overflow-auto">
+                {t().guidance}
+              </div>
+            </details>
+          </section>
+        )}
+      </Show>
+
       <Show when={selected.error && isAtlas()}>
         <p role="alert" class="text-sm text-destructive">
           Could not load this agreement.{' '}
@@ -371,7 +413,11 @@ export function NewDocumentPage() {
             Cancel
           </A>
           <Button disabled={busy() || !name().trim() || !ready()} onClick={() => void create()}>
-            {busy() ? 'Creating…' : 'Create document'}
+            {busy()
+              ? 'Creating…'
+              : template() === 'sponsorship-order'
+                ? 'Create sponsorship order'
+                : 'Create document'}
           </Button>
         </div>
       </footer>
@@ -409,7 +455,11 @@ export function NewDocumentPage() {
             disabled={busy() || !name().trim() || !ready()}
             onClick={() => void create()}
           >
-            {busy() ? 'Creating…' : 'Create document'}
+            {busy()
+              ? 'Creating…'
+              : template() === 'sponsorship-order'
+                ? 'Create sponsorship order'
+                : 'Create document'}
           </Button>
         </SheetContent>
       </Sheet>

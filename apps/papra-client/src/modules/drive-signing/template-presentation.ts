@@ -125,7 +125,11 @@ export function companyNameForOrganization(name: string): string {
   return names[name.trim().toLowerCase()] ?? '';
 }
 
-export function templateDefaults(template: DocumentTemplate, company: string, userName: string) {
+export function templateDefaults(
+  template: Pick<DocumentTemplate, 'fields'>,
+  company: string,
+  userName: string,
+) {
   const defaults: Record<string, string> = {};
   for (const field of template.fields) {
     if (field.id === 'company-name' && company) defaults[field.id] = company;

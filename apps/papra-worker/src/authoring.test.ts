@@ -269,3 +269,42 @@ test('shared blank templates work across member organizations and require member
   expect((await f.request('/api/organizations/other/document-templates')).status).toBe(404);
   expect((await f.request(base + '/missing')).status).toBe(404);
 });
+
+test('sponsorship order preserves commercial parties, delivery sections and unsigned signature blocks in PDF', async () => {
+  const { sponsorshipOrder } =
+    await import('../../papra-client/src/modules/drive-signing/sponsorship-order');
+  const { fillTemplate } =
+    await import('../../papra-client/src/modules/drive-signing/document-templates');
+  const values = Object.fromEntries(
+    sponsorshipOrder.fields.map((field) => [field.id, `TEST ${field.label}`]),
+  );
+  const source = validateSource(fillTemplate(sponsorshipOrder, values));
+  const pdf = await PDF.load(await renderDocument(source, 'TEST ONLY - Sponsorship Order'));
+  const text = pdf
+    .getPages()
+    .map((page) => page.extractText().text)
+    .join('\n');
+  for (const section of [
+    'Sponsorship Order',
+    'Order details',
+    'Placements and fees',
+    'Schedule',
+    'Billing',
+    'Deliverables and production',
+    'Reporting and editorial independence',
+    'Applicable terms',
+    'Authorised signatures',
+  ])
+    expect(text).toContain(section);
+  for (const value of [
+    'TEST Advertiser name',
+    'TEST Agency, if applicable',
+    'TEST Contracting and paying entity',
+    'TEST Publisher signatory name',
+    'TEST Buyer signatory name',
+  ])
+    expect(text).toContain(value);
+  expect(text).toContain('Signature:');
+  expect(text).not.toContain('{{');
+  expect(text).not.toContain('Deepgram');
+});

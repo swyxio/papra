@@ -365,6 +365,13 @@ export const DocumentsPage: Component = () => {
         >
           Create doc from template
         </Button>
+        <Button
+          as={A}
+          variant="outline"
+          href={`/orgs/${params.organizationId}/documents/new?template=sponsorship-order`}
+        >
+          Create sponsorship order
+        </Button>
         <div title="Export all accessible files in this space">
           <DriveExport organizationId={params.organizationId} />
         </div>
