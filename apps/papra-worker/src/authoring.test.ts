@@ -154,6 +154,86 @@ test('native sources and PDFs are immutable versions; a lost create/save respons
     expect((await PDF.load(a)).getPages().length).toBe(1);
   }
 });
+test('employment notices create a restricted HR folder and no public share, including after edits', async () => {
+  const f = await fixture();
+  const created = await f.request('/api/organizations/org/authored-documents', {
+    key,
+    name: 'TEST ONLY employment notice',
+    source,
+    templateId: 'employment-change-ca',
+    folderId: 'fld_home_org', // The server overrides an unrestricted requested destination.
+  });
+  expect(created.status).toBe(201);
+  const folder = await f.DB.prepare(
+    'SELECT f.* FROM folders f JOIN documents d ON d.home_folder_id=f.id WHERE d.id=?',
+  )
+    .bind(`doc_${key.slice(0, 24)}`)
+    .first();
+  expect(folder?.is_restricted).toBe(1);
+  expect(
+    (
+      await f.DB.prepare('SELECT role FROM folder_acl WHERE folder_id=? AND user_id=?')
+        .bind(folder!.id, 'owner')
+        .first()
+    )?.role,
+  ).toBe('writer');
+  expect((await f.request(f.base, undefined, 'writer')).status).toBe(404);
+  expect((await f.request(f.base)).status).toBe(200);
+  expect((await f.request(`${f.base}/lock`, { token })).status).toBe(200);
+  expect(
+    (await f.request(f.base, { key: 'c'.repeat(32), token, versionId: `ver_${key}`, source }))
+      .status,
+  ).toBe(200);
+  expect((await f.DB.prepare('SELECT home_folder_id FROM documents').first())?.home_folder_id).toBe(
+    folder!.id,
+  );
+  expect((await f.DB.prepare('SELECT count(*) n FROM share_links').first())?.n).toBe(0);
+  expect(
+    (
+      await f.request('/api/organizations/org/authored-documents', {
+        key,
+        name: 'TEST ONLY',
+        source,
+        templateId: 'employment-change-ca',
+      })
+    ).status,
+  ).toBe(201);
+  expect(
+    (await f.DB.prepare('SELECT count(*) n FROM folders WHERE is_restricted=1').first())?.n,
+  ).toBe(1);
+});
+
+test('California employment notice renders on one page with the selected change and employer signing', async () => {
+  const { employmentNoticeSource } =
+    await import('../../papra-client/src/modules/drive-signing/employment-change');
+  for (const type of ['layoff', 'discharge', 'leave', 'other']) {
+    const source = validateSource(
+      employmentNoticeSource({
+        'change-type': type,
+        'employee-name': 'TEST ONLY Employee',
+        'employee-ssn': '123-45-6789',
+        'effective-date': '2026-10-01',
+        'change-details': 'TEST ONLY: change to a part-time schedule.',
+        'company-name': 'TEST ONLY Employer',
+        'company-signatory-name': 'TEST ONLY Representative',
+        'company-signatory-title': 'TEST ONLY HR Manager',
+      }),
+    );
+    const pdf = await PDF.load(await renderDocument(source, 'TEST ONLY Employment Notice'));
+    expect(pdf.getPages()).toHaveLength(1);
+    const text = pdf.getPages()[0].extractText().text;
+    for (const value of [
+      '123-45-6789',
+      '2026-10-01',
+      'Employer signature',
+      'TEST ONLY Representative',
+      'Section 1089',
+    ])
+      expect(text).toContain(value);
+    expect(text).not.toContain('Employee signature');
+    expect(text.includes('part-time schedule')).toBe(type === 'other');
+  }
+});
 test('an editor lease excludes another editor and stale saves cannot overwrite the current PDF', async () => {
   const f = await fixture();
   await f.create();

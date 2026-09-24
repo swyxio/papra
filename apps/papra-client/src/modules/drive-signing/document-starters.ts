@@ -1,6 +1,7 @@
 import type { JSONContent } from '@tiptap/core';
 import type { TemplateField } from './document-templates';
 import { sponsorshipOrder } from './sponsorship-order';
+import { employmentChangeNotice } from './employment-change';
 
 const paragraph = (text: string): JSONContent => ({
   type: 'paragraph',
@@ -23,6 +24,7 @@ export const documentStarters: {
   fields?: TemplateField[];
 }[] = [
   sponsorshipOrder,
+  employmentChangeNotice,
   { id: 'blank', name: 'Blank document', source: { type: 'doc', content: [paragraph('')] } },
   {
     id: 'invoice',

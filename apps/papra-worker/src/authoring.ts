@@ -5,6 +5,8 @@ import {registerAuthoringExportRoutes} from './authoring-export';
 import {renderDocument,validateSource,sourceText} from './authoring-pdf';
 import {digestBytes,SIGNING_MAX_BYTES} from './signing-pdf';
 import {enqueueVersion} from './jobs';
+import {employmentNoticeFolder} from './employment-notices';
+
 const base='/api/organizations/:org/documents/:doc/editor';
 async function stagePdf(env:Env,storageKey:string,bytes:Uint8Array){
   const results=await Promise.allSettled([env.FILES.put(storageKey,bytes,{httpMetadata:{contentType:'application/pdf'}}),env.BACKUPS.put(storageKey,bytes,{httpMetadata:{contentType:'application/pdf'}})]);
@@ -30,7 +32,7 @@ export function registerAuthoringRoutes(app:App){
     const b=await c.req.json(),requestKey=key(b.key),docId=`doc_${requestKey.slice(0,24)}`,versionId=`ver_${requestKey}`;
     const old=await first(c.env,'SELECT * FROM documents WHERE id=?',docId);
     if(old){await document(c.env,user,org,docId,'write');if(old.created_by!==user.userId)throw error(409,'Create key already used');return c.json({documentId:docId,versionId:old.current_version_id},201);}
-    const folder=await canWriteFolder(c.env,user,b.folderId||organizationHomeFolderId(org));if(folder.organization_id!==org)throw error(403,'Folder access denied');
+    const folder=b.templateId==='employment-change-ca'?await employmentNoticeFolder(c.env,user,org):await canWriteFolder(c.env,user,b.folderId||organizationHomeFolderId(org));if(folder.organization_id!==org)throw error(403,'Folder access denied');
     const title=typeof b.name==='string'?b.name.trim().replace(/\.pdf$/i,'').slice(0,200):'';if(!title)throw error(400,'Enter a document name');
     let source,bytes;try{source=validateSource(b.source);bytes=await renderDocument(source,title);}catch(e){throw error(400,(e as Error).message);}
     if(bytes.length>SIGNING_MAX_BYTES)throw error(413,'Generated PDF exceeds 10 MiB');

@@ -1,6 +1,12 @@
 type TemplateDescription = { title: string; description: string; variant?: string };
 
 const descriptions: Record<string, TemplateDescription> = {
+  'employment-change-ca': {
+    title: 'California Employment Change Notice',
+    description:
+      'Notify an employee of a layoff, discharge, leave, or another change in status. Signed by the employer.',
+    variant: 'California · Section 1089',
+  },
   'sponsorship-order': {
     title: 'Sponsorship Order',
     description: 'Define deliverables, dates, pricing, and terms, then send for signature.',

@@ -14,6 +14,8 @@ export type TemplateField = {
   original: string;
   section?: string;
   multiline?: boolean;
+  inputType?: 'date' | 'password';
+  options?: { value: string; label: string }[];
 };
 export type FillableTemplate = { source: JSONContent; fields: TemplateField[] };
 export type DocumentTemplate = TemplateSummary & FillableTemplate & { guidance: string };

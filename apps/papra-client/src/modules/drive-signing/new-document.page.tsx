@@ -13,6 +13,7 @@ import {
   validateSponsorshipNumbers,
 } from './sponsorship-form';
 import type { SponsorshipPreset } from './sponsorship-form';
+import { employmentNoticeSource, validateEmploymentNotice } from './employment-change';
 import { NativeEditor } from './editor.pages';
 import { describeTemplate } from './template-descriptions';
 import { useQuery } from '@tanstack/solid-query';
@@ -35,12 +36,10 @@ export function NewDocumentPage() {
   }));
   const { user } = useCurrentUser();
   const [searchParams, setSearchParams] = useSearchParams();
-  const initialSponsorship = searchParams.template === 'sponsorship-order';
-  const [name, setName] = createSignal(initialSponsorship ? 'Sponsorship Order' : 'Mutual NDA');
+  const initialStarter = documentStarters.find((starter) => starter.id === searchParams.template);
+  const [name, setName] = createSignal(initialStarter?.name ?? 'Mutual NDA');
   const [customName, setCustomName] = createSignal(false);
-  const [template, setTemplate] = createSignal(
-    initialSponsorship ? 'sponsorship-order' : 'atlas:mutual-nda',
-  );
+  const [template, setTemplate] = createSignal(initialStarter?.id ?? 'atlas:mutual-nda');
   const [values, setValues] = createSignal<Record<string, string>>({});
   const [search, setSearch] = createSignal('');
   const [busy, setBusy] = createSignal(false),
@@ -97,10 +96,12 @@ export function NewDocumentPage() {
         )
       : {};
   const fieldValue = (id: string) => values()[id] ?? defaults()[id] ?? '';
-  const numericErrors = createMemo(() =>
+  const fieldErrors = createMemo(() =>
     template() === 'sponsorship-order'
       ? validateSponsorshipNumbers({ ...defaults(), ...values() })
-      : {},
+      : template() === 'employment-change-ca'
+        ? validateEmploymentNotice({ ...defaults(), ...values() })
+        : {},
   );
   const calculatedTotal = () => sponsorshipCalculatedTotal(values());
   function applyPreset(id: string) {
@@ -126,6 +127,8 @@ export function NewDocumentPage() {
       return;
     }
     const target = event.target as HTMLElement;
+    // Native selects keep their own Enter/arrow menu behavior.
+    if (target.tagName === 'SELECT') return;
     const step =
       event.altKey &&
       !event.ctrlKey &&
@@ -157,14 +160,18 @@ export function NewDocumentPage() {
     }
   }
   const source = createMemo(() =>
-    fillable()
-      ? fillTemplate(fillable()!, { ...defaults(), ...values() })
-      : documentStarters.find((t) => t.id === template())?.source,
+    template() === 'employment-change-ca'
+      ? employmentNoticeSource({ ...defaults(), ...values() })
+      : fillable()
+        ? fillTemplate(fillable()!, { ...defaults(), ...values() })
+        : documentStarters.find((t) => t.id === template())?.source,
   );
   function choose(id: string) {
     if (id !== template()) {
       setTemplate(id);
-      setSearchParams({ template: id === 'sponsorship-order' ? id : undefined });
+      setSearchParams({
+        template: documentStarters.some((starter) => starter.id === id) ? id : undefined,
+      });
       setValues({});
       setPresetId('');
       setBeforePreset(undefined);
@@ -176,9 +183,9 @@ export function NewDocumentPage() {
   }
   async function create() {
     if (!ready() || !source() || busy() || !name().trim()) return;
-    const invalid = Object.keys(numericErrors())[0];
+    const invalid = Object.keys(fieldErrors())[0];
     if (invalid) {
-      setError('Check the quantities and fees highlighted in Details.');
+      setError('Check the highlighted fields in Details.');
       const visibleField = () =>
         Array.from(document.querySelectorAll<HTMLElement>('[data-studio-field]')).find(
           (f) => f.dataset.studioField === invalid && f.offsetParent !== null,
@@ -200,7 +207,7 @@ export function NewDocumentPage() {
       const result = await apiClient<{ documentId: string }>({
         path: `/api/organizations/${params.organizationId}/authored-documents`,
         method: 'POST',
-        body: { key, name: name().trim(), source: source() },
+        body: { key, name: name().trim(), source: source(), templateId: template() },
       });
       navigate(`/organizations/${params.organizationId}/documents/${result.documentId}/editor`);
     } catch (e) {
@@ -395,7 +402,21 @@ export function NewDocumentPage() {
                   </p>
                 </div>
               </Show>
-              <For each={t().fields}>
+              <Show when={template() === 'employment-change-ca'}>
+                <p class="text-xs text-muted-foreground" role="note">
+                  Contains sensitive employee information. Saved to a restricted Employee notices
+                  folder for you and workspace admins. No public share link is created. Fill any
+                  remaining placeholders before employer signing.
+                </p>
+              </Show>
+              <For
+                each={t().fields.filter(
+                  (field) =>
+                    template() !== 'employment-change-ca' ||
+                    field.id !== 'change-details' ||
+                    fieldValue('change-type') === 'other',
+                )}
+              >
                 {(field) => (
                   <div class="text-sm break-words">
                     <Show when={field.section}>
@@ -404,50 +425,79 @@ export function NewDocumentPage() {
                     <label class="block">
                       {field.label}
                       <Show
-                        when={field.multiline}
+                        when={field.options}
                         fallback={
-                          <input
-                            class="studio-input mt-2"
-                            data-studio-field={field.id}
-                            inputMode={
-                              template() === 'sponsorship-order' &&
-                              sponsorshipNumericFields.includes(field.id)
-                                ? field.id === 'quantity'
-                                  ? 'numeric'
-                                  : 'decimal'
-                                : undefined
+                          <Show
+                            when={field.multiline}
+                            fallback={
+                              <input
+                                class="studio-input mt-2"
+                                data-studio-field={field.id}
+                                type={field.inputType ?? 'text'}
+                                autocomplete={field.id === 'employee-ssn' ? 'off' : undefined}
+                                maxlength={field.id === 'employee-ssn' ? 11 : undefined}
+                                inputMode={
+                                  template() === 'sponsorship-order' &&
+                                  sponsorshipNumericFields.includes(field.id)
+                                    ? field.id === 'quantity'
+                                      ? 'numeric'
+                                      : 'decimal'
+                                    : undefined
+                                }
+                                aria-invalid={!!fieldErrors()[field.id]}
+                                aria-describedby={
+                                  fieldErrors()[field.id]
+                                    ? `${fieldPrefix}-${field.id}-error`
+                                    : undefined
+                                }
+                                value={fieldValue(field.id)}
+                                placeholder={field.original}
+                                disabled={busy()}
+                                onInput={(e) => {
+                                  setValues({ ...values(), [field.id]: e.currentTarget.value });
+                                  setError('');
+                                }}
+                              />
                             }
-                            aria-invalid={!!numericErrors()[field.id]}
-                            aria-describedby={
-                              numericErrors()[field.id]
-                                ? `${fieldPrefix}-${field.id}-error`
-                                : undefined
-                            }
-                            value={fieldValue(field.id)}
-                            placeholder={field.original}
-                            disabled={busy()}
-                            onInput={(e) => {
-                              setValues({ ...values(), [field.id]: e.currentTarget.value });
-                              setError('');
-                            }}
-                          />
+                          >
+                            <textarea
+                              class="studio-input mt-2 resize-y"
+                              data-studio-field={field.id}
+                              rows={3}
+                              value={fieldValue(field.id)}
+                              placeholder={field.original}
+                              disabled={busy()}
+                              onInput={(e) => {
+                                setValues({ ...values(), [field.id]: e.currentTarget.value });
+                                setError('');
+                              }}
+                            />
+                          </Show>
                         }
                       >
-                        <textarea
-                          class="studio-input mt-2 resize-y"
+                        <select
+                          class="studio-input mt-2"
                           data-studio-field={field.id}
-                          rows={3}
                           value={fieldValue(field.id)}
-                          placeholder={field.original}
                           disabled={busy()}
-                          onInput={(e) => {
+                          onChange={(e) => {
                             setValues({ ...values(), [field.id]: e.currentTarget.value });
                             setError('');
                           }}
-                        />
+                        >
+                          <option value="">Choose change type…</option>
+                          <For each={field.options}>
+                            {(option) => <option value={option.value}>{option.label}</option>}
+                          </For>
+                        </select>
                       </Show>
                     </label>
-                    <Show when={numericErrors()[field.id]}>
+                    <Show when={field.id === 'employee-ssn'}>
+                      <p class="text-xs text-muted-foreground mt-2">
+                        Manual entry only. The full SSN appears in the document preview and PDF.
+                      </p>
+                    </Show>
+                    <Show when={fieldErrors()[field.id]}>
                       {(message) => (
                         <p
                           id={`${fieldPrefix}-${field.id}-error`}
