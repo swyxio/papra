@@ -14,6 +14,7 @@ import {
 } from './signing-pdf';
 import type { SigningField, PdfSigner } from './signing-pdf';
 import { enqueueVersion } from './jobs';
+import { signedPdfAttachment, signedPdfFilename } from './signing-mail';
 
 type RequestRow = Record<string, any> & {
   id: string;
@@ -400,9 +401,7 @@ export function registerSigningRoutes(app: App) {
       c.header('Content-Type', 'application/pdf');
       return c.body(object.body);
     }
-    return c.redirect(
-      await signedDownload(c.env, r.signed_key, `${r.name.replace(/\.pdf$/i, '')}-signed.pdf`, 60),
-    );
+    return c.redirect(await signedDownload(c.env, r.signed_key, signedPdfFilename(r.name), 60));
   });
   app.get('/api/signing/:token', async (c) => {
     const { request: r, recipient: p } = await publicSigning(c.env, c.req.param('token'));
@@ -438,7 +437,7 @@ export function registerSigningRoutes(app: App) {
         await signedDownload(
           c.env,
           key,
-          r.status === 'completed' ? `${r.name.replace(/\.pdf$/i, '')}-signed.pdf` : r.name,
+          r.status === 'completed' && key === r.signed_key ? signedPdfFilename(r.name) : r.name,
           60,
         ),
       );
@@ -530,6 +529,7 @@ export function registerSigningRoutes(app: App) {
 }
 
 async function deliverMail(env: Env, r: RequestRow) {
+  let attachment: Awaited<ReturnType<typeof signedPdfAttachment>> | undefined;
   for (const mail of await all(
     env,
     "SELECT * FROM signing_mail WHERE request_id=? AND status='pending'",
@@ -571,6 +571,8 @@ async function deliverMail(env: Env, r: RequestRow) {
       }
       const url = `${env.APP_URL}/sign/${await recipientToken(env, p)}`;
       const completed = mail.kind === 'completed';
+      if (completed && attachment === undefined)
+        attachment = await signedPdfAttachment(env, current);
       const res = await fetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: {
@@ -581,10 +583,11 @@ async function deliverMail(env: Env, r: RequestRow) {
         body: JSON.stringify({
           from: env.SIGNING_FROM,
           to: [p.email],
-          subject: `${completed ? 'Signed' : 'Signature requested'}: ${r.name}`,
+          subject: `${completed ? 'Signed' : 'Signature requested'}: ${current.name}`,
           text: completed
-            ? `${r.name} has been signed by every recipient.\n\nDownload the sealed PDF and view the signing record:\n${url}\n\nSwyxDrive`
-            : `${r.sender_name} (${r.sender_email}) requests your signature on ${r.name}.\n\nReview and sign:\n${url}\n\nThis link grants access to this signing request only. No account is needed.\n\nSwyxDrive`,
+            ? `${current.name} has been signed by every recipient.\n\n${attachment ? `The sealed PDF is attached as ${attachment.filename}.` : 'The sealed PDF exceeds the email attachment limit. Use the download link below.'}\n\nDownload the sealed PDF and view the signing record:\n${url}\n\nSwyxDrive`
+            : `${current.sender_name} (${current.sender_email}) requests your signature on ${current.name}.\n\nReview and sign:\n${url}\n\nThis link grants access to this signing request only. No account is needed.\n\nSwyxDrive`,
+          ...(completed && attachment ? { attachments: [attachment] } : {}),
         }),
         signal: AbortSignal.timeout(15000),
       });
@@ -713,7 +716,7 @@ export async function processSigning(env: Env, requestId: string) {
         versionId,
         r.document_id,
         outputKey,
-        `${r.name.replace(/\.pdf$/i, '')}-signed.pdf`,
+        signedPdfFilename(r.name),
         signed.length,
         sha,
         r.created_by,

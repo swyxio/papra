@@ -359,12 +359,30 @@ describe('native signing authorization and lifecycle', () => {
     const cert = await certificate();
     f.env.SIGNING_P12 = Buffer.from(cert.p12).toString('base64');
     f.env.SIGNING_PASSPHRASE = 'test-only';
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => Response.json({ id: 'synthetic-provider-receipt' })),
-    );
+    const acceptedMail = new Map<string, string>();
+    let loseCompletionReceipt = true;
+    const mailFetch = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      const key = new Headers(init?.headers).get('Idempotency-Key')!;
+      const body = init?.body as string;
+      if (acceptedMail.has(key)) expect(acceptedMail.get(key)).toBe(body);
+      else acceptedMail.set(key, body);
+      // The provider accepted the email, but the response was lost in transit.
+      if (JSON.parse(body).subject.startsWith('Signed:') && loseCompletionReceipt) {
+        loseCompletionReceipt = false;
+        throw new Error('synthetic network timeout');
+      }
+      return Response.json({ id: `synthetic-provider-receipt-${key}` });
+    });
+    vi.stubGlobal('fetch', mailFetch);
     const { request: r } = (await (
-      await f.request(f.base, { ...f.payload, fields: [field, { ...field, type: 'date', y: 0.5 }] })
+      await f.request(f.base, {
+        ...f.payload,
+        recipients: [
+          ...f.payload.recipients,
+          { name: 'Second Test Signer', email: 'second@example.com' },
+        ],
+        fields: [field, { ...field, type: 'date', y: 0.5 }, { ...field, recipient: 1, y: 0.3 }],
+      })
     ).json()) as any;
     const token = new URL(r.recipients[0].url).pathname.split('/').pop();
     await f.request(`/api/signing/${token}/sign`, {
@@ -373,6 +391,19 @@ describe('native signing authorization and lifecycle', () => {
       consent: true,
       timeZone: 'America/Los_Angeles',
     });
+    await processSigning(f.env, r.id);
+    expect(
+      (await f.DB.prepare('SELECT status FROM signing_requests WHERE id=?').bind(r.id).first())
+        ?.status,
+    ).toBe('pending');
+    expect(mailFetch).toHaveBeenCalledTimes(2);
+    const secondToken = new URL(r.recipients[1].url).pathname.split('/').pop();
+    await f.request(`/api/signing/${secondToken}/sign`, {
+      name: 'Second Test Signer',
+      signature: 'Second Test Signer',
+      consent: true,
+    });
+    await expect(processSigning(f.env, r.id)).rejects.toThrow('signing_email_failed');
     await processSigning(f.env, r.id);
     const stored = await f.DB.prepare('SELECT * FROM signing_requests WHERE id=?')
       .bind(r.id)
@@ -386,6 +417,35 @@ describe('native signing authorization and lifecycle', () => {
       )?.current_version_id,
     ).toBe(stored.signed_version_id);
     const signed = Buffer.from(await (await f.env.FILES.get(stored.signed_key))!.arrayBuffer());
+    const messages = mailFetch.mock.calls.map((call) =>
+      JSON.parse((call as unknown as [string, RequestInit])[1].body as string),
+    );
+    const completions = [...acceptedMail.values()]
+      .map((body) => JSON.parse(body))
+      .filter((message) => message.subject.startsWith('Signed:'));
+    expect(completions).toHaveLength(2);
+    expect(completions.map((message) => message.to[0]).sort((a, b) => a.localeCompare(b))).toEqual([
+      'second@example.com',
+      'test@example.com',
+    ]);
+    for (const message of completions) {
+      expect(message.attachments).toHaveLength(1);
+      expect(message.attachments[0].filename).toBe('TEST ONLY — signed.pdf');
+      expect(Buffer.from(message.attachments[0].content, 'base64')).toEqual(signed);
+      expect(message.text).toContain('/sign/');
+    }
+    expect(
+      messages
+        .filter((message) => message.subject.startsWith('Signature requested:'))
+        .every((message) => !message.attachments),
+    ).toBe(true);
+    expect(
+      (
+        await f.DB.prepare('SELECT original_name FROM versions WHERE id=?')
+          .bind(stored.signed_version_id)
+          .first()
+      )?.original_name,
+    ).toBe('TEST ONLY — signed.pdf');
     expect(
       Buffer.from(await (await f.env.BACKUPS.get(stored.signed_key))!.arrayBuffer()).equals(signed),
     ).toBe(true);
@@ -439,6 +499,8 @@ describe('native signing authorization and lifecycle', () => {
     );
     const before = stored.signed_key;
     await processSigning(f.env, r.id);
+    expect(mailFetch).toHaveBeenCalledTimes(5);
+    expect(acceptedMail.size).toBe(4);
     expect(
       (await f.DB.prepare('SELECT signed_key FROM signing_requests WHERE id=?').bind(r.id).first())
         ?.signed_key,
