@@ -2,6 +2,7 @@ import type { Component } from 'solid-js';
 import { useConfig } from '@/modules/config/config.provider';
 import { AuthLayout } from '../../ui/layouts/auth-layout.component';
 import { authWithProvider } from '../auth.services';
+import { loginCallbackMessage, loginRequestMessage } from '../login-errors';
 import { AuthLegalLinks } from '../components/legal-links.component';
 import { SsoProviderButton } from '../components/sso-provider-button.component';
 import { useAuthRedirect } from '../composables/use-auth-redirect.composable';
@@ -9,12 +10,19 @@ import { useAuthRedirect } from '../composables/use-auth-redirect.composable';
 export const LoginPage: Component = () => {
   const { config } = useConfig();
   const { getRedirectPath } = useAuthRedirect();
+  const callbackMessage = loginCallbackMessage(
+    new URLSearchParams(window.location.search).get('error'),
+  );
   const loginWithGoogle = async () => {
-    await authWithProvider({
-      provider: { key: 'google', name: 'Google', icon: 'i-tabler-brand-google' },
-      config,
-      redirectPath: getRedirectPath(),
-    });
+    try {
+      await authWithProvider({
+        provider: { key: 'google', name: 'Google', icon: 'i-tabler-brand-google' },
+        config,
+        redirectPath: getRedirectPath(),
+      });
+    } catch (error) {
+      throw new Error(loginRequestMessage(error));
+    }
   };
 
   return (
@@ -25,9 +33,9 @@ export const LoginPage: Component = () => {
           <p class="text-muted-foreground mt-1 mb-4">
             Your personal files and separate team spaces.
           </p>
-          {new URLSearchParams(window.location.search).get('error') === 'google_login_failed' && (
+          {callbackMessage && (
             <p class="text-destructive text-sm mb-4" role="alert">
-              Sign-in failed. Use an approved, verified Google account and try again.
+              {callbackMessage}
             </p>
           )}
           <SsoProviderButton
@@ -35,6 +43,7 @@ export const LoginPage: Component = () => {
             icon="i-tabler-brand-google"
             onClick={loginWithGoogle}
             label="Continue with Google"
+            errorRecoveryHref="https://drive.swyx.io/login"
           />
           <p class="text-muted-foreground text-sm mt-4">
             Use your ai.engineer, latent.space or smol.ai Google account. Your team space is added

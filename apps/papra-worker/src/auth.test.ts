@@ -369,7 +369,7 @@ describe('Worker Google admission', () => {
     ).toBeNull();
     await DB.prepare('UPDATE users SET disabled_at=NULL WHERE id=?').bind(identity!.userId).run();
     const replay = await app.request(callback, { headers: { cookie: login.cookie } }, env);
-    expect(replay.headers.get('location')).toContain('google_login_failed');
+    expect(replay.headers.get('location')).toContain('google_login_expired');
     expect(calls.filter((url) => url.endsWith('/token'))).toHaveLength(1);
     expect(
       (
@@ -399,13 +399,36 @@ describe('Worker Google admission', () => {
     googleResponses(login.url.searchParams.get('nonce')!, {}, { email_verified: false });
     const callback = `${env.APP_URL}/api/auth/callback/google?state=${login.url.searchParams.get('state')}&code=code`;
     expect((await app.request(callback, {}, env)).headers.get('location')).toContain(
-      'google_login_failed',
+      'google_login_expired',
     );
     expect(
       (await app.request(callback, { headers: { cookie: login.cookie } }, env)).headers.get(
         'location',
       ),
     ).toContain('google_login_failed');
+    expect((await DB.prepare('SELECT * FROM auth_sessions').all()).results).toHaveLength(0);
+  });
+  test('cancelled Google consent has a clear callback error', async () => {
+    const { app, env } = await fixture();
+    const response = await app.request(
+      env.APP_URL + '/api/auth/callback/google?error=access_denied',
+      {},
+      env,
+    );
+    expect(response.headers.get('location')).toBe(
+      env.APP_URL + '/login?error=google_login_cancelled',
+    );
+  });
+  test('verified personal Gmail is rejected with an account-specific error and no session', async () => {
+    const { app, env, DB } = await fixture();
+    const login = await begin(app, env);
+    googleResponses(login.url.searchParams.get('nonce')!, { email: 'personal@gmail.com' });
+    const response = await app.request(
+      `${env.APP_URL}/api/auth/callback/google?state=${login.url.searchParams.get('state')}&code=code`,
+      { headers: { cookie: login.cookie } },
+      env,
+    );
+    expect(response.headers.get('location')).toContain('google_account_not_allowed');
     expect((await DB.prepare('SELECT * FROM auth_sessions').all()).results).toHaveLength(0);
   });
   test('social sign-in rejects cross-origin, alternate providers and open redirects', async () => {

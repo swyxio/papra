@@ -9,12 +9,14 @@ export const SsoProviderButton: Component<{
   icon?: string;
   onClick: () => Promise<void>;
   label: string;
+  errorRecoveryHref?: string;
 }> = (props) => {
   const [getIsLoading, setIsLoading] = createSignal(false);
   const [getError, setError] = createSignal<string | undefined>(undefined);
   const { getErrorMessage } = useI18nApiErrors();
 
   const onClick = async () => {
+    setError(undefined);
     setIsLoading(true);
     try {
       await props.onClick();
@@ -50,7 +52,16 @@ export const SsoProviderButton: Component<{
         {props.label}
       </Button>
 
-      {getError() && <p class="text-red-500">{getError()}</p>}
+      {getError() && (
+        <div class="text-sm mt-3" role="alert">
+          <p class="text-destructive">{getError()}</p>
+          {props.errorRecoveryHref && (
+            <a class="underline inline-block mt-2" href={props.errorRecoveryHref}>
+              Open secure sign-in
+            </a>
+          )}
+        </div>
+      )}
     </>
   );
 };

@@ -33,6 +33,11 @@ const googleKeys = createRemoteJWKSet(new URL('https://www.googleapis.com/oauth2
 const SESSION_SECONDS = 7 * 24 * 3600;
 const STATE_SECONDS = 600;
 
+class LoginFailure extends Error {
+  constructor(public code: string) {
+    super('Authentication failed');
+  }
+}
 function authError(message = 'Authentication failed') {
   return new Error(message);
 }
@@ -171,10 +176,11 @@ export async function verifyGoogleIdentity(
     (payload.azp !== undefined && payload.azp !== clientId) ||
     payload.nonce !== nonce ||
     typeof payload.sub !== 'string' ||
-    typeof payload.email !== 'string' ||
-    !isApprovedEmail(payload.email, payload.email_verified)
+    typeof payload.email !== 'string'
   )
-    throw authError('Use a verified approved Google account');
+    throw authError('Google identity could not be verified');
+  if (!isApprovedEmail(payload.email, payload.email_verified))
+    throw new LoginFailure('google_account_not_allowed');
   return {
     sub: payload.sub,
     email: payload.email.trim().toLowerCase(),
@@ -276,7 +282,13 @@ export function registerAuthRoutes(app: App) {
   app.post('/api/auth/sign-in/social', async (context) => {
     const env = context.env;
     if (!sameOrigin(context.req.raw, env))
-      return context.json({ code: 'INVALID_ORIGIN', message: 'Invalid origin' }, 403);
+      return context.json(
+        {
+          code: 'INVALID_ORIGIN',
+          message: `Open ${baseUrl(env)}/login in Safari or Chrome and try again.`,
+        },
+        403,
+      );
     try {
       const body = await boundedJson(context.req.raw);
       if (body.provider !== 'google' || body.idToken)
@@ -324,6 +336,8 @@ export function registerAuthRoutes(app: App) {
     const origin = baseUrl(env);
     context.header('Set-Cookie', setCookie(env, 'oauth', '', 0));
     try {
+      if (context.req.query('error') === 'access_denied')
+        throw new LoginFailure('google_login_cancelled');
       const state = context.req.query('state');
       const code = context.req.query('code');
       const browserState = await readCookie(
@@ -339,13 +353,13 @@ export function registerAuthRoutes(app: App) {
         browserState !== state ||
         context.req.query('error')
       )
-        throw authError();
+        throw new LoginFailure('google_login_expired');
       const record = await env.DB.prepare(
         'DELETE FROM auth_oauth_states WHERE state_hash=? AND expires_at>? RETURNING nonce,verifier,callback_url,expires_at',
       )
         .bind(await hash(state), Date.now())
         .first<StateRow>();
-      if (!record) throw authError();
+      if (!record) throw new LoginFailure('google_login_expired');
       const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
         method: 'POST',
         headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -403,8 +417,9 @@ export function registerAuthRoutes(app: App) {
         { append: true },
       );
       return context.redirect(safeCallback(record.callback_url, origin), 302);
-    } catch {
-      return context.redirect(origin + '/login?error=google_login_failed', 302);
+    } catch (error) {
+      const code = error instanceof LoginFailure ? error.code : 'google_login_failed';
+      return context.redirect(origin + '/login?error=' + code, 302);
     }
   });
   app.get('/api/auth/get-session', async (context) => {

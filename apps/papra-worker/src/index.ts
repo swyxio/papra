@@ -18,10 +18,12 @@ import { registerGoogleDocumentRoutes } from './google-docs';
 import { registerSigningRoutes, processSigning, repairSigning } from './signing';
 import { isDocumentPage, pageMetadata, rewritePageMetadata } from './page-metadata';
 import { registerTemplateRoutes } from './templates';
+import { registerCanonicalOrigin } from './request-origin';
 
 export { ImageProcessorContainer, ContainerProxy } from '../native/container';
 export { MetadataBackupWorkflow } from './backup-workflow';
 const app = new Hono<AppEnv>();
+registerCanonicalOrigin(app);
 app.use('/api/*', bodyLimit({ maxSize: 1024 ** 2 }));
 app.use('/api/*', async (c, next) => {
   c.header('Cache-Control', 'no-store');
@@ -32,7 +34,13 @@ app.use('/api/*', async (c, next) => {
     origin &&
     origin !== new URL(c.env.APP_URL).origin
   )
-    throw new HTTPException(403, { message: 'Request origin is not allowed' });
+    return c.json(
+      {
+        code: 'INVALID_ORIGIN',
+        message: `Open ${new URL('/login', c.env.APP_URL).href} in Safari or Chrome, then try signing in again. This page was opened from an unsupported address or browser context.`,
+      },
+      403,
+    );
   if (
     c.req.path.startsWith('/api/auth/') &&
     !(await c.env.AUTH_LIMITER.limit({ key: c.req.header('CF-Connecting-IP') || 'unknown' }))
