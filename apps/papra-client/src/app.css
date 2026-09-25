@@ -1,3 +1,27 @@
+@font-face {
+  font-family: 'SwyxDrive Signature';
+  src: url('/fonts/Allura-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+.signature-font {
+  font-family: 'SwyxDrive Signature', cursive;
+  font-weight: 400;
+  font-style: normal;
+}
+
+.signature-input {
+  font-size: 32px;
+  line-height: 1.2;
+}
+
+.signature-preview {
+  font-size: min(32px, 70cqh);
+  line-height: 1;
+}
+
 :root {
   --background: 0 0% 100%;
   --foreground: 0 0% 3.9%;

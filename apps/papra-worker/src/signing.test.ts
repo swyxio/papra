@@ -12,6 +12,7 @@ import { PDF } from '@libpdf/core';
 import type { AppEnv, Env, Identity } from './types';
 import { registerSigningRoutes, processSigning } from './signing';
 import { validateFields, signingPdf, formatSigningDate, signingTimeZone } from './signing-pdf';
+import { signatureFontBase64 } from './signature-font';
 
 vi.mock('./jobs', () => ({ enqueueVersion: vi.fn(async () => {}) }));
 const instances: Miniflare[] = [],
@@ -30,6 +31,14 @@ const field = {
   width: 0.3,
   height: 0.07,
 };
+test('browser and sealed PDF use the same locally hosted handwriting font', async () => {
+  const bytes = await readFile(
+    new NodeURL('../../papra-client/public/fonts/Allura-Regular.ttf', import.meta.url),
+  );
+  expect(Buffer.from(signatureFontBase64, 'base64').equals(bytes)).toBe(true);
+  const font = PDF.create().embedFont(bytes);
+  expect(font.canEncode('Shawn Wang')).toBe(true);
+});
 async function fixture() {
   const m = new Miniflare({
     modules: true,
@@ -400,6 +409,7 @@ describe('native signing authorization and lifecycle', () => {
     expect((await f.request(`${f.base}/source/original?check=true`)).status).toBe(200);
     const raw = signed.toString('latin1'),
       range = raw.match(/\/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\]/)!;
+    expect(raw).toContain('Allura');
     expect(range).not.toBeNull();
     const [start, len, second, last] = range.slice(1).map(Number);
     expect(start).toBe(0);

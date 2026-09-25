@@ -16,6 +16,7 @@ export type SigningField = {
   label?: string;
 };
 type FieldActions = {
+  typedSignatures?: boolean;
   onPlace?: (page: number, x: number, y: number) => void;
   onMove?: (id: string, x: number, y: number) => void;
   onRemove?: (id: string) => void;
@@ -246,6 +247,7 @@ function PdfPage(
                 'top': `${field().y * 100}%`,
                 'width': `${field().width * 100}%`,
                 'height': `${field().height * 100}%`,
+                'container-type': 'size',
                 'touch-action': 'none',
                 'cursor': props.onMove ? 'move' : props.onActivate ? 'pointer' : 'default',
               }}
@@ -255,7 +257,13 @@ function PdfPage(
                 props.onActivate?.(field());
               }}
             >
-              <span class="truncate">
+              <span
+                class="truncate"
+                classList={{
+                  'signature-font signature-preview':
+                    !!props.typedSignatures && field().type === 'signature',
+                }}
+              >
                 {props.labels?.(field()) || field().label || field().type}
               </span>
               <Show when={props.onRemove}>

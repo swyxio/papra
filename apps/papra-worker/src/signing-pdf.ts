@@ -4,6 +4,7 @@
 import { PDF, P12Signer, rgb, measureText } from '@libpdf/core';
 
 import fonts from 'pdfmake/build/vfs_fonts.js';
+import { signatureFontBase64 } from './signature-font';
 
 const fontBytes = (name: string) => Uint8Array.from(atob(fonts[name]), (x) => x.charCodeAt(0));
 const textFont = PDF.create().embedFont(fontBytes('Roboto-Regular.ttf'));
@@ -130,7 +131,9 @@ export async function sealSigningPdf(
   const pdf = await signingPdf(bytes);
   const pages = pdf.getPages();
   const regular = pdf.embedFont(fontBytes('Roboto-Regular.ttf')),
-    italic = pdf.embedFont(fontBytes('Roboto-Italic.ttf')),
+    signatureFont = pdf.embedFont(
+      Uint8Array.from(atob(signatureFontBase64), (x) => x.charCodeAt(0)),
+    ),
     bold = pdf.embedFont(fontBytes('Roboto-Medium.ttf'));
   for (const field of fields) {
     const recipient = recipients[field.recipient];
@@ -157,8 +160,9 @@ export async function sealSigningPdf(
           : page.rotation === 270
             ? { x: box.x + vy, y: box.y + box.height - vx }
             : { x: box.x + vx, y: box.y + vy };
-    const font = field.type === 'signature' ? italic : regular;
-    let fontSize = Math.min(field.type === 'signature' ? 22 : 12, field.height * H * 0.55);
+    const font =
+      field.type === 'signature' && signatureFont.canEncode(value) ? signatureFont : regular;
+    let fontSize = Math.min(field.type === 'signature' ? 32 : 12, field.height * H * 0.55);
     const width = measureText(value, font, fontSize);
     if (width > field.width * W - 8) fontSize *= (field.width * W - 8) / width;
     page.drawText(value, {

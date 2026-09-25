@@ -648,6 +648,7 @@ export function PublicSigningPage() {
               <PdfFields
                 url={`${base()}/file${r().status === 'completed' ? '?signed=true' : ''}`}
                 fields={r().status === 'completed' ? [] : r().fields}
+                typedSignatures
                 onActivate={
                   r().status === 'pending' && !r().recipient.signedAt
                     ? (field) => {
@@ -721,7 +722,7 @@ export function PublicSigningPage() {
                   <label class="block text-sm">
                     Your signature
                     <input
-                      class={`${inputClass} text-xl italic`}
+                      class={`${inputClass} signature-font signature-input`}
                       id="signing-signature"
                       value={signature() || name() || r().recipient.name}
                       maxLength={100}
