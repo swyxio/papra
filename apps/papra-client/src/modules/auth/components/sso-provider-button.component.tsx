@@ -54,7 +54,7 @@ export const SsoProviderButton: Component<{
 
       {getError() && (
         <div class="text-sm mt-3" role="alert">
-          <p class="text-destructive">{getError()}</p>
+          <p class="text-red-600 dark:text-red-300">{getError()}</p>
           {props.errorRecoveryHref && (
             <a class="underline inline-block mt-2" href={props.errorRecoveryHref}>
               Open secure sign-in

@@ -9,7 +9,7 @@ const env = { APP_URL: 'https://drive.example' } as Env;
 function fixture() {
   const app = new Hono<AppEnv>();
   registerCanonicalOrigin(app);
-  app.all('*', (c) => c.text('app reached'));
+  app.all('*', () => new Response('app reached'));
   return app;
 }
 

@@ -1,4 +1,5 @@
 import type { Component } from 'solid-js';
+import { createSignal } from 'solid-js';
 import { useConfig } from '@/modules/config/config.provider';
 import { AuthLayout } from '../../ui/layouts/auth-layout.component';
 import { authWithProvider } from '../auth.services';
@@ -10,10 +11,11 @@ import { useAuthRedirect } from '../composables/use-auth-redirect.composable';
 export const LoginPage: Component = () => {
   const { config } = useConfig();
   const { getRedirectPath } = useAuthRedirect();
-  const callbackMessage = loginCallbackMessage(
-    new URLSearchParams(window.location.search).get('error'),
+  const [callbackMessage, setCallbackMessage] = createSignal(
+    loginCallbackMessage(new URLSearchParams(window.location.search).get('error')),
   );
   const loginWithGoogle = async () => {
+    setCallbackMessage(undefined);
     try {
       await authWithProvider({
         provider: { key: 'google', name: 'Google', icon: 'i-tabler-brand-google' },
@@ -33,9 +35,9 @@ export const LoginPage: Component = () => {
           <p class="text-muted-foreground mt-1 mb-4">
             Your personal files and separate team spaces.
           </p>
-          {callbackMessage && (
-            <p class="text-destructive text-sm mb-4" role="alert">
-              {callbackMessage}
+          {callbackMessage() && (
+            <p class="text-red-600 dark:text-red-300 text-sm mb-4" role="alert">
+              {callbackMessage()}
             </p>
           )}
           <SsoProviderButton

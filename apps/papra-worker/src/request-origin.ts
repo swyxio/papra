@@ -10,9 +10,9 @@ export function registerCanonicalOrigin(app: App) {
       canonical.search = incoming.search;
       return c.redirect(canonical.href, 308);
     }
+    await next();
     if (canonical.protocol === 'https:') {
       c.header('Strict-Transport-Security', 'max-age=31536000');
     }
-    await next();
   });
 }
