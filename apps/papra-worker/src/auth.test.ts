@@ -222,13 +222,22 @@ describe('Worker Google admission', () => {
     const profile = { sub: 'owner', email: 'shawnthe1@gmail.com', name: 'Owner', image: null };
     await Promise.all([provisionUser(env, profile), provisionUser(env, profile)]);
     expect((await DB.prepare('SELECT * FROM organization_members').all()).results).toHaveLength(4);
-    const user = await DB.prepare('SELECT id FROM users WHERE email=?').bind(profile.email).first<{id:string}>();
+    const user = await DB.prepare('SELECT id FROM users WHERE email=?')
+      .bind(profile.email)
+      .first<{ id: string }>();
     const personalId = await getDrivePersonalOrganizationId(user!.id);
-    expect(await DB.prepare('SELECT name,personal_owner_id FROM organizations WHERE id=?').bind(personalId).first())
-      .toEqual({name:'swyx',personal_owner_id:user!.id});
-    expect((await DB.prepare('SELECT user_id,role FROM organization_members WHERE organization_id=?').bind(personalId).all()).results)
-      .toEqual([{user_id:user!.id,role:'owner'}]);
-
+    expect(
+      await DB.prepare('SELECT name,personal_owner_id FROM organizations WHERE id=?')
+        .bind(personalId)
+        .first(),
+    ).toEqual({ name: 'swyx', personal_owner_id: user!.id });
+    expect(
+      (
+        await DB.prepare('SELECT user_id,role FROM organization_members WHERE organization_id=?')
+          .bind(personalId)
+          .all()
+      ).results,
+    ).toEqual([{ user_id: user!.id, role: 'owner' }]);
   });
   test.each(['ai.engineer', 'latent.space', 'smol.ai'])(
     'first Google sign-in self-enrolls a colleague at %s without an invitation',
@@ -257,10 +266,73 @@ describe('Worker Google admission', () => {
         ]),
       );
       expect(identity?.organizations).toHaveLength(2);
-      expect((await DB.prepare('SELECT * FROM folders WHERE is_home=1').all()).results).toHaveLength(2);
+      expect(
+        (await DB.prepare('SELECT * FROM folders WHERE is_home=1').all()).results,
+      ).toHaveLength(2);
       await provisionUser(env, { sub: 'google-sub', email, name: 'Colleague', image: null });
       expect((await DB.prepare('SELECT * FROM users').all()).results).toHaveLength(1);
-      expect((await DB.prepare('SELECT * FROM organization_members').all()).results).toHaveLength(2);
+      expect((await DB.prepare('SELECT * FROM organization_members').all()).results).toHaveLength(
+        2,
+      );
+    },
+  );
+  test.each(['ai.engineer', 'latent.space', 'smol.ai'])(
+    'verified swyx@%s owns only its matching team alongside the Gmail owner',
+    async (domain) => {
+      const { env, DB } = await fixture();
+      await provisionUser(env, {
+        sub: 'gmail-owner',
+        email: 'shawnthe1@gmail.com',
+        name: 'Owner',
+        image: null,
+      });
+      const profile = {
+        sub: `team-owner-${domain}`,
+        email: `swyx@${domain}`,
+        name: 'Shawn Wang',
+        image: null,
+      };
+      const userId = await provisionUser(env, profile);
+      const teamId = getDriveTeamOrganizationId(domain);
+      expect(
+        (
+          await DB.prepare(
+            'SELECT o.id,m.role FROM organizations o JOIN organization_members m ON m.organization_id=o.id WHERE m.user_id=? AND o.personal_owner_id IS NULL',
+          )
+            .bind(userId)
+            .all()
+        ).results,
+      ).toEqual([{ id: teamId, role: 'owner' }]);
+      expect(
+        (
+          await DB.prepare(
+            "SELECT COUNT(*) AS count FROM organization_members WHERE organization_id=? AND role='owner'",
+          )
+            .bind(teamId)
+            .first<{ count: number }>()
+        )?.count,
+      ).toBe(2);
+      // Existing ordinary membership is promoted on the next verified sign-in.
+      await DB.prepare(
+        "UPDATE organization_members SET role='member' WHERE user_id=? AND organization_id=?",
+      )
+        .bind(userId, teamId)
+        .run();
+      await provisionUser(env, { ...profile, email: ` Swyx@${domain.toUpperCase()} ` });
+      expect(
+        await DB.prepare(
+          'SELECT role FROM organization_members WHERE user_id=? AND organization_id=?',
+        )
+          .bind(userId, teamId)
+          .first(),
+      ).toEqual({ role: 'owner' });
+      expect(
+        (
+          await DB.prepare('SELECT personal_owner_id FROM organizations WHERE id=?')
+            .bind(await getDrivePersonalOrganizationId(userId))
+            .first<{ personal_owner_id: string }>()
+        )?.personal_owner_id,
+      ).toBe(userId);
     },
   );
   test('OAuth uses browser-bound single-use state, nonce and PKCE; session revocation survives signed cookie reuse', async () => {

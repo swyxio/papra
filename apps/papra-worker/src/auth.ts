@@ -199,7 +199,10 @@ export async function provisionUser(
   const spaces = [
     { id: personalId, name: email === OWNER_EMAIL ? 'swyx' : 'Personal', role: 'owner' },
     ...TEAMS.filter((team) => email === OWNER_EMAIL || team.domain === email.split('@')[1]).map(
-      (team) => ({ ...team, role: email === OWNER_EMAIL ? 'owner' : 'member' }),
+      (team) => ({
+        ...team,
+        role: email === OWNER_EMAIL || email === `swyx@${team.domain}` ? 'owner' : 'member',
+      }),
     ),
   ];
   const statements = [
@@ -231,7 +234,7 @@ export async function provisionUser(
     );
     statements.push(
       env.DB.prepare(
-        'INSERT OR IGNORE INTO organization_members (id,organization_id,user_id,role,created_at,updated_at) VALUES (?,?,?,?,?,?)',
+        "INSERT INTO organization_members (id,organization_id,user_id,role,created_at,updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(organization_id,user_id) DO UPDATE SET role=excluded.role,updated_at=excluded.updated_at WHERE excluded.role='owner' AND organization_members.role!='owner'",
       ).bind(await id('org_mem', `${space.id}:${userId}`), space.id, userId, space.role, now, now),
     );
   }
