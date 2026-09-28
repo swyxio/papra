@@ -538,8 +538,9 @@ export async function encodePlayback(source, destination, metadata, height, sign
       'error',
       '-nostdin',
       '-threads',
-      '1',
+      '2',
       ...httpsOptions(source),
+      ...(source.startsWith('https://') ? ['-multiple_requests', '1', '-short_seek_size', '8388608'] : []),
       '-i',
       source,
       ...(canRemuxPlayback(metadata, height)
@@ -560,9 +561,16 @@ export async function convertVideoJob(rawJob, callerSignal) {
   const signal = callerSignal ? AbortSignal.any([timeout, callerSignal]) : timeout;
   const dir = await mkdtemp(join(tmpdir(), 'papra-playback-'));
   try {
-    const metadata = checkedVideoMetadata(await probeMedia(job.source.url, signal));
+    // Full-clip conversion benefits from local seeking. Stage only bounded inputs;
+    // larger originals retain ranged reads and never depend on fitting on disk.
+    let source = job.source.url;
+    if (job.source.byteSize <= HARD_MAX_BYTES) {
+      source = join(dir, 'source');
+      await download(job.source, source, HARD_MAX_BYTES, signal);
+    }
+    const metadata = checkedVideoMetadata(await probeMedia(source, signal));
     const file = join(dir, 'playback.mp4');
-    await encodePlayback(job.source.url, file, metadata, job.height, signal);
+    await encodePlayback(source, file, metadata, job.height, signal);
     const outputMetadata = checkedVideoMetadata(await probeMedia(file, signal));
     if (outputMetadata.width > metadata.width || outputMetadata.height > metadata.height) {
       throw new ProcessingError('playback_output_upscaled');

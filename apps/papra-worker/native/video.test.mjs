@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { validateVideoJob, probeMedia, encodePlayback } from './server.mjs';
+import { validateVideoJob, probeMedia, encodePlayback, convertVideoJob } from './server.mjs';
 import { needsVideoPreview, normalizeMediaMetadata, canRemuxPlayback } from './video-policy.mjs';
 
 const run = promisify(execFile);
@@ -239,6 +239,40 @@ test('real FFmpeg encode path never upscales a small incompatible video even whe
     assert.equal(after.height, 180);
     assert.ok(after.width <= before.width && after.height <= before.height);
   } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('bounded conversion stages one original read and checks the uploaded output receipt', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'papra-staged-test-'));
+  const originalFetch = globalThis.fetch;
+  try {
+    const source = join(dir, 'source.mov');
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i',
+      'testsrc2=size=320x180:rate=30:duration=0.2', '-pix_fmt', 'yuv444p', '-y', source]);
+    const bytes = await readFile(source);
+    const requests = [];
+    globalThis.fetch = async (_url, options = {}) => {
+      requests.push(options.method ?? 'GET');
+      if (options.method === 'PUT') {
+        let size = 0;
+        for await (const chunk of options.body) size += chunk.length;
+        assert.ok(size > 0);
+        return new Response('', { status: 200 });
+      }
+      return new Response(bytes, { headers: { 'content-length': String(bytes.length) } });
+    };
+    const result = await convertVideoJob({ jobId: 'staged-preview', height: 1080,
+      source: { url: signed('originals/test.mov'), contentType: 'video/quicktime', byteSize: bytes.length },
+      output: { key: 'derived/test.mp4', url: signed('derived/test.mp4') },
+    });
+    assert.deepEqual(requests, ['GET', 'PUT']);
+    assert.equal(result.metadata.width, 320);
+    assert.equal(result.metadata.height, 180);
+    assert.equal(result.metadata.videoCodec, 'h264');
+    assert.equal(result.output.sha256.length, 64);
+  } finally {
+    globalThis.fetch = originalFetch;
     await rm(dir, { recursive: true, force: true });
   }
 });

@@ -96,7 +96,10 @@ receipt or safe error envelope. Disconnects abort processing. Each conversion
 writes a lease-specific derived key; the outbound proxy checks the current job,
 generation, lease and document state before accepting a write. Ready previews
 are reused. One video conversion runs at a time, with two CPU cores per native
-instance to handle high-resolution source decoding.
+instance to handle high-resolution source decoding. Inputs up to 2 GiB are
+staged with one bounded download for local seeking during conversion; larger
+inputs retain ranged reads with persistent connections and 8 MiB read-ahead.
+Temporary inputs and outputs are removed on completion or failure.
 
 The Worker reserves estimated compute before each attempt and settles measured
 request time at the provisioned CPU/memory/disk rate. The monthly preview
