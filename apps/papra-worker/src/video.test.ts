@@ -61,21 +61,22 @@ async function fixture() {
   };
   return { env, DB, send, doc };
 }
-test('automatic threshold is strictly less than 15 minutes', async () => {
-  const { env, DB, send } = await fixture();
-  await recordVideoMetadata(env, 'v', { ...metadata, durationSeconds: 900 });
-  expect(send).not.toHaveBeenCalled();
-  await recordVideoMetadata(env, 'v', metadata);
-  expect(send).toHaveBeenCalledTimes(1);
-  await recordVideoMetadata(env, 'v', metadata);
-  expect(send).toHaveBeenCalledTimes(1);
-  expect(
-    (await DB.prepare("SELECT count(*) n FROM jobs WHERE kind='video:720'").first<{ n: number }>())
-      ?.n,
-  ).toBe(1);
-});
+test.each([899, 900, 901])(
+  'automatic duration policy and dedup at %s seconds',
+  async (durationSeconds) => {
+    const { env, DB, send } = await fixture();
+    await recordVideoMetadata(env, 'v', { ...metadata, durationSeconds });
+    await recordVideoMetadata(env, 'v', { ...metadata, durationSeconds });
+    expect(send).toHaveBeenCalledTimes(2);
+    const jobs = await DB.prepare('SELECT kind FROM jobs ORDER BY kind').all<{ kind: string }>();
+    expect(jobs.results.map((j) => j.kind)).toEqual([
+      `video:720-${durationSeconds < 900 ? 'full' : 'teaser'}-v2`,
+      'video:thumbnails-v2',
+    ]);
+  },
+);
 test('compatible originals avoid conversion despite large byte size', async () => {
-  const { env, send, doc } = await fixture();
+  const { env, DB, send, doc } = await fixture();
   await recordVideoMetadata(env, 'v', {
     ...metadata,
     videoCodec: 'h264',
@@ -84,7 +85,10 @@ test('compatible originals avoid conversion despite large byte size', async () =
     bitrate: 4_000_000,
     formatName: 'mp4',
   });
-  expect(send).not.toHaveBeenCalled();
+  expect(send).toHaveBeenCalledTimes(1);
+  expect((await DB.prepare('SELECT kind FROM jobs').first<{ kind: string }>())?.kind).toBe(
+    'video:thumbnails-v2',
+  );
   const response = await mediaResponse(env, doc);
   expect(response.preview.status).toBe('original');
   expect(response.url).toContain('originals/v');
@@ -109,7 +113,7 @@ test('monthly reservations are atomic and cannot overrun budget', async () => {
   const jobs = Array.from({ length: 5 }, (_, i) => ({
     id: `j${i}`,
     version_id: 'v',
-    kind: 'video:720',
+    kind: 'video:720-full-v2',
     generation: 0,
     lease_token: `l${i}`,
   }));
@@ -127,9 +131,15 @@ test('monthly reservations are atomic and cannot overrun budget', async () => {
 });
 test('successful output is fenced to current job and stays separate from original', async () => {
   const { env, DB, doc } = await fixture();
-  const j = { id: 'j', version_id: 'v', kind: 'video:720', generation: 0, lease_token: 'l' };
+  const j = {
+    id: 'j',
+    version_id: 'v',
+    kind: 'video:720-full-v2',
+    generation: 0,
+    lease_token: 'l',
+  };
   await DB.prepare(
-    "INSERT INTO jobs(id,version_id,kind,status,lease_token,created_at,updated_at) VALUES('j','v','video:720','processing','l',1,1)",
+    "INSERT INTO jobs(id,version_id,kind,status,lease_token,created_at,updated_at) VALUES('j','v','video:720-full-v2','processing','l',1,1)",
   ).run();
   const native = vi.fn(async (_env: unknown, _j: unknown, _path: unknown, payload: any) => ({
     jobId: 'j',
@@ -143,7 +153,7 @@ test('successful output is fenced to current job and stays separate from origina
     { id: 'v', storage_key: 'originals/v', size: 601364768, mime_type: 'video/quicktime' },
     native as any,
   );
-  expect((await mediaResponse(env, doc)).selected).toBe('720');
+  expect((await mediaResponse(env, doc)).selected).toBe('720-full-v2');
   await runVideoJob(
     env,
     j,
@@ -161,7 +171,13 @@ test('successful output is fenced to current job and stays separate from origina
 });
 test('abandoned compute is conservatively billed and paused jobs resume next month', async () => {
   const { env, DB } = await fixture();
-  const j = { id: 'j', version_id: 'v', kind: 'video:720', generation: 0, lease_token: 'l' };
+  const j = {
+    id: 'j',
+    version_id: 'v',
+    kind: 'video:720-full-v2',
+    generation: 0,
+    lease_token: 'l',
+  };
   await reserveVideoCompute(env, j);
   await DB.prepare('UPDATE video_compute_attempts SET created_at=?')
     .bind(Date.now() - 21 * 60_000)
@@ -180,4 +196,109 @@ test('abandoned compute is conservatively billed and paused jobs resume next mon
   expect(
     (await DB.prepare("SELECT status FROM jobs WHERE id='j'").first<{ status: string }>())?.status,
   ).toBe('pending');
+});
+
+test('explicit full long preview is deduplicated and does not consume automatic budget', async () => {
+  const { env, DB, doc, send } = await fixture();
+  await recordVideoMetadata(env, 'v', { ...metadata, durationSeconds: 900 });
+  send.mockClear();
+  await Promise.all(
+    Array.from({ length: 5 }, () => requestVideoPreview(env, doc, '720-full-v2', false)),
+  );
+  expect(send).toHaveBeenCalledOnce();
+  const period = new Date().toISOString().slice(0, 7);
+  await DB.prepare('INSERT INTO video_compute_usage(month,spent_microusd) VALUES(?,?)')
+    .bind(period, VIDEO_MONTHLY_MICROUSD)
+    .run();
+  const j = {
+    id: 'manual',
+    version_id: 'v',
+    kind: 'video:720-full-v2',
+    generation: 0,
+    lease_token: 'manual-lease',
+  };
+  expect(await reserveVideoCompute(env, j)).toBe(true);
+  await settleVideoCompute(env, j, 60_000);
+  expect(
+    (await DB.prepare('SELECT spent_microusd FROM video_compute_usage').first<any>())
+      .spent_microusd,
+  ).toBe(VIDEO_MONTHLY_MICROUSD);
+});
+test('profile cache is tied to version and preserves separate teaser/full renditions', async () => {
+  const { env, DB, doc } = await fixture();
+  await recordVideoMetadata(env, 'v', { ...metadata, durationSeconds: 900 });
+  for (const [profile, duration, scope] of [
+    ['720-teaser-v2', 60, 'teaser'],
+    ['720-full-v2', 900, 'full'],
+  ] as const)
+    await DB.prepare(
+      'INSERT INTO video_previews(version_id,quality,storage_key,size,sha256,created_at,metadata_json,scope) VALUES(?,?,?,?,?,?,?,?)',
+    )
+      .bind(
+        'v',
+        profile,
+        'derived/v/' + profile,
+        1234,
+        'a'.repeat(64),
+        1,
+        JSON.stringify({ ...metadata, width: 720, height: 1280, durationSeconds: duration }),
+        scope,
+      )
+      .run();
+  const teaser = await mediaResponse(env, doc, '720-teaser-v2');
+  expect(teaser.preview.durationSeconds).toBe(60);
+  expect(teaser.original.durationSeconds).toBe(900);
+  expect((await mediaResponse(env, doc)).selected).toBe('720-full-v2');
+  await DB.prepare(
+    "INSERT INTO versions(id,document_id,storage_key,original_name,size,mime_type,created_by,created_at) VALUES('v2','d','originals/v2','replacement.mov',100,'video/quicktime','u',2)",
+  ).run();
+  expect(
+    (
+      await mediaResponse(env, {
+        ...doc,
+        current_version_id: 'v2',
+        original_storage_key: 'originals/v2',
+      })
+    ).preview.variants,
+  ).toHaveLength(0);
+});
+
+test('known compatible originals request thumbnails without encoding', async () => {
+  const { env, DB, doc, send } = await fixture();
+  await DB.prepare('INSERT INTO video_metadata(version_id,metadata_json,created_at) VALUES(?,?,1)')
+    .bind(
+      'v',
+      JSON.stringify({
+        ...metadata,
+        videoCodec: 'h264',
+        width: 640,
+        height: 360,
+        bitrate: 1000000,
+        formatName: 'mp4',
+      }),
+    )
+    .run();
+  await requestVideoPreview(env, doc, '720', false);
+  await requestVideoPreview(env, doc, '720', false);
+  expect(send).toHaveBeenCalledOnce();
+  expect((await DB.prepare('SELECT kind FROM jobs').first<{ kind: string }>())?.kind).toBe(
+    'video:thumbnails-v2',
+  );
+});
+test('missing cached preview is regenerable without changing the original', async () => {
+  const { env, DB, doc, send } = await fixture();
+  await DB.prepare('INSERT INTO video_metadata(version_id,metadata_json,created_at) VALUES(?,?,1)')
+    .bind('v', JSON.stringify(metadata))
+    .run();
+  await DB.exec(
+    "INSERT INTO video_previews(version_id,quality,storage_key,size,sha256,created_at) VALUES('v','720-full-v2','derived/missing.mp4',1234,'sha',1); INSERT INTO jobs(id,version_id,kind,status,created_at,updated_at) VALUES('cached','v','video:720-full-v2','done',1,1);",
+  );
+  vi.mocked(env.FILES.head).mockResolvedValue(null);
+  await requestVideoPreview(env, doc, '720', false);
+  const job = await DB.prepare("SELECT status,generation FROM jobs WHERE id='cached'").first<{
+    status: string;
+    generation: number;
+  }>();
+  expect(job).toEqual({ status: 'pending', generation: 1 });
+  expect(send).toHaveBeenCalledTimes(2);
 });

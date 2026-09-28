@@ -1,6 +1,11 @@
 import type { Env } from './types';
-import type { MediaMetadata, VideoConvertResult, VideoProbeResult } from '../native/protocol';
-import { needsVideoPreview } from '../native/video-policy.mjs';
+import type {
+  MediaMetadata,
+  VideoConvertResult,
+  VideoProbeResult,
+  NativeOutput,
+} from '../native/protocol';
+import { needsVideoPreview, thumbnailPositions } from '../native/video-policy.mjs';
 import { all, first, run, id, error } from './db';
 import { s3, signedMedia, signedDownload } from './storage';
 
@@ -26,13 +31,27 @@ export type MediaDocument = {
   name: string;
   preview_key?: string | null;
 };
-type Variant = { quality: string; storage_key: string; size: number };
+type Variant = {
+  quality: string;
+  storage_key: string;
+  size: number;
+  metadata_json: string;
+  scope: 'full' | 'teaser';
+};
+type Thumbnail = { timestamp_seconds: number; storage_key: string; cover: number };
 export class VideoPausedError extends Error {}
 const month = () => new Date().toISOString().slice(0, 7);
-const quality = (value?: string) => {
-  if (value && !['original', '720', '1080'].includes(value))
-    throw error(400, 'Choose Original, 720p or 1080p');
-  return value;
+export const VIDEO_PROFILES = ['720-full-v2', '720-teaser-v2', '1080-full-v2'] as const;
+const automaticProfile = (metadata: MediaMetadata | null) =>
+  metadata?.durationSeconds && metadata.durationSeconds >= AUTO_PREVIEW_SECONDS
+    ? '720-teaser-v2'
+    : '720-full-v2';
+const resolveQuality = (value: unknown, metadata: MediaMetadata | null) => {
+  if (value === undefined || value === '720') return automaticProfile(metadata);
+  if (value === '1080') return '1080-full-v2';
+  if (value === 'original' || VIDEO_PROFILES.includes(value as (typeof VIDEO_PROFILES)[number]))
+    return value as string;
+  throw error(400, 'Choose Original or an available preview');
 };
 export async function videoMetadata(env: Env, versionId: string) {
   const row = await first<{ metadata_json: string }>(
@@ -53,15 +72,19 @@ export async function queueVideo(env: Env, versionId: string, kind: string, retr
     try {
       await env.VIDEO_JOBS.send({ jobId: row.id, generation: row.generation });
     } catch {
-      /* The persisted job is recovered by housekeeping. */
+      /* Housekeeping recovers persisted jobs. */
     }
   }
 }
-export async function recordVideoMetadata(env: Env, versionId: string, metadata: MediaMetadata) {
-  // Older extraction manifests lack codec metadata; probe those only when opened.
+export async function recordVideoMetadata(
+  env: Env,
+  versionId: string,
+  metadata: MediaMetadata,
+  extracted: NativeOutput[] = [],
+) {
   if (!metadata.videoCodec || !metadata.width || !metadata.height || !metadata.durationSeconds)
     return;
-  await run(
+  const saved = await run(
     env,
     'INSERT INTO video_metadata(version_id,metadata_json,created_at) SELECT ?,?,? WHERE EXISTS(SELECT 1 FROM versions v JOIN documents d ON d.id=v.document_id WHERE v.id=? AND d.is_deleted=0) ON CONFLICT(version_id) DO UPDATE SET metadata_json=excluded.metadata_json',
     versionId,
@@ -69,8 +92,44 @@ export async function recordVideoMetadata(env: Env, versionId: string, metadata:
     Date.now(),
     versionId,
   );
-  if (needsVideoPreview(metadata) && metadata.durationSeconds < AUTO_PREVIEW_SECONDS)
-    await queueVideo(env, versionId, 'video:720');
+  if (!saved.meta.changes) return;
+  // Reuse suitable extraction receipts, never remote/public thumbnail URLs.
+  const positions = thumbnailPositions(metadata.durationSeconds);
+  if (!metadata.isHdr)
+    for (const position of positions) {
+      const frame = extracted.find(
+        (x) =>
+          x.kind === 'frame' &&
+          x.contentType === 'image/jpeg' &&
+          x.startSeconds !== undefined &&
+          Math.abs(x.startSeconds - position) <= 0.5,
+      );
+      if (frame && (await env.FILES.head(frame.key))?.size === frame.byteSize)
+        await run(
+          env,
+          'INSERT OR IGNORE INTO video_thumbnails(version_id,profile,timestamp_seconds,storage_key,size,sha256,cover) VALUES(?,?,?,?,?,?,?)',
+          versionId,
+          'thumbnails-v2',
+          frame.startSeconds,
+          frame.key,
+          frame.byteSize,
+          frame.sha256,
+          position === positions[0] ? 1 : 0,
+        );
+    }
+  const frames = await all<Thumbnail>(
+    env,
+    "SELECT timestamp_seconds,storage_key,cover FROM video_thumbnails WHERE version_id=? AND profile='thumbnails-v2'",
+    versionId,
+  );
+  if (
+    positions.some(
+      (position) => !frames.some((frame) => Math.abs(frame.timestamp_seconds - position) <= 0.5),
+    )
+  )
+    await queueVideo(env, versionId, 'video:thumbnails-v2');
+  if (needsVideoPreview(metadata))
+    await queueVideo(env, versionId, `video:${automaticProfile(metadata)}`);
 }
 export async function requestVideoPreview(
   env: Env,
@@ -80,47 +139,94 @@ export async function requestVideoPreview(
 ) {
   if (!doc.mime_type.startsWith('video/'))
     throw error(400, 'Previews are available for video files');
-  if (requested !== '720' && requested !== '1080') throw error(400, 'Choose 720p or 1080p');
   if (retry !== undefined && typeof retry !== 'boolean') throw error(400, 'Invalid retry option');
-  const ready = await first(
-    env,
-    'SELECT version_id FROM video_previews WHERE version_id=? AND quality=?',
-    doc.current_version_id,
-    requested,
-  );
-  if (ready) return;
-  if (!(await videoMetadata(env, doc.current_version_id))) {
-    await queueVideo(env, doc.current_version_id, 'video:probe', retry === true);
-    // Probe first: a large but compatible original should never be encoded merely because it was opened.
-    if (requested === '720') return;
+  const metadata = await videoMetadata(env, doc.current_version_id);
+  const profile = resolveQuality(requested, metadata);
+  if (profile === 'original') throw error(400, 'Original playback does not require generation');
+  if (
+    profile === '1080-full-v2' &&
+    metadata &&
+    Math.min(metadata.width ?? 0, metadata.height ?? 0) < 1080
+  )
+    throw error(400, '1080p would upscale this source');
+  if (metadata) {
+    const frames = await all<Thumbnail>(
+      env,
+      "SELECT timestamp_seconds,storage_key,cover FROM video_thumbnails WHERE version_id=? AND profile='thumbnails-v2'",
+      doc.current_version_id,
+    );
+    if (
+      thumbnailPositions(metadata.durationSeconds ?? 0).some(
+        (position) => !frames.some((frame) => Math.abs(frame.timestamp_seconds - position) <= 0.5),
+      )
+    )
+      await queueVideo(env, doc.current_version_id, 'video:thumbnails-v2', retry === true);
+    if ((requested === '720' || requested === undefined) && !needsVideoPreview(metadata)) return;
   }
-  await queueVideo(env, doc.current_version_id, `video:${requested}`, retry === true);
+  const ready = await first<Variant>(
+    env,
+    'SELECT storage_key,size FROM video_previews WHERE version_id=? AND quality=?',
+    doc.current_version_id,
+    profile,
+  );
+  if (ready && (await env.FILES.head(ready.storage_key))?.size === ready.size) return;
+  if (ready) {
+    await run(
+      env,
+      "UPDATE jobs SET status='failed',error='preview_cache_missing' WHERE version_id=? AND kind=? AND status='done'",
+      doc.current_version_id,
+      `video:${profile}`,
+    );
+  }
+  if (!metadata) {
+    await queueVideo(env, doc.current_version_id, 'video:probe', retry === true);
+    if (requested === '720' || requested === undefined) return;
+  }
+  await queueVideo(env, doc.current_version_id, `video:${profile}`, retry === true || !!ready);
 }
 export async function mediaResponse(env: Env, doc: MediaDocument, requested?: string) {
-  quality(requested);
   const video = doc.mime_type.startsWith('video/');
   const metadata = video ? await videoMetadata(env, doc.current_version_id) : null;
+  const desired = resolveQuality(requested, metadata);
   const variants = video
     ? await all<Variant>(
         env,
-        'SELECT quality,storage_key,size FROM video_previews WHERE version_id=? ORDER BY quality DESC',
+        "SELECT quality,storage_key,size,metadata_json,scope FROM video_previews WHERE version_id=? AND quality IN ('720-full-v2','720-teaser-v2','1080-full-v2') ORDER BY quality",
         doc.current_version_id,
       )
     : [];
   const jobs = video
-    ? await all<{ kind: string; status: string; error: string | null }>(
+    ? await all<{
+        id: string;
+        generation: number;
+        kind: string;
+        status: string;
+        error: string | null;
+      }>(
         env,
-        "SELECT kind,status,error FROM jobs WHERE version_id=? AND kind LIKE 'video:%'",
+        "SELECT id,generation,kind,status,error FROM jobs WHERE version_id=? AND kind LIKE 'video:%'",
         doc.current_version_id,
       )
     : [];
-  const selection =
-    requested ??
-    (variants.some((v) => v.quality === '720') ? '720' : (variants[0]?.quality ?? 'original'));
+  const selection = requested
+    ? desired
+    : variants.some((v) => v.quality === '720-full-v2')
+      ? '720-full-v2'
+      : variants.some((v) => v.quality === '1080-full-v2')
+        ? '1080-full-v2'
+        : desired;
   const variant = variants.find((v) => v.quality === selection);
   const job =
-    jobs.find((j) => j.kind === `video:${requested === '1080' ? '1080' : '720'}`) ??
-    jobs.find((j) => j.kind === 'video:probe');
+    jobs.find((j) => j.kind === `video:${selection}`) ?? jobs.find((j) => j.kind === 'video:probe');
+  const progress =
+    job?.status === 'processing'
+      ? await first<{ phase: string; percent: number | null }>(
+          env,
+          'SELECT phase,percent FROM video_preview_progress WHERE job_id=? AND generation=?',
+          job.id,
+          job.generation,
+        )
+      : null;
   const needs = video && (!metadata || needsVideoPreview(metadata));
   const status = variant
     ? 'ready'
@@ -135,7 +241,17 @@ export async function mediaResponse(env: Env, doc: MediaDocument, requested?: st
             : needs
               ? 'needs_preview'
               : 'original';
-  const canOriginal = !needs || requested === 'original';
+  const canOriginal = !needs || selection === 'original';
+  const frames = video
+    ? await all<Thumbnail>(
+        env,
+        "SELECT timestamp_seconds,storage_key,cover FROM video_thumbnails WHERE version_id=? AND profile='thumbnails-v2' ORDER BY cover DESC,timestamp_seconds",
+        doc.current_version_id,
+      )
+    : [];
+  const selectedMetadata = variant
+    ? (JSON.parse(variant.metadata_json) as MediaMetadata)
+    : metadata;
   return {
     url: variant
       ? await signedMedia(env, variant.storage_key, 'video/mp4')
@@ -145,58 +261,92 @@ export async function mediaResponse(env: Env, doc: MediaDocument, requested?: st
     mimeType: variant ? 'video/mp4' : doc.mime_type,
     versionId: doc.current_version_id,
     expiresAt: new Date(Date.now() + 900_000).toISOString(),
-    selected: variant ? selection : canOriginal ? 'original' : (requested ?? '720'),
+    selected: variant ? selection : canOriginal ? 'original' : selection,
     original: {
       size: doc.original_size,
       width: metadata?.width,
       height: metadata?.height,
       codec: metadata?.videoCodec,
+      durationSeconds: metadata?.durationSeconds,
     },
     preview: {
       status,
+      phase: progress?.phase,
+      percent: progress?.percent ?? undefined,
       error: job?.error,
-      durationSeconds: metadata?.durationSeconds,
-      posterUrl: doc.preview_key ? await signedMedia(env, doc.preview_key, 'image/jpeg') : null,
-      variants: variants.map((v) => ({ quality: v.quality, size: v.size })),
+      scope: variant?.scope ?? (selection === '720-teaser-v2' ? 'teaser' : 'full'),
+      durationSeconds: selectedMetadata?.durationSeconds,
+      originalDurationSeconds: metadata?.durationSeconds,
+      posterUrl: frames[0]
+        ? await signedMedia(env, frames[0].storage_key, 'image/jpeg')
+        : doc.preview_key
+          ? await signedMedia(env, doc.preview_key, 'image/jpeg')
+          : null,
+      thumbnails: await Promise.all(
+        frames.map(async (frame) => ({
+          timestampSeconds: frame.timestamp_seconds,
+          url: await signedMedia(env, frame.storage_key, 'image/jpeg'),
+          cover: !!frame.cover,
+        })),
+      ),
+      variants: variants.map((v) => ({
+        quality: v.quality,
+        size: v.size,
+        scope: v.scope,
+        ...JSON.parse(v.metadata_json),
+      })),
+      costTracking: 'estimated',
+      automaticMonthlyBudgetUsd: 10,
     },
   };
 }
 export async function previewDownload(env: Env, doc: MediaDocument, requested?: string) {
-  quality(requested);
-  if (requested !== '720' && requested !== '1080')
-    throw error(400, 'Choose a generated preview to download');
+  const profile = resolveQuality(requested, await videoMetadata(env, doc.current_version_id));
+  if (profile === 'original') throw error(400, 'Choose a generated preview to download');
   const variant = await first<Variant>(
     env,
     'SELECT storage_key,size FROM video_previews WHERE version_id=? AND quality=?',
     doc.current_version_id,
-    requested,
+    profile,
   );
   if (!variant) throw error(409, 'This preview is not ready yet');
   return {
     url: await signedDownload(
       env,
       variant.storage_key,
-      `${doc.name.replace(/\.[^.]+$/, '')} - ${requested}p.mp4`,
+      `${doc.name.replace(/\.[^.]+$/, '')} - ${profile.startsWith('1080') ? '1080' : '720'}p ${profile.includes('teaser') ? '1-minute preview' : 'full preview'}.mp4`,
     ),
   };
 }
 export async function reserveVideoCompute(env: Env, j: VideoJob) {
   const period = month();
   const now = Date.now();
+  const metadata = await videoMetadata(env, j.version_id);
+  const automatic = !(
+    j.kind.includes('1080') ||
+    (j.kind.includes('720-full') && (metadata?.durationSeconds ?? 0) >= 900)
+  );
   const results = await env.DB.batch([
     env.DB.prepare('INSERT OR IGNORE INTO video_compute_usage(month) VALUES(?)').bind(period),
     env.DB.prepare(
-      'UPDATE video_compute_usage SET reserved_microusd=reserved_microusd+? WHERE month=? AND spent_microusd+reserved_microusd+?<=?',
-    ).bind(RESERVATION, period, RESERVATION, VIDEO_MONTHLY_MICROUSD),
+      'UPDATE video_compute_usage SET reserved_microusd=reserved_microusd+? WHERE month=? AND (?=0 OR spent_microusd+reserved_microusd+?<=?)',
+    ).bind(
+      automatic ? RESERVATION : 0,
+      period,
+      automatic ? 1 : 0,
+      RESERVATION,
+      VIDEO_MONTHLY_MICROUSD,
+    ),
     env.DB.prepare(
-      'INSERT INTO video_compute_attempts(lease_token,job_id,month,reserved_microusd,created_at) SELECT ?,?,?,?,? WHERE changes()=1',
-    ).bind(j.lease_token, j.id, period, RESERVATION, now),
+      'INSERT INTO video_compute_attempts(lease_token,job_id,month,reserved_microusd,created_at,automatic) SELECT ?,?,?,?,?,? WHERE changes()=1',
+    ).bind(j.lease_token, j.id, period, RESERVATION, now, automatic ? 1 : 0),
   ]);
   return results[1].meta.changes === 1;
 }
 export async function settleVideoCompute(env: Env, j: VideoJob, elapsedMs: number, outputSize = 0) {
-  const attempt = await first<{ reserved_microusd: number }>(env,
-    'SELECT reserved_microusd FROM video_compute_attempts WHERE lease_token=? AND completed_at IS NULL',
+  const attempt = await first<{ reserved_microusd: number; automatic: number }>(
+    env,
+    'SELECT reserved_microusd,automatic FROM video_compute_attempts WHERE lease_token=? AND completed_at IS NULL',
     j.lease_token,
   );
   if (!attempt) return;
@@ -207,7 +357,11 @@ export async function settleVideoCompute(env: Env, j: VideoJob, elapsedMs: numbe
   await env.DB.batch([
     env.DB.prepare(
       'UPDATE video_compute_usage SET reserved_microusd=reserved_microusd-?,spent_microusd=spent_microusd+? WHERE month=(SELECT month FROM video_compute_attempts WHERE lease_token=? AND completed_at IS NULL)',
-    ).bind(attempt.reserved_microusd, charged, j.lease_token),
+    ).bind(
+      attempt.automatic ? attempt.reserved_microusd : 0,
+      attempt.automatic ? charged : 0,
+      j.lease_token,
+    ),
     env.DB.prepare(
       'UPDATE video_compute_attempts SET charged_microusd=?,elapsed_ms=?,output_size=?,completed_at=? WHERE lease_token=? AND completed_at IS NULL',
     ).bind(charged, Math.round(elapsedMs), outputSize, Date.now(), j.lease_token),
@@ -218,7 +372,7 @@ export async function recoverVideoCompute(env: Env) {
   // An interrupted attempt is conservatively charged its reservation, never silently free.
   await env.DB.batch([
     env.DB.prepare(
-      'UPDATE video_compute_usage SET spent_microusd=spent_microusd+coalesce((SELECT sum(reserved_microusd) FROM video_compute_attempts WHERE month=video_compute_usage.month AND completed_at IS NULL AND created_at<?),0),reserved_microusd=reserved_microusd-coalesce((SELECT sum(reserved_microusd) FROM video_compute_attempts WHERE month=video_compute_usage.month AND completed_at IS NULL AND created_at<?),0)',
+      'UPDATE video_compute_usage SET spent_microusd=spent_microusd+coalesce((SELECT sum(reserved_microusd) FROM video_compute_attempts WHERE month=video_compute_usage.month AND automatic=1 AND completed_at IS NULL AND created_at<?),0),reserved_microusd=reserved_microusd-coalesce((SELECT sum(reserved_microusd) FROM video_compute_attempts WHERE month=video_compute_usage.month AND automatic=1 AND completed_at IS NULL AND created_at<?),0)',
     ).bind(cutoff, cutoff),
     env.DB.prepare(
       'UPDATE video_compute_attempts SET charged_microusd=reserved_microusd,completed_at=? WHERE completed_at IS NULL AND created_at<?',
@@ -234,12 +388,20 @@ export async function runVideoJob(
   v: VideoVersion,
   callNative: <T>(env: Env, j: VideoJob, path: string, payload: unknown) => Promise<T>,
 ) {
-  if (j.kind !== 'video:probe') {
+  const profile = j.kind.slice('video:'.length);
+  const thumbnailOnly = profile === 'thumbnails-v2';
+  if (
+    profile !== 'probe' &&
+    !thumbnailOnly &&
+    !VIDEO_PROFILES.includes(profile as (typeof VIDEO_PROFILES)[number])
+  )
+    throw new Error('unsupported_preview_profile');
+  if (profile !== 'probe' && !thumbnailOnly) {
     const existing = await first<Variant>(
       env,
       'SELECT storage_key,size FROM video_previews WHERE version_id=? AND quality=?',
       v.id,
-      j.kind === 'video:1080' ? '1080' : '720',
+      profile,
     );
     if (existing && (await env.FILES.head(existing.storage_key))?.size === existing.size) return;
   }
@@ -247,12 +409,13 @@ export async function runVideoJob(
   const start = Date.now();
   let size = 0;
   try {
+    const storage = s3(env);
     const source = {
-      url: await s3(env).getPresignedUrl('GET', v.storage_key, 1800),
+      url: await storage.getPresignedUrl('GET', v.storage_key, 1800),
       contentType: v.mime_type,
       byteSize: v.size,
     };
-    if (j.kind === 'video:probe') {
+    if (profile === 'probe') {
       const result = await callNative<VideoProbeResult>(env, j, '/video/probe', {
         jobId: j.id,
         source,
@@ -264,46 +427,139 @@ export async function runVideoJob(
       )
         throw new Error('invalid_video_probe');
       await recordVideoMetadata(env, v.id, result.metadata);
-      // This probe was requested by opening the file, so long videos may now be prepared too.
-      if (needsVideoPreview(result.metadata)) await queueVideo(env, v.id, 'video:720');
       return;
     }
-    const height = j.kind === 'video:1080' ? 1080 : 720;
-    const key = `derived/${v.id}/playback/${height}-g${j.generation}-${j.lease_token}.mp4`;
-    const result = await callNative<VideoConvertResult>(env, j, '/video/convert', {
-      jobId: j.id,
-      source,
-      output: { key, url: await s3(env).getPresignedUrl('PUT', key, 1800) },
-      height,
-    });
-    const output = result.output;
-    if (
-      result.jobId !== j.id ||
-      output?.key !== key ||
-      output.contentType !== 'video/mp4' ||
-      !Number.isSafeInteger(output.byteSize) ||
-      output.byteSize < 1 ||
-      !/^[a-f0-9]{64}$/.test(output.sha256)
-    )
-      throw new Error('invalid_video_preview');
-    size = output.byteSize;
-    const object = await env.FILES.head(key);
-    if (!object || object.size !== size) throw new Error('video_preview_missing');
-    const stored = await run(
+    const metadata = await videoMetadata(env, v.id);
+    const target = async (suffix: string) => {
+      const key = `derived/${v.id}/playback/${profile}-g${j.generation}-${j.lease_token}${suffix}`;
+      return { key, url: await storage.getPresignedUrl('PUT', key, 1800) };
+    };
+    const existingFrames = await all<Thumbnail>(
       env,
-      "INSERT INTO video_previews(version_id,quality,storage_key,size,sha256,created_at) SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM jobs j JOIN versions v ON v.id=j.version_id JOIN documents d ON d.id=v.document_id WHERE j.id=? AND j.generation=? AND j.lease_token=? AND j.status='processing' AND d.is_deleted=0) ON CONFLICT(version_id,quality) DO UPDATE SET storage_key=excluded.storage_key,size=excluded.size,sha256=excluded.sha256,created_at=excluded.created_at",
+      "SELECT timestamp_seconds,storage_key,cover FROM video_thumbnails WHERE version_id=? AND profile='thumbnails-v2'",
       v.id,
-      String(height),
-      key,
-      size,
-      output.sha256,
-      Date.now(),
-      j.id,
-      j.generation,
-      j.lease_token,
     );
-    if (!stored.meta.changes) await env.FILES.delete(key);
+    const positions = thumbnailPositions(metadata?.durationSeconds ?? 0);
+    const thumbnails = thumbnailOnly
+      ? await Promise.all(
+          positions
+            .filter(
+              (position) =>
+                !existingFrames.some(
+                  (frame) => Math.abs(frame.timestamp_seconds - position) <= 0.5,
+                ),
+            )
+            .map(async (timestampSeconds, index) => ({
+              timestampSeconds,
+              output: await target(`-thumb-${index}.jpg`),
+            })),
+        )
+      : [];
+    if (thumbnailOnly && !thumbnails.length) return;
+    const output = thumbnailOnly ? undefined : await target('.mp4');
+    const result = await callNative<VideoConvertResult>(
+      env,
+      j,
+      thumbnailOnly ? '/video/thumbnails' : '/video/convert',
+      {
+        jobId: j.id,
+        source,
+        output,
+        height: profile.startsWith('1080') ? 1080 : 720,
+        durationLimitSeconds: profile.includes('teaser') ? 60 : undefined,
+        thumbnails,
+      },
+    );
+    if (result.jobId !== j.id) throw new Error('invalid_video_preview');
+    const receiptValid = (receipt: NativeOutput, targetKey: string, contentType: string) =>
+      receipt?.key === targetKey &&
+      receipt.contentType === contentType &&
+      Number.isSafeInteger(receipt.byteSize) &&
+      receipt.byteSize > 0 &&
+      /^[a-f0-9]{64}$/.test(receipt.sha256);
+    if (!thumbnailOnly) {
+      if (
+        !output ||
+        !receiptValid(result.output, output.key, 'video/mp4') ||
+        !result.metadata?.width ||
+        !result.metadata?.height ||
+        !result.metadata.durationSeconds
+      )
+        throw new Error('invalid_video_preview');
+      if (profile.includes('teaser') && result.metadata.durationSeconds > 60.2)
+        throw new Error('invalid_teaser_duration');
+      size = result.output.byteSize;
+      if ((await env.FILES.head(output.key))?.size !== size)
+        throw new Error('video_preview_missing');
+      const stored = await run(
+        env,
+        "INSERT INTO video_previews(version_id,quality,storage_key,size,sha256,created_at,metadata_json,scope) SELECT ?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM jobs j JOIN versions v ON v.id=j.version_id JOIN documents d ON d.id=v.document_id WHERE j.id=? AND j.generation=? AND j.lease_token=? AND j.status='processing' AND d.is_deleted=0) ON CONFLICT(version_id,quality) DO UPDATE SET storage_key=excluded.storage_key,size=excluded.size,sha256=excluded.sha256,created_at=excluded.created_at,metadata_json=excluded.metadata_json,scope=excluded.scope",
+        v.id,
+        profile,
+        output.key,
+        size,
+        result.output.sha256,
+        Date.now(),
+        JSON.stringify(result.metadata),
+        profile.includes('teaser') ? 'teaser' : 'full',
+        j.id,
+        j.generation,
+        j.lease_token,
+      );
+      if (!stored.meta.changes) await env.FILES.delete(output.key);
+    }
+    for (const frame of result.thumbnails ?? []) {
+      const requested = thumbnails.find((t) => t.output.key === frame.key);
+      if (
+        !requested ||
+        !receiptValid(frame, requested.output.key, 'image/jpeg') ||
+        (Math.abs(frame.timestampSeconds - requested.timestampSeconds) > 0.5 &&
+          !(requested.timestampSeconds === positions[0] && frame.timestampSeconds === 0)) ||
+        (await env.FILES.head(frame.key))?.size !== frame.byteSize
+      )
+        throw new Error('invalid_video_thumbnail');
+      const stored = await run(
+        env,
+        "INSERT INTO video_thumbnails(version_id,profile,timestamp_seconds,storage_key,size,sha256,cover) SELECT ?,'thumbnails-v2',?,?,?,?,? WHERE EXISTS(SELECT 1 FROM jobs j JOIN versions v ON v.id=j.version_id JOIN documents d ON d.id=v.document_id WHERE j.id=? AND j.generation=? AND j.lease_token=? AND j.status='processing' AND d.is_deleted=0) ON CONFLICT(version_id,profile,timestamp_seconds) DO NOTHING",
+        v.id,
+        frame.timestampSeconds,
+        frame.key,
+        frame.byteSize,
+        frame.sha256,
+        requested.timestampSeconds === positions[0] ? 1 : 0,
+        j.id,
+        j.generation,
+        j.lease_token,
+      );
+      if (!stored.meta.changes) await env.FILES.delete(frame.key);
+    }
   } finally {
     await settleVideoCompute(env, j, Date.now() - start, size);
   }
+}
+
+export async function recordVideoProgress(
+  env: Env,
+  j: Pick<VideoJob, 'id' | 'generation'>,
+  value: { phase?: unknown; percent?: unknown },
+) {
+  if (!['preparing', 'encoding', 'uploading', 'finalizing'].includes(String(value.phase))) return;
+  const percent =
+    typeof value.percent === 'number' &&
+    Number.isFinite(value.percent) &&
+    value.percent >= 0 &&
+    value.percent <= 100
+      ? value.percent
+      : null;
+  await run(
+    env,
+    "INSERT INTO video_preview_progress(job_id,generation,phase,percent,updated_at) SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM jobs j JOIN versions v ON v.id=j.version_id JOIN documents d ON d.id=v.document_id WHERE j.id=? AND j.generation=? AND j.status='processing' AND d.is_deleted=0) ON CONFLICT(job_id) DO UPDATE SET generation=excluded.generation,phase=excluded.phase,percent=excluded.percent,updated_at=excluded.updated_at",
+    j.id,
+    j.generation,
+    String(value.phase),
+    percent,
+    Date.now(),
+    j.id,
+    j.generation,
+  );
 }

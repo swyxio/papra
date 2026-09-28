@@ -142,7 +142,8 @@ test('conversion responds immediately with whitespace heartbeats before a valid 
       if (part.done) break;
       body += Buffer.from(part.value).toString();
     }
-    assert.deepEqual(JSON.parse(body), expected);
+    assert.equal(response.headers.get('content-type'), 'application/x-ndjson');
+    assert.deepEqual(JSON.parse(body), { result: expected });
   } finally {
     await close(native);
   }
@@ -198,7 +199,38 @@ test('closing a streamed response cancels native conversion and releases process
       ),
     ]);
     const next = await fetch(url, { method: 'POST', body: JSON.stringify(convertPayload()) });
-    assert.deepEqual(await next.json(), { jobId: 'heartbeat-test' });
+    assert.deepEqual(await next.json(), { result: { jobId: 'heartbeat-test' } });
+  } finally {
+    await close(native);
+  }
+});
+
+test('NDJSON conversion emits measured encoding events separately from upload and final receipt', async () => {
+  const native = createNativeServer({
+    convert: async (_job, _signal, progress) => {
+      progress({ phase: 'encoding', percent: 37 });
+      progress({ phase: 'encoding', percent: 100 });
+      progress({ phase: 'uploading' });
+      progress({ phase: 'finalizing' });
+      return { jobId: 'heartbeat-test' };
+    },
+  });
+  try {
+    const response = await fetch(await listen(native), {
+      method: 'POST',
+      body: JSON.stringify(convertPayload()),
+    });
+    const events = (await response.text())
+      .split('\n')
+      .filter((line) => line.trim())
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(events, [
+      { progress: { phase: 'encoding', percent: 37 } },
+      { progress: { phase: 'encoding', percent: 100 } },
+      { progress: { phase: 'uploading' } },
+      { progress: { phase: 'finalizing' } },
+      { result: { jobId: 'heartbeat-test' } },
+    ]);
   } finally {
     await close(native);
   }

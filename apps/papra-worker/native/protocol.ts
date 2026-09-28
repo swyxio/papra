@@ -48,13 +48,43 @@ export type MediaMetadata = {
   bitrate?: number;
   formatName?: string;
   fps?: number;
+  colorTransfer?: string;
+  colorPrimaries?: string;
+  colorSpace?: string;
+  isHdr?: boolean;
 };
 export type VideoProbeJob = { jobId: string; source: NativeJob['source'] };
 export type VideoProbeResult = { jobId: string; metadata: MediaMetadata };
-export type VideoConvertJob = VideoProbeJob & { output: OutputTarget; height: 720 | 1080 };
+export type VideoConvertJob = VideoProbeJob & {
+  output: OutputTarget;
+  height: 720 | 1080;
+  durationLimitSeconds?: 60;
+  thumbnails?: { timestampSeconds: number; output: OutputTarget }[];
+};
 export type VideoConvertResult = {
   jobId: string;
   output: NativeOutput;
   metadata: MediaMetadata;
   elapsedMs: number;
+  sourceMetadata: MediaMetadata;
+  thumbnails: (NativeOutput & { timestampSeconds: number })[];
 };
+
+export type VideoThumbnailJob = VideoProbeJob & {
+  thumbnails: { timestampSeconds: number; output: OutputTarget }[];
+};
+export type VideoThumbnailResult = {
+  jobId: string;
+  sourceMetadata: MediaMetadata;
+  thumbnails: (NativeOutput & { timestampSeconds: number })[];
+  elapsedMs: number;
+};
+
+export type VideoProgress = {
+  phase: 'preparing' | 'encoding' | 'uploading' | 'finalizing';
+  percent?: number;
+};
+export type VideoStreamEvent =
+  | { progress: VideoProgress }
+  | { result: VideoConvertResult }
+  | { error: string; status: number };

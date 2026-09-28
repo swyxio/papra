@@ -7,7 +7,12 @@ import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Transform, Readable } from 'node:stream';
 import { createHash } from 'node:crypto';
-import { normalizeMediaMetadata, playbackEncodingArgs, canRemuxPlayback } from './video-policy.mjs';
+import {
+  normalizeMediaMetadata,
+  playbackEncodingArgs,
+  canRemuxPlayback,
+  playbackFilter,
+} from './video-policy.mjs';
 
 const R2_HOST = '2d017c943ff16e4c52783635ef05e535.r2.cloudflarestorage.com';
 const HARD_MAX_BYTES = 2 * 1024 ** 3;
@@ -147,7 +152,7 @@ function httpsOptions(source) {
     ? ['-tls_verify', '1', '-ca_file', '/etc/ssl/certs/ca-certificates.crt']
     : [];
 }
-async function command(program, args, signal, maxOutput = MAX_TEXT_BYTES) {
+async function command(program, args, signal, maxOutput = MAX_TEXT_BYTES, onStdout) {
   return new Promise((resolve, reject) => {
     const child = spawn(program, args, {
       signal,
@@ -158,6 +163,7 @@ async function command(program, args, signal, maxOutput = MAX_TEXT_BYTES) {
     let length = 0;
     let tooLarge = false;
     child.stdout.on('data', (data) => {
+      onStdout?.(data.toString('utf8'));
       length += data.length;
       if (length <= maxOutput) parts.push(data);
       else {
@@ -242,7 +248,7 @@ async function upload(file, output, kind, contentType, signal, timeline = {}) {
     ...timeline,
   };
 }
-async function thumbnail(source, destination, signal, seek = 0) {
+export async function thumbnail(source, destination, signal, seek = 0, metadata = {}) {
   await rm(destination, { force: true });
   await command(
     'ffmpeg',
@@ -261,7 +267,10 @@ async function thumbnail(source, destination, signal, seek = 0) {
       '-frames:v',
       '1',
       '-vf',
-      'scale=1280:1280:force_original_aspect_ratio=decrease',
+      playbackFilter(
+        metadata,
+        "scale=w='trunc(min(iw,1280)/2)*2':h='trunc(min(ih,1280)/2)*2':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1",
+      ),
       '-q:v',
       '3',
       '-y',
@@ -499,6 +508,22 @@ export async function probeMedia(source, signal) {
     ),
   );
 }
+function validateThumbnailTargets(entries) {
+  if (entries !== undefined && (!Array.isArray(entries) || entries.length > 6))
+    throw new ProcessingError('invalid_preview_thumbnails', 400);
+  const targets = (entries ?? []).map((entry) => {
+    if (
+      !Number.isFinite(entry?.timestampSeconds) ||
+      entry.timestampSeconds < 0 ||
+      entry.timestampSeconds > 21600
+    )
+      throw new ProcessingError('invalid_thumbnail_timestamp', 400);
+    return { timestampSeconds: entry.timestampSeconds, output: target(entry.output) };
+  });
+  if (new Set(targets.map((entry) => entry.output.key)).size !== targets.length)
+    throw new ProcessingError('duplicate_output_target', 400);
+  return targets;
+}
 export function validateVideoJob(job, convert = false) {
   if (
     !job ||
@@ -514,7 +539,23 @@ export function validateVideoJob(job, convert = false) {
   const source = { ...job.source, url: authorizedUrl(job.source.url) };
   if (!convert) return { jobId: job.jobId, source };
   if (![720, 1080].includes(job.height)) throw new ProcessingError('invalid_preview_height', 400);
-  return { jobId: job.jobId, source, output: target(job.output), height: job.height };
+  if (job.durationLimitSeconds !== undefined && job.durationLimitSeconds !== 60)
+    throw new ProcessingError('invalid_preview_duration_limit', 400);
+  const thumbnails = validateThumbnailTargets(job.thumbnails);
+  const output = target(job.output);
+  if (
+    new Set([output.key, ...thumbnails.map((entry) => entry.output.key)]).size !==
+    thumbnails.length + 1
+  )
+    throw new ProcessingError('duplicate_output_target', 400);
+  return {
+    jobId: job.jobId,
+    source,
+    output,
+    height: job.height,
+    durationLimitSeconds: job.durationLimitSeconds,
+    thumbnails,
+  };
 }
 function checkedVideoMetadata(info) {
   const metadata = normalizeMediaMetadata(info);
@@ -529,7 +570,38 @@ export async function probeVideoJob(rawJob) {
   const info = await probeMedia(job.source.url, AbortSignal.timeout(60_000));
   return { jobId: job.jobId, metadata: checkedVideoMetadata(info) };
 }
-export async function encodePlayback(source, destination, metadata, height, signal) {
+export async function encodePlayback(
+  source,
+  destination,
+  metadata,
+  height,
+  signal,
+  durationLimitSeconds,
+  onProgress,
+) {
+  const targetDuration = Math.min(
+    metadata.durationSeconds ?? Infinity,
+    durationLimitSeconds ?? Infinity,
+  );
+  let pending = '';
+  let lastPercent = -1;
+  const measured = (chunk) => {
+    pending += chunk;
+    const lines = pending.split('\n');
+    pending = lines.pop() ?? '';
+    for (const line of lines) {
+      const match = /^out_time_us=(\d+)$/.exec(line);
+      if (!match || !Number.isFinite(targetDuration) || targetDuration <= 0) continue;
+      const percent = Math.min(
+        99,
+        Math.floor((Number(match[1]) / 1_000_000 / targetDuration) * 100),
+      );
+      if (percent > lastPercent) {
+        lastPercent = percent;
+        onProgress?.({ phase: 'encoding', percent });
+      }
+    }
+  };
   await command(
     'ffmpeg',
     [
@@ -537,26 +609,34 @@ export async function encodePlayback(source, destination, metadata, height, sign
       '-loglevel',
       'error',
       '-nostdin',
+      ...(onProgress ? ['-progress', 'pipe:1', '-stats_period', '1'] : []),
       '-filter_threads',
       '2',
       '-threads',
       '2',
       ...httpsOptions(source),
-      ...(source.startsWith('https://') ? ['-multiple_requests', '1', '-short_seek_size', '8388608'] : []),
+      ...(source.startsWith('https://')
+        ? ['-multiple_requests', '1', '-short_seek_size', '8388608']
+        : []),
       '-i',
       source,
       ...(canRemuxPlayback(metadata, height)
         ? ['-map', '0:v:0', '-map', '0:a:0?', '-c', 'copy', '-movflags', '+faststart']
         : playbackEncodingArgs(metadata, height)),
+      ...(durationLimitSeconds ? ['-t', String(durationLimitSeconds)] : []),
       '-fs',
       String(HARD_MAX_BYTES),
       '-y',
       destination,
     ],
     signal,
+    MAX_TEXT_BYTES,
+    onProgress ? measured : undefined,
   );
+  onProgress?.({ phase: 'encoding', percent: 100 });
 }
-export async function convertVideoJob(rawJob, callerSignal) {
+
+export async function convertVideoJob(rawJob, callerSignal, onProgress) {
   const job = validateVideoJob(rawJob, true);
   const started = Date.now();
   const timeout = AbortSignal.timeout(JOB_TIMEOUT_MS);
@@ -566,11 +646,22 @@ export async function convertVideoJob(rawJob, callerSignal) {
     // Full-clip conversion benefits from local seeking. Stage only bounded inputs;
     // larger originals retain ranged reads and never depend on fitting on disk.
     const phase = (name) => {
+      const progressPhase =
+        name === 'encode'
+          ? 'encoding'
+          : name === 'upload'
+            ? 'uploading'
+            : ['verify', 'thumbnails', 'done'].includes(name)
+              ? 'finalizing'
+              : 'preparing';
+      onProgress?.({ phase: progressPhase });
       // oxlint-disable-next-line no-console -- Bounded phase names/timings contain no object URLs or document text.
-      console.error(JSON.stringify({ event: 'video_phase', phase: name, elapsedMs: Date.now() - started }));
+      console.error(
+        JSON.stringify({ event: 'video_phase', phase: name, elapsedMs: Date.now() - started }),
+      );
     };
     let source = job.source.url;
-    if (job.source.byteSize <= HARD_MAX_BYTES) {
+    if (!job.durationLimitSeconds && job.source.byteSize <= HARD_MAX_BYTES) {
       source = join(dir, 'source');
       phase('stage');
       await download(job.source, source, HARD_MAX_BYTES, signal);
@@ -579,22 +670,111 @@ export async function convertVideoJob(rawJob, callerSignal) {
     const metadata = checkedVideoMetadata(await probeMedia(source, signal));
     const file = join(dir, 'playback.mp4');
     phase('encode');
-    await encodePlayback(source, file, metadata, job.height, signal);
+    await encodePlayback(
+      source,
+      file,
+      metadata,
+      job.height,
+      signal,
+      job.durationLimitSeconds,
+      onProgress,
+    );
     phase('verify');
     const outputMetadata = checkedVideoMetadata(await probeMedia(file, signal));
     if (outputMetadata.width > metadata.width || outputMetadata.height > metadata.height) {
       throw new ProcessingError('playback_output_upscaled');
     }
     if (
-      Math.abs(outputMetadata.durationSeconds - metadata.durationSeconds) >
-      Math.max(1, metadata.durationSeconds * 0.01)
+      outputMetadata.videoCodec !== 'h264' ||
+      outputMetadata.pixelFormat !== 'yuv420p' ||
+      outputMetadata.isHdr ||
+      (outputMetadata.fps ?? Infinity) > 30.01 ||
+      (metadata.hasAudio && (!outputMetadata.hasAudio || outputMetadata.audioCodec !== 'aac'))
+    )
+      throw new ProcessingError('playback_output_format_invalid');
+
+    if (job.durationLimitSeconds && outputMetadata.durationSeconds > job.durationLimitSeconds + 0.2)
+      throw new ProcessingError('playback_teaser_duration_exceeded');
+    if (
+      Math.abs(
+        outputMetadata.durationSeconds -
+          Math.min(metadata.durationSeconds, job.durationLimitSeconds ?? Infinity),
+      ) >
+      Math.max(1, Math.min(metadata.durationSeconds, job.durationLimitSeconds ?? Infinity) * 0.01)
     ) {
       throw new ProcessingError('playback_output_incomplete');
     }
     phase('upload');
     const output = await upload(file, job.output, 'playback', 'video/mp4', signal);
+    phase('thumbnails');
+    const thumbnails = await extractPlaybackThumbnails(
+      source,
+      dir,
+      metadata,
+      job.thumbnails,
+      signal,
+    );
     phase('done');
-    return { jobId: job.jobId, output, metadata: outputMetadata, elapsedMs: Date.now() - started };
+    return {
+      jobId: job.jobId,
+      output,
+      metadata: outputMetadata,
+      sourceMetadata: metadata,
+      thumbnails,
+      elapsedMs: Date.now() - started,
+    };
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+async function extractPlaybackThumbnails(source, dir, metadata, targets, signal) {
+  const thumbnails = [];
+  const seen = new Set();
+  for (const entry of targets) {
+    const timestampSeconds = Math.min(
+      entry.timestampSeconds,
+      Math.max(0, metadata.durationSeconds - 0.1),
+    );
+    const position = Math.round(timestampSeconds * 1000);
+    if (seen.has(position)) continue;
+    seen.add(position);
+    const frame = join(dir, `frame-${position}.jpg`);
+    let actualTimestamp = timestampSeconds;
+    try {
+      await thumbnail(source, frame, signal, timestampSeconds, metadata);
+    } catch (error) {
+      if (error.code !== 'native_frame_unavailable') throw error;
+      if (thumbnails.length || timestampSeconds === 0) continue;
+      await thumbnail(source, frame, signal, 0, metadata);
+      actualTimestamp = 0;
+      seen.add(0);
+    }
+    thumbnails.push({
+      ...(await upload(frame, entry.output, 'frame', 'image/jpeg', signal)),
+      timestampSeconds: actualTimestamp,
+    });
+    await rm(frame);
+  }
+  return thumbnails;
+}
+export async function thumbnailVideoJob(rawJob, callerSignal) {
+  const job = validateVideoJob(rawJob);
+  const targets = validateThumbnailTargets(rawJob.thumbnails);
+  if (!targets.length) throw new ProcessingError('invalid_preview_thumbnails', 400);
+  const started = Date.now();
+  const timeout = AbortSignal.timeout(JOB_TIMEOUT_MS);
+  const signal = callerSignal ? AbortSignal.any([timeout, callerSignal]) : timeout;
+  const dir = await mkdtemp(join(tmpdir(), 'papra-thumbnails-'));
+  try {
+    const sourceMetadata = checkedVideoMetadata(await probeMedia(job.source.url, signal));
+    const thumbnails = await extractPlaybackThumbnails(
+      job.source.url,
+      dir,
+      sourceMetadata,
+      targets,
+      signal,
+    );
+    return { jobId: job.jobId, sourceMetadata, thumbnails, elapsedMs: Date.now() - started };
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -634,7 +814,9 @@ export function createNativeServer({ convert = convertVideoJob, heartbeatMs = 15
     }
     if (
       request.method !== 'POST' ||
-      !['/process', '/hash', '/video/probe', '/video/convert'].includes(request.url)
+      !['/process', '/hash', '/video/probe', '/video/convert', '/video/thumbnails'].includes(
+        request.url,
+      )
     ) {
       response.writeHead(404);
       response.end(JSON.stringify({ error: 'not_found' }));
@@ -666,10 +848,13 @@ export function createNativeServer({ convert = convertVideoJob, heartbeatMs = 15
       } catch {
         throw new ProcessingError('invalid_json', 400);
       }
-      if (request.url === '/video/convert') {
-        validateVideoJob(job, true);
+      if (['/video/convert', '/video/thumbnails'].includes(request.url)) {
+        if (request.url === '/video/convert') validateVideoJob(job, true);
+        else validateVideoJob(job);
+        if (request.url === '/video/convert')
+          response.setHeader('content-type', 'application/x-ndjson');
         // Flush bytes during encoding so proxies do not expire a silent long-running response.
-        // Whitespace remains valid before the final JSON result consumed by response.json().
+        // Blank heartbeat lines are ignored by the conversion NDJSON reader.
         response.writeHead(200);
         response.write('\n');
         heartbeat = setInterval(() => {
@@ -682,8 +867,13 @@ export function createNativeServer({ convert = convertVideoJob, heartbeatMs = 15
         '/process': processJob,
         '/video/probe': probeVideoJob,
         '/video/convert': convert,
-      }[request.url](job, cancelled.signal);
-      if (!response.destroyed) response.end(JSON.stringify(result));
+        '/video/thumbnails': thumbnailVideoJob,
+      }[request.url](job, cancelled.signal, (progress) => {
+        if (request.url === '/video/convert' && !response.destroyed)
+          response.write(JSON.stringify({ progress }) + '\n');
+      });
+      if (!response.destroyed)
+        response.end(JSON.stringify(request.url === '/video/convert' ? { result } : result) + '\n');
     } catch (error) {
       if (!response.destroyed) {
         const status = error instanceof ProcessingError ? error.status : 500;

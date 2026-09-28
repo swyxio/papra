@@ -1,6 +1,8 @@
 import type {
   MediaPlayback,
   MediaQuality,
+  PreviewProfile,
+  PreviewRequest,
 } from '@/modules/documents/components/document-media-preview.component';
 import type { PublicSharedDocument, ShareLink } from './document-share-links.types';
 import { buildTimeConfig } from '@/modules/config/config';
@@ -248,7 +250,7 @@ export async function prepareSharedMedia({
 }: {
   token: string;
   accessToken?: string;
-  quality: '720' | '1080';
+  quality: PreviewRequest;
   retry?: boolean;
 }) {
   return httpClient({
@@ -266,7 +268,7 @@ export async function downloadSharedMedia({
 }: {
   token: string;
   accessToken?: string;
-  quality: '720' | '1080';
+  quality: PreviewProfile;
 }) {
   return httpClient<{ url: string }>({
     method: 'GET',

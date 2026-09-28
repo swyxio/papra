@@ -46,7 +46,7 @@ ImageProcessorContainer.outboundByHost = {
       }
       const match = key.match(/^derived\/([^/]+)\/g(\d+)\//);
       const video = key.match(
-        /^derived\/([^/]+)\/playback\/(720|1080)-g(\d+)-([a-f0-9-]{36})\.mp4$/,
+        /^derived\/([^/]+)\/playback\/(720|1080|720-full-v2|720-teaser-v2|1080-full-v2|thumbnails-v2)-g(\d+)-([a-f0-9-]{36})(?:\.mp4|-thumb-[0-5]\.jpg)$/,
       );
       if (!match && !video) return new Response('Job capability required', { status: 403 });
       versionId = match?.[1] ?? video![1];

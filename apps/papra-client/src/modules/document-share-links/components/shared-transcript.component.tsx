@@ -1,20 +1,21 @@
+import {
+  mediaTimestamp as timestamp,
+  needsFullPlayback,
+} from '@/modules/documents/components/media-playback.policy';
+import type { TeaserPlayback } from '@/modules/documents/components/document-media-preview.component';
 import type { SharedTranscript } from '../document-share-links.services';
 import { For, Show, createSignal } from 'solid-js';
 import { Button } from '@/modules/ui/components/button';
 import { createToast } from '@/modules/ui/components/sonner';
 
-function timestamp(seconds: number) {
-  const whole = Math.floor(seconds);
-  const minutes = Math.floor(whole / 60) % 60;
-  const hours = Math.floor(whole / 3600);
-  return `${hours ? `${hours}:` : ''}${hours ? String(minutes).padStart(2, '0') : Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`;
-}
 export function SharedTranscriptPanel(props: {
   transcript: SharedTranscript;
   name: string;
   onSeek?: (seconds: number) => void;
+  teaser?: TeaserPlayback;
   class?: string;
 }) {
+  const [outsideTeaser, setOutsideTeaser] = createSignal<number>();
   const [copied, setCopied] = createSignal(false);
   const copy = async () => {
     try {
@@ -55,6 +56,24 @@ export function SharedTranscriptPanel(props: {
           </div>
         </Show>
       </div>
+      <Show when={props.teaser && outsideTeaser() !== undefined}>
+        <div role="status" class="rounded-lg border p-4 text-sm space-y-3">
+          <p>
+            {timestamp(outsideTeaser()!)} is beyond the 1-minute preview. Full playback is needed to
+            hear this part.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              props.teaser?.requestFull(outsideTeaser()!);
+              setOutsideTeaser(undefined);
+            }}
+          >
+            Open or generate full preview
+          </Button>
+        </div>
+      </Show>
       <Show
         when={props.transcript.text}
         fallback={<p class="text-sm text-muted-foreground">No speech was detected.</p>}
@@ -67,8 +86,15 @@ export function SharedTranscriptPanel(props: {
                   <button
                     type="button"
                     class="shrink-0 text-sm tabular-nums text-primary underline underline-offset-4 py-1"
-                    aria-label={`Seek to ${timestamp(segment.startSeconds!)}`}
-                    onClick={() => props.onSeek?.(segment.startSeconds!)}
+                    aria-label={`${needsFullPlayback(segment.startSeconds!, props.teaser?.endSeconds) ? 'Full playback needed at' : 'Seek to'} ${timestamp(segment.startSeconds!)}`}
+                    onClick={() => {
+                      if (needsFullPlayback(segment.startSeconds!, props.teaser?.endSeconds)) {
+                        setOutsideTeaser(segment.startSeconds!);
+                      } else {
+                        setOutsideTeaser(undefined);
+                        props.onSeek?.(segment.startSeconds!);
+                      }
+                    }}
                   >
                     {timestamp(segment.startSeconds!)}
                   </button>

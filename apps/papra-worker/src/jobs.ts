@@ -5,7 +5,13 @@ import type { Env } from './types';
 import { all, first, run, id } from './db';
 import { s3 } from './storage';
 import type { NativeJob, NativeOutput, NativeResult } from '../native/protocol';
-import { recordVideoMetadata, runVideoJob, recoverVideoCompute, VideoPausedError } from './video';
+import {
+  recordVideoMetadata,
+  recordVideoProgress,
+  runVideoJob,
+  recoverVideoCompute,
+  VideoPausedError,
+} from './video';
 
 type Job = {
   id: string;
@@ -297,9 +303,51 @@ async function callNative<T>(
         response.status >= 400 && response.status < 500,
       );
     }
-    const result = await response.json<T>().catch(() => {
+    let result: T;
+    try {
+      if (response.headers.get('content-type')?.includes('application/x-ndjson') && response.body) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let terminal: unknown;
+        let previousPhase = '';
+        let lastProgress = 0;
+        for (;;) {
+          const chunk = await reader.read();
+          buffer += decoder.decode(chunk.value, { stream: !chunk.done });
+          if (buffer.length > 512_000) throw new JobError('native_response_too_large');
+          let newline: number;
+          while ((newline = buffer.indexOf('\n')) >= 0) {
+            const line = buffer.slice(0, newline).trim();
+            buffer = buffer.slice(newline + 1);
+            if (!line) continue;
+            const event = JSON.parse(line) as {
+              progress?: { phase?: unknown; percent?: unknown };
+              result?: unknown;
+              error?: unknown;
+              status?: unknown;
+            };
+            if (
+              event.progress &&
+              (event.progress.phase !== previousPhase || Date.now() - lastProgress >= 5_000)
+            ) {
+              await recordVideoProgress(env, j, event.progress);
+              previousPhase = String(event.progress.phase);
+              lastProgress = Date.now();
+            }
+            if (event.result !== undefined) terminal = event.result;
+            else if (event.error !== undefined) terminal = event;
+          }
+          if (chunk.done) break;
+        }
+        if (buffer.trim() || terminal === undefined)
+          throw new JobError('native_response_interrupted');
+        result = terminal as T;
+      } else result = await response.json<T>();
+    } catch (error) {
+      if (error instanceof JobError) throw error;
       throw new JobError('native_response_interrupted');
-    });
+    }
     // Long conversions flush headers and whitespace heartbeats before completion.
     // Their terminal error therefore arrives in the JSON body, not HTTP status.
     const nativeError = result as { error?: unknown; status?: unknown };
@@ -448,7 +496,8 @@ async function processVersion(env: Env, j: Job, v: Version) {
     });
   }
   if (!(await owned(env, j))) return;
-  if (v.mime_type.startsWith('video/')) await recordVideoMetadata(env, v.id, m.result.metadata);
+  if (v.mime_type.startsWith('video/'))
+    await recordVideoMetadata(env, v.id, m.result.metadata, m.result.outputs);
   if (!(await backupManifest(env, j, v, m))) return;
   const preview = m.result.outputs.find((x) => x.kind === 'preview'),
     text = m.result.text.slice(0, MAX_TEXT);

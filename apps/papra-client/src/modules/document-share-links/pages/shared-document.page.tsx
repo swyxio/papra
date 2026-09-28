@@ -1,3 +1,4 @@
+import type { TeaserPlayback } from '@/modules/documents/components/document-media-preview.component';
 import { MediaPlaybackPlayer } from '@/modules/documents/components/document-media-preview.component';
 import { PublicHeader } from '@/modules/ui/layouts/public.layout';
 import { SharedTranscriptPanel } from '../components/shared-transcript.component';
@@ -112,6 +113,7 @@ const SharedDocumentCard: Component<{
 
   const isMedia = () => /^(audio|video)\//.test(props.document.mimeType);
   const [seek, setSeek] = createSignal<(seconds: number) => void>();
+  const [teaser, setTeaser] = createSignal<TeaserPlayback>();
   const transcriptQuery = useQuery(() => ({
     queryKey: ['share-link', props.token, 'transcript', props.accessToken],
     queryFn: async () =>
@@ -248,6 +250,7 @@ const SharedDocumentCard: Component<{
                 downloadSharedMedia({ token: props.token, accessToken: props.accessToken, quality })
               }
               onSeekAvailable={(callback) => setSeek(() => callback)}
+              onTeaserChange={setTeaser}
             />
           </div>
         </Show>
@@ -288,6 +291,7 @@ const SharedDocumentCard: Component<{
               transcript={transcript()}
               name={props.document.name}
               onSeek={seek()}
+              teaser={teaser()}
             />
           )}
         </Show>

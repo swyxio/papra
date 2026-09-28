@@ -54,6 +54,10 @@ CREATE TABLE IF NOT EXISTS google_document_exports ( version_id TEXT PRIMARY KEY
 CREATE INDEX IF NOT EXISTS google_document_exports_document ON google_document_exports(document_id,converted_at);
 CREATE TABLE upload_shares(upload_id TEXT PRIMARY KEY REFERENCES uploads(id) ON DELETE CASCADE,token TEXT UNIQUE NOT NULL,bytes INTEGER NOT NULL DEFAULT 0,updated_at INTEGER NOT NULL,interrupted INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE video_metadata(version_id TEXT PRIMARY KEY REFERENCES versions(id) ON DELETE CASCADE,metadata_json TEXT NOT NULL,created_at INTEGER NOT NULL);
-CREATE TABLE video_previews(version_id TEXT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,quality TEXT NOT NULL CHECK(quality IN ('720','1080')),storage_key TEXT NOT NULL,size INTEGER NOT NULL,sha256 TEXT NOT NULL,created_at INTEGER NOT NULL,PRIMARY KEY(version_id,quality));
+CREATE TABLE video_previews(version_id TEXT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,quality TEXT NOT NULL,storage_key TEXT NOT NULL,size INTEGER NOT NULL,sha256 TEXT NOT NULL,created_at INTEGER NOT NULL,metadata_json TEXT NOT NULL DEFAULT '{}',scope TEXT NOT NULL DEFAULT 'full',PRIMARY KEY(version_id,quality));
 CREATE TABLE video_compute_usage(month TEXT PRIMARY KEY,reserved_microusd INTEGER NOT NULL DEFAULT 0,spent_microusd INTEGER NOT NULL DEFAULT 0);
-CREATE TABLE video_compute_attempts(lease_token TEXT PRIMARY KEY,job_id TEXT NOT NULL,month TEXT NOT NULL,reserved_microusd INTEGER NOT NULL,charged_microusd INTEGER,elapsed_ms INTEGER,output_size INTEGER,created_at INTEGER NOT NULL,completed_at INTEGER);
+CREATE TABLE video_compute_attempts(lease_token TEXT PRIMARY KEY,job_id TEXT NOT NULL,month TEXT NOT NULL,reserved_microusd INTEGER NOT NULL,charged_microusd INTEGER,elapsed_ms INTEGER,output_size INTEGER,created_at INTEGER NOT NULL,completed_at INTEGER,automatic INTEGER NOT NULL DEFAULT 1);
+
+CREATE TABLE video_thumbnails(version_id TEXT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,profile TEXT NOT NULL,timestamp_seconds REAL NOT NULL,storage_key TEXT NOT NULL,size INTEGER NOT NULL,sha256 TEXT NOT NULL,cover INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(version_id,profile,timestamp_seconds));
+
+CREATE TABLE video_preview_progress(job_id TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,generation INTEGER NOT NULL,phase TEXT NOT NULL,percent REAL,updated_at INTEGER NOT NULL);
