@@ -23,7 +23,10 @@ The consumer transcribes these chunks and adds each chunk's start time to word
 or segment timestamps. Frame receipts contain source timestamps for vision and
 search provenance. No model calls run in the image.
 
-A job has a 12 minute deadline and one active job per container instance. Tool
+A job has a 12 minute deadline and one active job per container instance.
+The caller deadline is 13 minutes and destroys the per-job instance in finally;
+the fallback idle window is 15 minutes so an idle alarm cannot interrupt a
+long response if its Durable Object request state is lost. Tool
 failure or bounds violations produce stable errors; originals remain available
 when processing cannot finish within these limits. Temporary files are removed
 on success and failure. Presign URLs for at least 15 minutes, with a bounded

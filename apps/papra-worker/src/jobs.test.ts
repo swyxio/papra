@@ -331,6 +331,62 @@ test('a streamed native failure preserves its terminal status after HTTP headers
   expect(destroy).toHaveBeenCalledOnce();
 });
 
+test('native streaming is kept alive until its response settles, then cleaned up', async () => {
+  const { env, DB } = await fixture();
+  Object.assign(env, {
+    R2_ACCESS_KEY_ID: 'test',
+    R2_SECRET_ACCESS_KEY: 'test',
+    R2_ENDPOINT: 'https://example.r2.cloudflarestorage.com',
+    R2_BUCKET: 'papra-drive',
+  });
+  let tick!: () => void;
+  let finish!: () => void;
+  let started!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const clear = vi.spyOn(globalThis, 'clearInterval');
+  vi.spyOn(globalThis, 'setInterval').mockImplementation(((callback: () => void) => {
+    tick = callback;
+    return 123;
+  }) as never);
+  const destroy = vi.fn(async () => {});
+  const fetch = vi.fn(async (request: Request) => {
+    if (new URL(request.url).pathname === '/ping') return new Response('ok');
+    return new Response(
+      new ReadableStream({
+        start(controller) {
+          finish = () => {
+            controller.enqueue(
+              new TextEncoder().encode(
+                JSON.stringify({ error: 'invalid_video_source', status: 400 }),
+              ),
+            );
+            controller.close();
+          };
+          started();
+        },
+      }),
+    );
+  });
+  vi.mocked(getContainer).mockReturnValue({ fetch, destroy } as never);
+  await DB.prepare(
+    "INSERT INTO jobs(id,version_id,kind,status,created_at,updated_at) VALUES('keepalive-job','v','video:probe','pending',1,1)",
+  ).run();
+  const work = consumeJobs(batch({ jobId: 'keepalive-job', generation: 0 }), env);
+  await ready;
+  tick();
+  await Promise.resolve();
+  expect(fetch.mock.calls.some(([request]) => new URL(request.url).pathname === '/ping')).toBe(
+    true,
+  );
+  expect(destroy).not.toHaveBeenCalled();
+  finish();
+  await work;
+  expect(clear).toHaveBeenCalledWith(123);
+  expect(destroy).toHaveBeenCalledOnce();
+});
+
 test('vision jobs use Gemma multimodal messages and publish its chat completion caption', async () => {
   const { env, DB } = await fixture();
   const bytes = new Uint8Array([1, 2, 3]);

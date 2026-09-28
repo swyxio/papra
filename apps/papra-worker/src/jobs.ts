@@ -251,6 +251,26 @@ async function callNative<T>(
   payload: unknown,
 ): Promise<T> {
   const container = getContainer(env.PROCESSOR, `${j.id}-${j.generation}`);
+  const keepAliveAbort = new AbortController();
+  let pendingPing: Promise<void> | undefined;
+  // Streaming fetch responses do not keep a Durable Object resident. Incoming
+  // requests do, so ping while native work owns the response body.
+  const keepAlive = setInterval(() => {
+    if (pendingPing) return;
+    pendingPing = container
+      .fetch(
+        new Request('http://processor/ping', {
+          signal: AbortSignal.any([keepAliveAbort.signal, AbortSignal.timeout(10_000)]),
+        }),
+      )
+      .then(async (response) => {
+        await response.body?.cancel();
+      })
+      .catch(() => {})
+      .finally(() => {
+        pendingPing = undefined;
+      });
+  }, 30_000);
   try {
     const response = await container.fetch(
       new Request(`http://processor${path}`, {
@@ -277,7 +297,9 @@ async function callNative<T>(
         response.status >= 400 && response.status < 500,
       );
     }
-    const result = await response.json<T>();
+    const result = await response.json<T>().catch(() => {
+      throw new JobError('native_response_interrupted');
+    });
     // Long conversions flush headers and whitespace heartbeats before completion.
     // Their terminal error therefore arrives in the JSON body, not HTTP status.
     const nativeError = result as { error?: unknown; status?: unknown };
@@ -290,6 +312,9 @@ async function callNative<T>(
       );
     return result;
   } finally {
+    clearInterval(keepAlive);
+    keepAliveAbort.abort();
+    await pendingPing;
     await container.destroy().catch(() => {});
   }
 }

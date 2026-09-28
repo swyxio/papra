@@ -8,7 +8,10 @@ const R2_HOST = '2d017c943ff16e4c52783635ef05e535.r2.cloudflarestorage.com';
 /** Bind PROCESSOR to this class; only the queue consumer calls its /process endpoint. */
 export class ImageProcessorContainer extends Container<Env> {
   defaultPort = 8080;
-  sleepAfter = '1m';
+  // A streamed response can outlive the Durable Object's in-memory request state.
+  // Keep its fallback idle window beyond native (12m) and caller (13m) deadlines;
+  // the caller still destroys each per-job container immediately in finally.
+  sleepAfter = '15m';
   enableInternet = false;
   interceptHttps = true;
   allowedHosts = [R2_HOST];
