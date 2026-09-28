@@ -57,6 +57,53 @@ test('only the active processing Container may forward derived PUT capabilities'
   expect(f.forward).toHaveBeenCalledOnce();
   expect(f.remove).not.toHaveBeenCalled();
 });
+test('video preview writes require the exact quality, generation, lease and container', async () => {
+  const f = await fixture();
+  const lease = 'f15f7200-0000-4000-8000-000000000000';
+  await f.DB.prepare("UPDATE jobs SET kind='video:720',generation=3,lease_token=? WHERE id='j'")
+    .bind(lease)
+    .run();
+  const key = `derived/v/playback/720-g3-${lease}.mp4`;
+  const request = (path = key) =>
+    new Request(
+      `https://2d017c943ff16e4c52783635ef05e535.r2.cloudflarestorage.com/papra-drive/${path}?X-Amz-Signature=synthetic`,
+      { method: 'PUT', body: 'synthetic' },
+    );
+  expect((await f.handler(request(), f.env, { ...f.context, containerId: 'j-3' })).status).toBe(
+    200,
+  );
+  expect(
+    (
+      await f.handler(request(key.replace('720-', '1080-')), f.env, {
+        ...f.context,
+        containerId: 'j-3',
+      })
+    ).status,
+  ).toBe(403);
+  expect((await f.handler(request(), f.env, f.context)).status).toBe(403);
+  await f.DB.prepare("UPDATE jobs SET lease_token='new-lease' WHERE id='j'").run();
+  expect((await f.handler(request(), f.env, { ...f.context, containerId: 'j-3' })).status).toBe(
+    403,
+  );
+});
+test('a video lease revoked during PUT deletes only its late preview', async () => {
+  const f = await fixture();
+  const lease = 'f15f7200-0000-4000-8000-000000000000';
+  const key = `derived/v/playback/720-g0-${lease}.mp4`;
+  await f.DB.prepare("UPDATE jobs SET kind='video:720',lease_token=? WHERE id='j'")
+    .bind(lease)
+    .run();
+  f.forward.mockImplementation(async () => {
+    await f.DB.prepare("UPDATE documents SET is_deleted=1 WHERE id='d'").run();
+    return new Response('', { status: 200 });
+  });
+  const request = new Request(
+    `https://2d017c943ff16e4c52783635ef05e535.r2.cloudflarestorage.com/papra-drive/${key}?X-Amz-Signature=synthetic`,
+    { method: 'PUT', body: 'synthetic' },
+  );
+  expect((await f.handler(request, f.env, f.context)).status).toBe(403);
+  expect(f.remove).toHaveBeenCalledExactlyOnceWith(key);
+});
 test('purging revokes stale presigned derived writes before R2 forwarding', async () => {
   const f = await fixture();
   await f.DB.prepare("UPDATE documents SET is_deleted=2 WHERE id='d'").run();

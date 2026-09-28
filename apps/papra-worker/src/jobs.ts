@@ -277,7 +277,18 @@ async function callNative<T>(
         response.status >= 400 && response.status < 500,
       );
     }
-    return await response.json<T>();
+    const result = await response.json<T>();
+    // Long conversions flush headers and whitespace heartbeats before completion.
+    // Their terminal error therefore arrives in the JSON body, not HTTP status.
+    const nativeError = result as { error?: unknown; status?: unknown };
+    if (typeof nativeError?.error === 'string' && /^[a-z_]{1,80}$/.test(nativeError.error))
+      throw new JobError(
+        nativeError.error,
+        typeof nativeError.status === 'number' &&
+          nativeError.status >= 400 &&
+          nativeError.status < 500,
+      );
+    return result;
   } finally {
     await container.destroy().catch(() => {});
   }

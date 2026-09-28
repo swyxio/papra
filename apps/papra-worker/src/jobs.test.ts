@@ -304,6 +304,33 @@ test.each([
   },
 );
 
+test('a streamed native failure preserves its terminal status after HTTP headers', async () => {
+  const { env, DB } = await fixture();
+  Object.assign(env, {
+    R2_ACCESS_KEY_ID: 'test',
+    R2_SECRET_ACCESS_KEY: 'test',
+    R2_ENDPOINT: 'https://example.r2.cloudflarestorage.com',
+    R2_BUCKET: 'papra-drive',
+  });
+  const destroy = vi.fn(async () => {});
+  vi.mocked(getContainer).mockReturnValue({
+    fetch: async () =>
+      new Response('\n\n' + JSON.stringify({ error: 'invalid_video_source', status: 400 }), {
+        status: 200,
+      }),
+    destroy,
+  } as never);
+  await DB.prepare(
+    "INSERT INTO jobs(id,version_id,kind,status,created_at,updated_at) VALUES('native-job','v','video:probe','pending',1,1)",
+  ).run();
+  await consumeJobs(batch({ jobId: 'native-job', generation: 0 }), env);
+  expect(await DB.prepare("SELECT status,error FROM jobs WHERE id='native-job'").first()).toEqual({
+    status: 'failed',
+    error: 'invalid_video_source',
+  });
+  expect(destroy).toHaveBeenCalledOnce();
+});
+
 test('vision jobs use Gemma multimodal messages and publish its chat completion caption', async () => {
   const { env, DB } = await fixture();
   const bytes = new Uint8Array([1, 2, 3]);

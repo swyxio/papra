@@ -553,10 +553,11 @@ export async function encodePlayback(source, destination, metadata, height, sign
     signal,
   );
 }
-export async function convertVideoJob(rawJob) {
+export async function convertVideoJob(rawJob, callerSignal) {
   const job = validateVideoJob(rawJob, true);
   const started = Date.now();
-  const signal = AbortSignal.timeout(JOB_TIMEOUT_MS);
+  const timeout = AbortSignal.timeout(JOB_TIMEOUT_MS);
+  const signal = callerSignal ? AbortSignal.any([timeout, callerSignal]) : timeout;
   const dir = await mkdtemp(join(tmpdir(), 'papra-playback-'));
   try {
     const metadata = checkedVideoMetadata(await probeMedia(job.source.url, signal));
@@ -599,63 +600,86 @@ export async function hashObject(job) {
   if (received !== job.source.byteSize) throw new ProcessingError('source_size_mismatch');
   return { jobId: job.jobId, byteSize: received, sha256: hash.digest('hex') };
 }
-let busy = false;
-export const server = createServer(async (request, response) => {
-  response.setHeader('content-type', 'application/json');
-  response.setHeader('cache-control', 'no-store');
-  if (request.method === 'GET' && ['/health', '/ping', '/'].includes(request.url)) {
-    response.end(JSON.stringify({ ok: true, protocol: 1 }));
-    return;
-  }
-  if (
-    request.method !== 'POST' ||
-    !['/process', '/hash', '/video/probe', '/video/convert'].includes(request.url)
-  ) {
-    response.writeHead(404);
-    response.end(JSON.stringify({ error: 'not_found' }));
-    return;
-  }
-  if (busy) {
-    response.writeHead(429);
-    response.end(JSON.stringify({ error: 'processor_busy' }));
-    return;
-  }
-  busy = true;
-  try {
-    let body = '';
-    let bytes = 0;
-    for await (const chunk of request) {
-      bytes += chunk.length;
-      if (bytes > 1024 ** 2) throw new ProcessingError('job_body_too_large', 413);
-      body += chunk;
+export function createNativeServer({ convert = convertVideoJob, heartbeatMs = 15_000 } = {}) {
+  let busy = false;
+  return createServer(async (request, response) => {
+    response.setHeader('content-type', 'application/json');
+    response.setHeader('cache-control', 'no-store');
+    if (request.method === 'GET' && ['/health', '/ping', '/'].includes(request.url)) {
+      response.end(JSON.stringify({ ok: true, protocol: 1 }));
+      return;
     }
-    let job;
+    if (
+      request.method !== 'POST' ||
+      !['/process', '/hash', '/video/probe', '/video/convert'].includes(request.url)
+    ) {
+      response.writeHead(404);
+      response.end(JSON.stringify({ error: 'not_found' }));
+      return;
+    }
+    if (busy) {
+      response.writeHead(429);
+      response.end(JSON.stringify({ error: 'processor_busy' }));
+      return;
+    }
+    busy = true;
+    let heartbeat;
+    const cancelled = new AbortController();
+    const onClose = () => {
+      if (!response.writableFinished) cancelled.abort();
+    };
+    response.on('close', onClose);
     try {
-      job = JSON.parse(body);
-    } catch {
-      throw new ProcessingError('invalid_json', 400);
+      let body = '';
+      let bytes = 0;
+      for await (const chunk of request) {
+        bytes += chunk.length;
+        if (bytes > 1024 ** 2) throw new ProcessingError('job_body_too_large', 413);
+        body += chunk;
+      }
+      let job;
+      try {
+        job = JSON.parse(body);
+      } catch {
+        throw new ProcessingError('invalid_json', 400);
+      }
+      if (request.url === '/video/convert') {
+        validateVideoJob(job, true);
+        // Flush bytes during encoding so proxies do not expire a silent long-running response.
+        // Whitespace remains valid before the final JSON result consumed by response.json().
+        response.writeHead(200);
+        response.write('\n');
+        heartbeat = setInterval(() => {
+          if (!response.destroyed) response.write('\n');
+        }, heartbeatMs);
+        heartbeat.unref();
+      }
+      const result = await {
+        '/hash': hashObject,
+        '/process': processJob,
+        '/video/probe': probeVideoJob,
+        '/video/convert': convert,
+      }[request.url](job, cancelled.signal);
+      if (!response.destroyed) response.end(JSON.stringify(result));
+    } catch (error) {
+      if (!response.destroyed) {
+        const status = error instanceof ProcessingError ? error.status : 500;
+        if (!response.headersSent) response.writeHead(status);
+        response.end(
+          JSON.stringify({
+            error: error instanceof ProcessingError ? error.code : 'processing_failed',
+            ...(heartbeat ? { status } : {}),
+          }),
+        );
+      }
+    } finally {
+      if (heartbeat) clearInterval(heartbeat);
+      response.removeListener('close', onClose);
+      busy = false;
     }
-    response.end(
-      JSON.stringify(
-        await {
-          '/hash': hashObject,
-          '/process': processJob,
-          '/video/probe': probeVideoJob,
-          '/video/convert': convertVideoJob,
-        }[request.url](job),
-      ),
-    );
-  } catch (error) {
-    response.writeHead(error instanceof ProcessingError ? error.status : 500);
-    response.end(
-      JSON.stringify({
-        error: error instanceof ProcessingError ? error.code : 'processing_failed',
-      }),
-    );
-  } finally {
-    busy = false;
-  }
-});
+  });
+}
+export const server = createNativeServer();
 server.requestTimeout = 30_000;
 if (process.argv[1] && import.meta.url === new URL('file://' + process.argv[1]).href) {
   server.listen(Number(process.env.PORT ?? 8080), '0.0.0.0');

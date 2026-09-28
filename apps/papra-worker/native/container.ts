@@ -34,6 +34,7 @@ ImageProcessorContainer.outboundByHost = {
       return new Response('Object capability required', { status: 403 });
     }
     let key: string | undefined, versionId: string | undefined, generation: number | undefined;
+    let videoQuality: string | undefined, leaseToken: string | undefined;
     if (request.method === 'PUT') {
       try {
         key = decodeURIComponent(url.pathname.slice('/papra-drive/'.length));
@@ -41,15 +42,26 @@ ImageProcessorContainer.outboundByHost = {
         return new Response('Invalid object key', { status: 403 });
       }
       const match = key.match(/^derived\/([^/]+)\/g(\d+)\//);
-      if (!match) return new Response('Job capability required', { status: 403 });
-      versionId = match[1];
-      generation = Number(match[2]);
+      const video = key.match(
+        /^derived\/([^/]+)\/playback\/(720|1080)-g(\d+)-([a-f0-9-]{36})\.mp4$/,
+      );
+      if (!match && !video) return new Response('Job capability required', { status: 403 });
+      versionId = match?.[1] ?? video![1];
+      generation = Number(match?.[2] ?? video![3]);
+      videoQuality = video?.[2];
+      leaseToken = video?.[4];
     }
     const active = async () => {
       const job = await env.DB.prepare(
-        "SELECT j.id FROM jobs j JOIN versions v ON v.id=j.version_id JOIN documents d ON d.id=v.document_id WHERE v.id=? AND d.is_deleted<>2 AND j.kind='process' AND j.generation=? AND j.status='processing' AND j.lease_token IS NOT NULL",
+        videoQuality
+          ? "SELECT j.id FROM jobs j JOIN versions v ON v.id=j.version_id JOIN documents d ON d.id=v.document_id WHERE v.id=? AND d.is_deleted=0 AND j.kind=? AND j.generation=? AND j.status='processing' AND j.lease_token=?"
+          : "SELECT j.id FROM jobs j JOIN versions v ON v.id=j.version_id JOIN documents d ON d.id=v.document_id WHERE v.id=? AND d.is_deleted<>2 AND j.kind='process' AND j.generation=? AND j.status='processing' AND j.lease_token IS NOT NULL",
       )
-        .bind(versionId, generation)
+        .bind(
+          ...(videoQuality
+            ? [versionId, `video:${videoQuality}`, generation, leaseToken]
+            : [versionId, generation]),
+        )
         .first<{ id: string }>();
       return (
         !!job && env.PROCESSOR.idFromName(`${job.id}-${generation}`).toString() === ctx.containerId
