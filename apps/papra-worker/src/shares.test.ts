@@ -614,8 +614,20 @@ test('shared transcript requires existing delegation and returns only current-ge
   expect(mediaUrl.searchParams.get('response-content-type')).toBe('video/mp4');
   expect(mediaUrl.searchParams.get('response-content-disposition')).toBe('inline');
   expect(mediaUrl.searchParams.get('X-Amz-SignedHeaders')).toBe('host');
+  const playbackPath = `/api/share-links/${share.token}/document/media`;
+  expect((await request(playbackPath)).status).toBe(401);
+  expect((await request(`${playbackPath}/preview`, 'POST', { quality: '720' })).status).toBe(401);
+  expect((await request(`${playbackPath}/download?quality=720`)).status).toBe(401);
+  const playback = await request(playbackPath, 'GET', undefined, 'owner', accessToken);
+  expect(playback.status).toBe(200);
+  expect(((await playback.json()) as any).preview.status).toBe('needs_preview');
   await request(`/api/organizations/team/share-links/${share.id}`, 'PATCH', { isEnabled: false });
   expect((await request(path, 'GET', undefined, 'owner', accessToken)).status).toBe(410);
+  expect((await request(playbackPath, 'GET', undefined, 'owner', accessToken)).status).toBe(410);
+  expect(
+    (await request(`${playbackPath}/preview`, 'POST', { quality: '720' }, 'owner', accessToken))
+      .status,
+  ).toBe(410);
 });
 test('transcript preserves full text from truncated legacy segments and retries missing result objects', async () => {
   const { DB, env, request, create } = await fixture();

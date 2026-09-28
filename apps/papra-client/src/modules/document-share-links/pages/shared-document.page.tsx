@@ -1,3 +1,4 @@
+import { MediaPlaybackPlayer } from '@/modules/documents/components/document-media-preview.component';
 import { PublicHeader } from '@/modules/ui/layouts/public.layout';
 import { SharedTranscriptPanel } from '../components/shared-transcript.component';
 import type { PublicSharedDocument } from '../document-share-links.types';
@@ -29,6 +30,9 @@ import { createToast } from '@/modules/ui/components/sonner';
 import { TextField, TextFieldLabel, TextFieldRoot } from '@/modules/ui/components/textfield';
 import { LanguageSwitcher } from '@/modules/ui/layouts/sidenav.layout';
 import {
+  fetchSharedMedia,
+  prepareSharedMedia,
+  downloadSharedMedia,
   fetchSharedTranscript,
   fetchSharedDocument,
   fetchSharedDocumentDirect,
@@ -107,21 +111,7 @@ const SharedDocumentCard: Component<{
   const { t } = useI18n();
 
   const isMedia = () => /^(audio|video)\//.test(props.document.mimeType);
-  let player: HTMLMediaElement | undefined;
-  let resumeAt = 0;
-  const [mediaError, setMediaError] = createSignal(false);
-  const mediaQuery = useQuery(() => ({
-    queryKey: ['share-link', props.token, 'media', props.accessToken],
-    queryFn: async () =>
-      fetchSharedDocumentDirect({
-        token: props.token,
-        accessToken: props.accessToken,
-        mode: 'media',
-      }),
-    enabled: !props.document.upload && isMedia(),
-    retry: false,
-    refetchOnWindowFocus: false,
-  }));
+  const [seek, setSeek] = createSignal<(seconds: number) => void>();
   const transcriptQuery = useQuery(() => ({
     queryKey: ['share-link', props.token, 'transcript', props.accessToken],
     queryFn: async () =>
@@ -130,20 +120,6 @@ const SharedDocumentCard: Component<{
     retry: 1,
     refetchOnWindowFocus: false,
   }));
-  const seek = (seconds: number) => {
-    if (player) {
-      player.currentTime = seconds;
-      player.focus();
-    }
-  };
-  const loaded = () => {
-    setMediaError(false);
-    if (player && resumeAt) player.currentTime = resumeAt;
-  };
-  const failed = () => {
-    resumeAt = player?.currentTime ?? 0;
-    setMediaError(true);
-  };
   const downloadMutation = useMutation(() => ({
     mutationFn: async () =>
       fetchSharedDocumentDirect({
@@ -252,40 +228,28 @@ const SharedDocumentCard: Component<{
         )}
       </Show>
       <div class="p-6 flex justify-center max-w-5xl mx-auto w-full">
-        <Show when={mediaQuery.data?.url}>
-          {(url) => (
-            <Show
-              when={props.document.mimeType.startsWith('video/')}
-              fallback={
-                <audio
-                  ref={(element) => {
-                    player = element;
-                  }}
-                  controls
-                  preload="metadata"
-                  src={url()}
-                  aria-label="Audio player"
-                  class="w-full"
-                  onLoadedMetadata={loaded}
-                  onError={failed}
-                />
+        <Show when={!props.document.upload && isMedia()}>
+          <div class="w-full">
+            <MediaPlaybackPlayer
+              identity={`share:${props.token}:${props.accessToken ?? ''}`}
+              isVideo={props.document.mimeType.startsWith('video/')}
+              fetchMedia={async (quality) =>
+                fetchSharedMedia({ token: props.token, accessToken: props.accessToken, quality })
               }
-            >
-              <video
-                ref={(element) => {
-                  player = element;
-                }}
-                controls
-                playsinline
-                preload="metadata"
-                src={url()}
-                aria-label="Video player"
-                class="w-full max-h-75vh bg-black rounded-md"
-                onLoadedMetadata={loaded}
-                onError={failed}
-              />
-            </Show>
-          )}
+              prepare={async (quality, retry) =>
+                prepareSharedMedia({
+                  token: props.token,
+                  accessToken: props.accessToken,
+                  quality,
+                  retry,
+                })
+              }
+              download={async (quality) =>
+                downloadSharedMedia({ token: props.token, accessToken: props.accessToken, quality })
+              }
+              onSeekAvailable={(callback) => setSeek(() => callback)}
+            />
+          </div>
         </Show>
         <Show when={derivativeQuery.data?.url}>
           {(url) => <img src={url()} alt="File preview" class="max-w-full" />}
@@ -298,14 +262,6 @@ const SharedDocumentCard: Component<{
           )}
         </Show>
       </div>
-      <Show when={mediaError() || mediaQuery.isError}>
-        <div class="max-w-5xl mx-auto px-6 pb-4 flex items-center gap-3 text-sm">
-          <p>Could not play this file. Reload the player or download the original.</p>
-          <Button variant="outline" size="sm" onClick={() => void mediaQuery.refetch()}>
-            Reload player
-          </Button>
-        </div>
-      </Show>
       <Show when={props.document.transcription}>
         {(state) => (
           <div class="max-w-5xl mx-auto px-6 pt-6">
@@ -331,7 +287,7 @@ const SharedDocumentCard: Component<{
             <SharedTranscriptPanel
               transcript={transcript()}
               name={props.document.name}
-              onSeek={mediaQuery.data?.url ? seek : undefined}
+              onSeek={seek()}
             />
           )}
         </Show>

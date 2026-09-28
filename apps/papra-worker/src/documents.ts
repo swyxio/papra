@@ -8,6 +8,8 @@ import {
   canWriteFolder,
 } from './collaboration';
 import { signedDownload, signedMedia, s3 } from './storage';
+import { mediaResponse, requestVideoPreview, previewDownload } from './video';
+import type { MediaDocument } from './video';
 import { enqueueVersion } from './jobs';
 import { keywordPredicate } from './keyword';
 import { fetchTranscript } from './transcripts';
@@ -242,7 +244,29 @@ export function registerDocumentRoutes(app: App) {
     if (!/^(audio|video)\//.test(doc.mime_type))
       throw error(400, 'This file is not audio or video');
     c.header('Cache-Control', 'private, no-store');
-    return c.json(await inlineFile(c.env, doc));
+    return c.json(await mediaResponse(c.env, doc as MediaDocument, c.req.query('quality')));
+  });
+  app.post(`${base}/:doc/media/preview`, async (c) => {
+    const doc = await currentFileDocument(
+      c.env,
+      c.get('identity'),
+      c.req.param('org'),
+      c.req.param('doc'),
+    );
+    const body = await c.req.json();
+    await requestVideoPreview(c.env, doc as MediaDocument, body.quality, body.retry);
+    c.header('Cache-Control', 'private, no-store');
+    return c.json(await mediaResponse(c.env, doc as MediaDocument, body.quality));
+  });
+  app.get(`${base}/:doc/media/download`, async (c) => {
+    const doc = await currentFileDocument(
+      c.env,
+      c.get('identity'),
+      c.req.param('org'),
+      c.req.param('doc'),
+    );
+    c.header('Cache-Control', 'private, no-store');
+    return c.json(await previewDownload(c.env, doc as MediaDocument, c.req.query('quality')));
   });
   app.get(`${base}/:doc/transcript`, async (c) => {
     const doc = await currentFileDocument(

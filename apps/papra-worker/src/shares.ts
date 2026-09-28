@@ -9,6 +9,8 @@ import { pendingUploadShare } from './upload-shares';
 import { fetchTranscript } from './transcripts';
 import { fetchTranscriptionStatus } from './processing';
 import { s3, signedDownload, signedMedia } from './storage';
+import { mediaResponse, requestVideoPreview, previewDownload } from './video';
+import type { MediaDocument } from './video';
 
 type ShareRow = {
   id: string;
@@ -522,5 +524,43 @@ export function registerShareRoutes(app: App) {
     );
     if (context.req.query('direct') === 'download') return context.json({ url });
     return context.redirect(url, 302);
+  });
+  const mediaBase = '/api/share-links/:token/document/media';
+  app.get(mediaBase, async (c) => {
+    const row = await authorizedPublicShare(
+      c.env,
+      c.req.param('token'),
+      c.req.header('Authorization'),
+    );
+    const doc = await getDocument(c.env, row.document_id);
+    if (!doc || doc.is_deleted) return fail(410, 'Share link unavailable');
+    if (!/^(audio|video)\//.test(doc.mime_type))
+      return fail(400, 'This file is not audio or video');
+    c.header('Cache-Control', 'private, no-store');
+    return c.json(await mediaResponse(c.env, doc as MediaDocument, c.req.query('quality')));
+  });
+  app.post(`${mediaBase}/preview`, async (c) => {
+    const row = await authorizedPublicShare(
+      c.env,
+      c.req.param('token'),
+      c.req.header('Authorization'),
+    );
+    const doc = await getDocument(c.env, row.document_id);
+    if (!doc || doc.is_deleted) return fail(410, 'Share link unavailable');
+    const body = await jsonBody(c.req.raw);
+    await requestVideoPreview(c.env, doc as MediaDocument, body.quality, body.retry);
+    c.header('Cache-Control', 'private, no-store');
+    return c.json(await mediaResponse(c.env, doc as MediaDocument, String(body.quality)));
+  });
+  app.get(`${mediaBase}/download`, async (c) => {
+    const row = await authorizedPublicShare(
+      c.env,
+      c.req.param('token'),
+      c.req.header('Authorization'),
+    );
+    const doc = await getDocument(c.env, row.document_id);
+    if (!doc || doc.is_deleted) return fail(410, 'Share link unavailable');
+    c.header('Cache-Control', 'private, no-store');
+    return c.json(await previewDownload(c.env, doc as MediaDocument, c.req.query('quality')));
   });
 }

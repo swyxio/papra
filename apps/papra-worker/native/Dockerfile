@@ -4,6 +4,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY server.mjs ./server.mjs
+COPY video-policy.mjs ./video-policy.mjs
 COPY entrypoint.sh ./entrypoint.sh
 RUN chmod 755 /app/entrypoint.sh
 ENV NODE_ENV=production PORT=8080

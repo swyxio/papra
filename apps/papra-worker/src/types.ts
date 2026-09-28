@@ -10,6 +10,7 @@ export type Env = {
   TRANSFER_JOBS: Queue;
   SEARCH_JOBS: Queue;
   TEXT_JOBS: Queue;
+  VIDEO_JOBS: Queue;
   AI: Ai;
   INDEX: VectorizeIndex;
   PROCESSOR: DurableObjectNamespace<ImageProcessorContainer>;

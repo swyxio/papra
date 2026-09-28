@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Transform, Readable } from 'node:stream';
 import { createHash } from 'node:crypto';
+import { normalizeMediaMetadata, playbackEncodingArgs, canRemuxPlayback } from './video-policy.mjs';
 
 const R2_HOST = '2d017c943ff16e4c52783635ef05e535.r2.cloudflarestorage.com';
 const HARD_MAX_BYTES = 2 * 1024 ** 3;
@@ -148,7 +149,11 @@ function httpsOptions(source) {
 }
 async function command(program, args, signal, maxOutput = MAX_TEXT_BYTES) {
   return new Promise((resolve, reject) => {
-    const child = spawn(program, args, { signal, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(program, args, {
+      signal,
+      killSignal: 'SIGKILL',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     const parts = [];
     let length = 0;
     let tooLarge = false;
@@ -353,28 +358,13 @@ export async function processJob(rawJob) {
           await upload(preview, job.outputs.preview, 'preview', 'image/jpeg', signal),
         );
     } else if (type.startsWith('audio/') || type.startsWith('video/')) {
-      const info = JSON.parse(
-        await command(
-          'ffprobe',
-          [
-            '-v',
-            'error',
-            '-show_format',
-            '-show_streams',
-            '-of',
-            'json',
-            ...httpsOptions(source),
-            source,
-          ],
-          signal,
-        ),
-      );
+      const info = await probeMedia(source, signal);
       const duration = Number(info.format?.duration);
       if (!Number.isFinite(duration) || duration <= 0 || duration > job.limits.maxDurationSeconds)
         throw new ProcessingError('media_duration_limit_exceeded');
       const hasAudio = info.streams?.some((stream) => stream.codec_type === 'audio') ?? false;
       const hasVideo = info.streams?.some((stream) => stream.codec_type === 'video') ?? false;
-      result.metadata = { durationSeconds: duration, hasAudio };
+      result.metadata = normalizeMediaMetadata(info);
       if (hasVideo && job.outputs.preview) {
         const preview = join(dir, 'preview.jpg');
         await thumbnail(source, preview, signal);
@@ -490,6 +480,101 @@ export async function processJob(rawJob) {
     await rm(dir, { recursive: true, force: true });
   }
 }
+// Helpers accept local fixtures for native tests; HTTP jobs always validate signed R2 capabilities.
+export async function probeMedia(source, signal) {
+  return JSON.parse(
+    await command(
+      'ffprobe',
+      [
+        '-v',
+        'error',
+        '-show_format',
+        '-show_streams',
+        '-of',
+        'json',
+        ...httpsOptions(source),
+        source,
+      ],
+      signal,
+    ),
+  );
+}
+export function validateVideoJob(job, convert = false) {
+  if (
+    !job ||
+    typeof job.jobId !== 'string' ||
+    !/^[a-zA-Z0-9_-]{1,128}$/.test(job.jobId) ||
+    typeof job.source?.contentType !== 'string' ||
+    !job.source.contentType.toLowerCase().startsWith('video/') ||
+    !Number.isSafeInteger(job.source.byteSize) ||
+    job.source.byteSize < 1
+  ) {
+    throw new ProcessingError('invalid_video_job', 400);
+  }
+  const source = { ...job.source, url: authorizedUrl(job.source.url) };
+  if (!convert) return { jobId: job.jobId, source };
+  if (![720, 1080].includes(job.height)) throw new ProcessingError('invalid_preview_height', 400);
+  return { jobId: job.jobId, source, output: target(job.output), height: job.height };
+}
+function checkedVideoMetadata(info) {
+  const metadata = normalizeMediaMetadata(info);
+  if (!metadata.videoCodec || !metadata.width || !metadata.height)
+    throw new ProcessingError('video_stream_unavailable');
+  if (!metadata.durationSeconds || metadata.durationSeconds > 21600)
+    throw new ProcessingError('media_duration_limit_exceeded');
+  return metadata;
+}
+export async function probeVideoJob(rawJob) {
+  const job = validateVideoJob(rawJob);
+  const info = await probeMedia(job.source.url, AbortSignal.timeout(60_000));
+  return { jobId: job.jobId, metadata: checkedVideoMetadata(info) };
+}
+export async function encodePlayback(source, destination, metadata, height, signal) {
+  await command(
+    'ffmpeg',
+    [
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-nostdin',
+      '-threads',
+      '1',
+      ...httpsOptions(source),
+      '-i',
+      source,
+      ...(canRemuxPlayback(metadata, height)
+        ? ['-map', '0:v:0', '-map', '0:a:0?', '-c', 'copy', '-movflags', '+faststart']
+        : playbackEncodingArgs(metadata, height)),
+      '-fs',
+      String(HARD_MAX_BYTES),
+      '-y',
+      destination,
+    ],
+    signal,
+  );
+}
+export async function convertVideoJob(rawJob) {
+  const job = validateVideoJob(rawJob, true);
+  const started = Date.now();
+  const signal = AbortSignal.timeout(JOB_TIMEOUT_MS);
+  const dir = await mkdtemp(join(tmpdir(), 'papra-playback-'));
+  try {
+    const metadata = checkedVideoMetadata(await probeMedia(job.source.url, signal));
+    const file = join(dir, 'playback.mp4');
+    await encodePlayback(job.source.url, file, metadata, job.height, signal);
+    const outputMetadata = checkedVideoMetadata(await probeMedia(file, signal));
+    if (
+      Math.abs(outputMetadata.durationSeconds - metadata.durationSeconds) >
+      Math.max(1, metadata.durationSeconds * 0.01)
+    ) {
+      throw new ProcessingError('playback_output_incomplete');
+    }
+    const output = await upload(file, job.output, 'playback', 'video/mp4', signal);
+    return { jobId: job.jobId, output, metadata: outputMetadata, elapsedMs: Date.now() - started };
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
 export async function hashObject(job) {
   if (
     !job ||
@@ -522,7 +607,10 @@ export const server = createServer(async (request, response) => {
     response.end(JSON.stringify({ ok: true, protocol: 1 }));
     return;
   }
-  if (request.method !== 'POST' || !['/process', '/hash'].includes(request.url)) {
+  if (
+    request.method !== 'POST' ||
+    !['/process', '/hash', '/video/probe', '/video/convert'].includes(request.url)
+  ) {
     response.writeHead(404);
     response.end(JSON.stringify({ error: 'not_found' }));
     return;
@@ -548,7 +636,14 @@ export const server = createServer(async (request, response) => {
       throw new ProcessingError('invalid_json', 400);
     }
     response.end(
-      JSON.stringify(await (request.url === '/hash' ? hashObject(job) : processJob(job))),
+      JSON.stringify(
+        await {
+          '/hash': hashObject,
+          '/process': processJob,
+          '/video/probe': probeVideoJob,
+          '/video/convert': convertVideoJob,
+        }[request.url](job),
+      ),
     );
   } catch (error) {
     response.writeHead(error instanceof ProcessingError ? error.status : 500);

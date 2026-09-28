@@ -42,12 +42,18 @@ test('output writes stay under derived/ with unique bounded targets', () => {
 test('invalid payloads return safe domain errors without echoing capability URLs', async () => {
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   try {
-    const response = await fetch(`http://127.0.0.1:${server.address().port}/process`, {
-      method: 'POST',
-      body: JSON.stringify({ signedSecret: 'must-not-echo' }),
-    });
-    assert.equal(response.status, 400);
-    assert.deepEqual(await response.json(), { error: 'invalid_job' });
+    for (const [path, code] of [
+      ['/process', 'invalid_job'],
+      ['/video/probe', 'invalid_video_job'],
+      ['/video/convert', 'invalid_video_job'],
+    ]) {
+      const response = await fetch(`http://127.0.0.1:${server.address().port}${path}`, {
+        method: 'POST',
+        body: JSON.stringify({ signedSecret: 'must-not-echo' }),
+      });
+      assert.equal(response.status, 400);
+      assert.deepEqual(await response.json(), { error: code });
+    }
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

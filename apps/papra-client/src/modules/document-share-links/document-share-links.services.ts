@@ -1,3 +1,7 @@
+import type {
+  MediaPlayback,
+  MediaQuality,
+} from '@/modules/documents/components/document-media-preview.component';
 import type { PublicSharedDocument, ShareLink } from './document-share-links.types';
 import { buildTimeConfig } from '@/modules/config/config';
 import { apiClient } from '../shared/http/api-client';
@@ -215,6 +219,60 @@ export async function fetchSharedTranscript({
     method: 'GET',
     baseUrl: buildTimeConfig.baseApiUrl,
     url: `/api/share-links/${token}/document/transcript`,
+    headers: getAuthorizationHeaders({ accessToken }),
+  });
+}
+
+export async function fetchSharedMedia({
+  token,
+  accessToken,
+  quality,
+}: {
+  token: string;
+  accessToken?: string;
+  quality?: MediaQuality;
+}) {
+  return httpClient<MediaPlayback>({
+    method: 'GET',
+    baseUrl: buildTimeConfig.baseApiUrl,
+    url: `/api/share-links/${token}/document/media`,
+    query: quality ? { quality } : undefined,
+    headers: getAuthorizationHeaders({ accessToken }),
+  });
+}
+export async function prepareSharedMedia({
+  token,
+  accessToken,
+  quality,
+  retry,
+}: {
+  token: string;
+  accessToken?: string;
+  quality: '720' | '1080';
+  retry?: boolean;
+}) {
+  return httpClient({
+    method: 'POST',
+    baseUrl: buildTimeConfig.baseApiUrl,
+    url: `/api/share-links/${token}/document/media/preview`,
+    body: { quality, retry },
+    headers: getAuthorizationHeaders({ accessToken }),
+  });
+}
+export async function downloadSharedMedia({
+  token,
+  accessToken,
+  quality,
+}: {
+  token: string;
+  accessToken?: string;
+  quality: '720' | '1080';
+}) {
+  return httpClient<{ url: string }>({
+    method: 'GET',
+    baseUrl: buildTimeConfig.baseApiUrl,
+    url: `/api/share-links/${token}/document/media/download`,
+    query: { quality },
     headers: getAuthorizationHeaders({ accessToken }),
   });
 }

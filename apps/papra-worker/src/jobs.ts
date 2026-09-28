@@ -5,6 +5,7 @@ import type { Env } from './types';
 import { all, first, run, id } from './db';
 import { s3 } from './storage';
 import type { NativeJob, NativeOutput, NativeResult } from '../native/protocol';
+import { recordVideoMetadata, runVideoJob, recoverVideoCompute, VideoPausedError } from './video';
 
 type Job = {
   id: string;
@@ -106,6 +107,7 @@ async function fencedPut(
 const jobSelect =
   'SELECT j.*,v.size object_size,v.mime_type FROM jobs j JOIN versions v ON v.id=j.version_id';
 function jobQueue(env: Env, j: Job) {
+  if (j.kind.startsWith('video:')) return { name: 'papra-drive-video', binding: env.VIDEO_JOBS };
   if (['hash', 'backup', 'backup-hash'].includes(j.kind))
     return { name: 'papra-drive-transfers', binding: env.TRANSFER_JOBS };
   if (
@@ -242,7 +244,12 @@ async function backupManifest(env: Env, j: Job, v: Version, m: Manifest) {
     { httpMetadata: { contentType: 'application/json' } },
   );
 }
-async function callNative<T>(env: Env, j: Job, path: string, payload: unknown): Promise<T> {
+async function callNative<T>(
+  env: Env,
+  j: Pick<Job, 'id' | 'generation'>,
+  path: string,
+  payload: unknown,
+): Promise<T> {
   const container = getContainer(env.PROCESSOR, `${j.id}-${j.generation}`);
   try {
     const response = await container.fetch(
@@ -399,6 +406,7 @@ async function processVersion(env: Env, j: Job, v: Version) {
     });
   }
   if (!(await owned(env, j))) return;
+  if (v.mime_type.startsWith('video/')) await recordVideoMetadata(env, v.id, m.result.metadata);
   if (!(await backupManifest(env, j, v, m))) return;
   const preview = m.result.outputs.find((x) => x.kind === 'preview'),
     text = m.result.text.slice(0, MAX_TEXT);
@@ -997,6 +1005,7 @@ export async function consumeJobs(batch: MessageBatch, env: Env) {
       const v = await version(env, j.version_id);
       if (!v) throw new JobError('version_missing', true);
       if (j.kind === 'process') await processVersion(env, j, v);
+      else if (j.kind.startsWith('video:')) await runVideoJob(env, j, v, callNative);
       else if (j.kind === 'index') await indexVersion(env, j, v);
       else if (j.kind === 'hash') await hashVersion(env, j, v);
       else if (j.kind === 'backup') await backupOriginal(env, j, v);
@@ -1014,6 +1023,18 @@ export async function consumeJobs(batch: MessageBatch, env: Env) {
       message.ack();
     } catch (error) {
       if (!(await owned(env, j))) {
+        message.ack();
+        continue;
+      }
+      if (error instanceof VideoPausedError) {
+        await run(
+          env,
+          "UPDATE jobs SET status='paused',lease_token=NULL,error='preview_budget_paused',updated_at=? WHERE id=? AND generation=? AND lease_token=?",
+          Date.now(),
+          j.id,
+          j.generation,
+          lease,
+        );
         message.ack();
         continue;
       }
@@ -1054,6 +1075,7 @@ export async function consumeJobs(batch: MessageBatch, env: Env) {
   }
 }
 export async function housekeeping(env: Env) {
+  await recoverVideoCompute(env);
   const now = Date.now();
   await env.DB.batch([
     env.DB.prepare('DELETE FROM auth_sessions WHERE expires_at<?').bind(now),
