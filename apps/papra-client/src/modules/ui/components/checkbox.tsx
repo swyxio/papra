@@ -1,4 +1,4 @@
-import type { CheckboxControlProps } from '@kobalte/core/checkbox';
+import type { CheckboxControlProps, CheckboxRootProps } from '@kobalte/core/checkbox';
 import type { PolymorphicProps } from '@kobalte/core/polymorphic';
 import type { JSX, ValidComponent, VoidProps } from 'solid-js';
 import { Checkbox as CheckboxPrimitive } from '@kobalte/core/checkbox';
@@ -6,9 +6,21 @@ import { splitProps } from 'solid-js';
 import { cn } from '@/modules/shared/style/cn';
 
 export const CheckboxLabel = CheckboxPrimitive.Label;
-export const Checkbox = CheckboxPrimitive;
 export const CheckboxErrorMessage = CheckboxPrimitive.ErrorMessage;
 export const CheckboxDescription = CheckboxPrimitive.Description;
+
+type checkboxRootProps<T extends ValidComponent = 'div'> = CheckboxRootProps<T> & {
+  class?: string;
+};
+
+// Anchors the primitive's absolutely positioned hidden input to the root.
+export function Checkbox<T extends ValidComponent = 'div'>(
+  props: PolymorphicProps<T, checkboxRootProps<T>>,
+) {
+  const [local, rest] = splitProps(props, ['class']);
+
+  return <CheckboxPrimitive class={cn('relative', local.class)} {...(rest as any)} />;
+}
 
 type checkboxControlProps<T extends ValidComponent = 'div'> = VoidProps<
   CheckboxControlProps<T> & {
