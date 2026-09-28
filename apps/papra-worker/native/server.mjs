@@ -537,6 +537,8 @@ export async function encodePlayback(source, destination, metadata, height, sign
       '-loglevel',
       'error',
       '-nostdin',
+      '-filter_threads',
+      '2',
       '-threads',
       '2',
       ...httpsOptions(source),
@@ -563,14 +565,22 @@ export async function convertVideoJob(rawJob, callerSignal) {
   try {
     // Full-clip conversion benefits from local seeking. Stage only bounded inputs;
     // larger originals retain ranged reads and never depend on fitting on disk.
+    const phase = (name) => {
+      // oxlint-disable-next-line no-console -- Bounded phase names/timings contain no object URLs or document text.
+      console.error(JSON.stringify({ event: 'video_phase', phase: name, elapsedMs: Date.now() - started }));
+    };
     let source = job.source.url;
     if (job.source.byteSize <= HARD_MAX_BYTES) {
       source = join(dir, 'source');
+      phase('stage');
       await download(job.source, source, HARD_MAX_BYTES, signal);
     }
+    phase('probe');
     const metadata = checkedVideoMetadata(await probeMedia(source, signal));
     const file = join(dir, 'playback.mp4');
+    phase('encode');
     await encodePlayback(source, file, metadata, job.height, signal);
+    phase('verify');
     const outputMetadata = checkedVideoMetadata(await probeMedia(file, signal));
     if (outputMetadata.width > metadata.width || outputMetadata.height > metadata.height) {
       throw new ProcessingError('playback_output_upscaled');
@@ -581,7 +591,9 @@ export async function convertVideoJob(rawJob, callerSignal) {
     ) {
       throw new ProcessingError('playback_output_incomplete');
     }
+    phase('upload');
     const output = await upload(file, job.output, 'playback', 'video/mp4', signal);
+    phase('done');
     return { jobId: job.jobId, output, metadata: outputMetadata, elapsedMs: Date.now() - started };
   } finally {
     await rm(dir, { recursive: true, force: true });
