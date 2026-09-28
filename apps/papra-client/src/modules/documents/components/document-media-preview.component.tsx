@@ -47,6 +47,8 @@ export function MediaPlaybackPlayer(props: {
   let resumePlaying = false;
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
   let automaticallyRequested = '';
+  let previousMedia: MediaPlayback | undefined;
+  let refreshSource = false;
   const [quality, setQuality] = createSignal<MediaQuality>();
   const [failed, setFailed] = createSignal(false);
   const [preparing, setPreparing] = createSignal(false);
@@ -60,12 +62,33 @@ export function MediaPlaybackPlayer(props: {
         setQuality(undefined);
         setFailed(false);
         setActionError('');
+        previousMedia = undefined;
       },
     ),
   );
   const media = useQuery(() => ({
     queryKey: ['media-playback', props.identity, quality()],
-    queryFn: async () => props.fetchMedia(quality()),
+    queryFn: async () => {
+      const result = await props.fetchMedia(quality());
+      // Status polling must not restart a playing original every three seconds.
+      // Keep its signed URL until the selected rendition changes or it needs renewal.
+      if (
+        !refreshSource &&
+        previousMedia?.url &&
+        result.url &&
+        previousMedia.versionId === result.versionId &&
+        previousMedia.selected === result.selected &&
+        Date.parse(previousMedia.expiresAt ?? '') > Date.now() + 90_000
+      ) {
+        result.url = previousMedia.url;
+        result.expiresAt = previousMedia.expiresAt;
+      } else if (previousMedia?.url && result.url !== previousMedia.url) {
+        rememberPlayback();
+      }
+      previousMedia = result;
+      refreshSource = false;
+      return result;
+    },
     retry: 1,
     staleTime: Infinity,
     refetchOnWindowFocus: false,
@@ -147,6 +170,7 @@ export function MediaPlaybackPlayer(props: {
   const retryPlayback = async () => {
     rememberPlayback();
     setFailed(false);
+    refreshSource = true;
     const previousUrl = media.data?.url;
     const result = await media.refetch();
     if (result.data?.url === previousUrl) player?.load();
