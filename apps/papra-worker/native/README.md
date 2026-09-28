@@ -41,7 +41,7 @@ and configure Wrangler:
       "class_name": "ImageProcessorContainer",
       "image": "./native/Dockerfile",
       "image_build_context": "./native",
-      "instance_type": "standard-1",
+      "instance_type": "standard-3",
       "max_instances": 2
     }
   ],
@@ -61,7 +61,7 @@ The entrypoint trusts Cloudflare's runtime-injected CA and drops privileges to
 the `node` user before processing. No certificate checks are disabled. The
 maintained `@cloudflare/containers` class starts instances on demand and holds
 them awake during in-flight responses. The image's `.dockerignore` permits only
-the Dockerfile, server, and entrypoint, excluding local credentials and fixtures.
+the Dockerfile, server, video policy, and entrypoint, excluding local credentials and fixtures.
 
 Verification:
 
@@ -79,3 +79,27 @@ and Wrangler's configuration schema. Current references:
 [Queues limits](https://developers.cloudflare.com/queues/platform/limits/).
 Container image build and rollout are separate from Worker publication; verify
 the deployed processing path before reporting it live.
+
+## Video playback previews
+
+`POST /video/probe` records codec, display dimensions, duration, pixel format,
+frame rate, and bitrate. Compatible, modest-bitrate MP4/WebM originals play
+without conversion. Videos needing conversion and shorter than 15 minutes
+queue a 720p preview; longer videos prepare one on opening or explicit request.
+1080p is optional. Preview encoding only reduces dimensions, preserves aspect
+ratio and portrait orientation, caps frame rate at 30 fps, and emits H.264/AAC
+MP4 with fast-start. The decoded output is checked against the original display
+dimensions so no preview can upscale. Originals are never replaced.
+
+`POST /video/convert` streams whitespace heartbeats while encoding, then a JSON
+receipt or safe error envelope. Disconnects abort processing. Each conversion
+writes a lease-specific derived key; the outbound proxy checks the current job,
+generation, lease and document state before accepting a write. Ready previews
+are reused. One video conversion runs at a time, with two CPU cores per native
+instance to handle high-resolution source decoding.
+
+The Worker reserves estimated compute before each attempt and settles measured
+request time at the provisioned CPU/memory/disk rate. The monthly preview
+compute limit is $10; this estimate excludes R2 storage, Workers AI and other
+native processing. It is an application processing limit, not a Cloudflare
+billing cap.
