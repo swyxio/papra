@@ -6,10 +6,10 @@ import { s3, signedMedia, signedDownload } from './storage';
 
 export const AUTO_PREVIEW_SECONDS = 15 * 60;
 export const VIDEO_MONTHLY_MICROUSD = 10_000_000;
-// Reserve 15 minutes at standard-1's full CPU + provisioned memory/disk rate.
+// Reserve 15 minutes at standard-3's full CPU + provisioned memory/disk rate.
 // Charge the measured container request time, including startup and teardown.
-const RESERVATION = 19_000;
-const MICROUSD_PER_SECOND = 20.56;
+const RESERVATION = 56_000;
+const MICROUSD_PER_SECOND = 61.12;
 type VideoJob = {
   id: string;
   version_id: string;
@@ -195,14 +195,19 @@ export async function reserveVideoCompute(env: Env, j: VideoJob) {
   return results[1].meta.changes === 1;
 }
 export async function settleVideoCompute(env: Env, j: VideoJob, elapsedMs: number, outputSize = 0) {
+  const attempt = await first<{ reserved_microusd: number }>(env,
+    'SELECT reserved_microusd FROM video_compute_attempts WHERE lease_token=? AND completed_at IS NULL',
+    j.lease_token,
+  );
+  if (!attempt) return;
   const charged = Math.min(
-    RESERVATION,
+    attempt.reserved_microusd,
     Math.ceil((Math.max(0, elapsedMs) / 1000) * MICROUSD_PER_SECOND),
   );
   await env.DB.batch([
     env.DB.prepare(
       'UPDATE video_compute_usage SET reserved_microusd=reserved_microusd-?,spent_microusd=spent_microusd+? WHERE month=(SELECT month FROM video_compute_attempts WHERE lease_token=? AND completed_at IS NULL)',
-    ).bind(RESERVATION, charged, j.lease_token),
+    ).bind(attempt.reserved_microusd, charged, j.lease_token),
     env.DB.prepare(
       'UPDATE video_compute_attempts SET charged_microusd=?,elapsed_ms=?,output_size=?,completed_at=? WHERE lease_token=? AND completed_at IS NULL',
     ).bind(charged, Math.round(elapsedMs), outputSize, Date.now(), j.lease_token),

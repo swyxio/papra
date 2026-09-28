@@ -104,7 +104,7 @@ test('monthly reservations are atomic and cannot overrun budget', async () => {
   const { env, DB } = await fixture();
   const period = new Date().toISOString().slice(0, 7);
   await DB.prepare('INSERT INTO video_compute_usage(month,spent_microusd) VALUES(?,?)')
-    .bind(period, VIDEO_MONTHLY_MICROUSD - 19_000)
+    .bind(period, VIDEO_MONTHLY_MICROUSD - 56_000)
     .run();
   const jobs = Array.from({ length: 5 }, (_, i) => ({
     id: `j${i}`,
@@ -123,7 +123,7 @@ test('monthly reservations are atomic and cannot overrun budget', async () => {
     spent_microusd: number;
   }>();
   expect(usage?.reserved_microusd).toBe(0);
-  expect(usage?.spent_microusd).toBe(VIDEO_MONTHLY_MICROUSD - 19_000 + 1234);
+  expect(usage?.spent_microusd).toBe(VIDEO_MONTHLY_MICROUSD - 56_000 + 3668);
 });
 test('successful output is fenced to current job and stays separate from original', async () => {
   const { env, DB, doc } = await fixture();
@@ -176,7 +176,7 @@ test('abandoned compute is conservatively billed and paused jobs resume next mon
     spent_microusd: number;
   }>();
   expect(usage?.reserved_microusd).toBe(0);
-  expect(usage?.spent_microusd).toBe(19_000);
+  expect(usage?.spent_microusd).toBe(56_000);
   expect(
     (await DB.prepare("SELECT status FROM jobs WHERE id='j'").first<{ status: string }>())?.status,
   ).toBe('pending');

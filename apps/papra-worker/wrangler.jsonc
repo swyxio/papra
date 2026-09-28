@@ -65,7 +65,7 @@
       "image": "./native/Dockerfile",
       "image_build_context": "./native",
       "max_instances": 2,
-      "instance_type": "standard-1",
+      "instance_type": "standard-3",
     },
   ],
   "durable_objects": {
