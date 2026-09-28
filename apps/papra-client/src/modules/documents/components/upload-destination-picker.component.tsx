@@ -54,7 +54,9 @@ export const UploadDestinationPicker: Component<{ organizationId: string }> = (p
         >
           <For each={folders.data?.folders.filter((folder) => folder.canWrite)}>
             {(folder) => (
-              <option value={folder.id}>{folderPath(folder, folders.data?.folders ?? [])}</option>
+              <option value={folder.id} selected={folder.id === destination()}>
+                {folderPath(folder, folders.data?.folders ?? [])}
+              </option>
             )}
           </For>
         </select>
