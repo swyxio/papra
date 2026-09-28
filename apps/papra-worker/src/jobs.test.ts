@@ -257,44 +257,52 @@ test('cancellation during receipt write removes late receipt and original, witho
   expect((await f.DB.prepare('SELECT count(*) n FROM jobs').first<{ n: number }>())!.n).toBe(1);
 });
 
-test('native capacity waits preserve attempt budget and release the exact job container', async () => {
-  const { env, DB } = await fixture();
-  Object.assign(env, {
-    R2_ACCESS_KEY_ID: 'test',
-    R2_SECRET_ACCESS_KEY: 'test',
-    R2_ENDPOINT: 'https://example.r2.cloudflarestorage.com',
-    R2_BUCKET: 'papra-drive',
-  });
-  const { getContainer } = await import('@cloudflare/containers');
-  const destroy = vi.fn(async () => {});
-  const fetch = vi.fn(
-    async () => new Response('There is no Container instance available', { status: 503 }),
-  );
-  vi.mocked(getContainer).mockReturnValue({ fetch, destroy } as never);
-  await DB.prepare(
-    "INSERT INTO jobs(id,version_id,kind,status,attempts,generation,created_at,updated_at) VALUES('native-job','v','hash','pending',2,4,1,1)",
-  ).run();
-  await DB.prepare('UPDATE versions SET size=? WHERE id=?')
-    .bind(1024 ** 2 + 1, 'v')
-    .run();
-  const messages = batch({ jobId: 'native-job', generation: 4 });
-  const retry = vi.fn();
-  messages.messages[0]!.retry = retry;
-  await consumeJobs(messages, env);
-  expect(getContainer).toHaveBeenCalledWith(env.PROCESSOR, 'native-job-4');
-  expect(destroy).toHaveBeenCalledTimes(1);
-  expect(retry).toHaveBeenCalledWith({ delaySeconds: 90 });
-  expect(
+test.each([
+  { status: 503, kind: 'hash' },
+  { status: 404, kind: 'video:probe' },
+])(
+  'native availability waits preserve attempt budget ($status/$kind)',
+  async ({ status, kind }) => {
+    const { env, DB } = await fixture();
+    Object.assign(env, {
+      R2_ACCESS_KEY_ID: 'test',
+      R2_SECRET_ACCESS_KEY: 'test',
+      R2_ENDPOINT: 'https://example.r2.cloudflarestorage.com',
+      R2_BUCKET: 'papra-drive',
+    });
+    const { getContainer } = await import('@cloudflare/containers');
+    const destroy = vi.fn(async () => {});
+    const fetch = vi.fn(
+      async () => new Response('There is no Container instance available', { status }),
+    );
+    vi.mocked(getContainer).mockReturnValue({ fetch, destroy } as never);
     await DB.prepare(
-      "SELECT status,attempts,error,lease_token FROM jobs WHERE id='native-job'",
-    ).first(),
-  ).toEqual({
-    status: 'pending',
-    attempts: 2,
-    error: 'native_capacity_pending',
-    lease_token: null,
-  });
-});
+      "INSERT INTO jobs(id,version_id,kind,status,attempts,generation,created_at,updated_at) VALUES('native-job','v',?,'pending',2,4,1,1)",
+    )
+      .bind(kind)
+      .run();
+    await DB.prepare('UPDATE versions SET size=? WHERE id=?')
+      .bind(1024 ** 2 + 1, 'v')
+      .run();
+    const messages = batch({ jobId: 'native-job', generation: 4 });
+    const retry = vi.fn();
+    messages.messages[0]!.retry = retry;
+    await consumeJobs(messages, env);
+    expect(getContainer).toHaveBeenCalledWith(env.PROCESSOR, 'native-job-4');
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(retry).toHaveBeenCalledWith({ delaySeconds: 90 });
+    expect(
+      await DB.prepare(
+        "SELECT status,attempts,error,lease_token FROM jobs WHERE id='native-job'",
+      ).first(),
+    ).toEqual({
+      status: 'pending',
+      attempts: 2,
+      error: 'native_capacity_pending',
+      lease_token: null,
+    });
+  },
+);
 
 test('vision jobs use Gemma multimodal messages and publish its chat completion caption', async () => {
   const { env, DB } = await fixture();

@@ -260,7 +260,13 @@ async function callNative<T>(
         signal: AbortSignal.timeout(13 * 60_000),
       }),
     );
-    if (response.status === 503 || response.status === 429)
+    // A newly deployed Worker may briefly reach the previous container image.
+    // Its video routes return 404 until the image rollout is ready.
+    if (
+      response.status === 503 ||
+      response.status === 429 ||
+      (response.status === 404 && path.startsWith('/video/'))
+    )
       throw new JobError('native_capacity_pending');
     if (!response.ok) {
       const value = await response.json<{ error?: string }>().catch(() => ({ error: undefined }));
