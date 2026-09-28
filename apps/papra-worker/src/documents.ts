@@ -5,6 +5,7 @@ import {
   ensureDocumentAccess,
   permittedDocumentPredicateSQL,
   canReadFolder,
+  canWriteFolder,
 } from './collaboration';
 import { signedDownload, signedMedia, s3 } from './storage';
 import { enqueueVersion } from './jobs';
@@ -485,7 +486,7 @@ export function registerDocumentRoutes(app: App) {
     await enqueueVersion(c.env, v.id, 'index');
     return c.json({ document: await formatDocument(c.env, (await getDocument(c.env, d.id))!) });
   });
-  for (const kind of ['trash', 'tags'])
+  for (const kind of ['trash', 'tags', 'move'])
     app.post(`${base}/batch/${kind}`, async (c) => {
       const b = await c.req.json(),
         f = await documentFilter(
@@ -499,7 +500,7 @@ export function registerDocumentRoutes(app: App) {
         );
       let ds = await all(
         c.env,
-        `SELECT d.* FROM documents d WHERE ${f.sql} LIMIT 500`,
+        `SELECT d.* FROM documents d WHERE ${f.sql} LIMIT ${kind === 'move' ? 501 : 500}`,
         ...f.bindings,
       );
       if (Array.isArray(b.filter?.documentIds)) {
@@ -507,6 +508,31 @@ export function registerDocumentRoutes(app: App) {
         if (b.filter.documentIds.length > 500) throw error(400, 'Select at most 500 documents');
         for (const doc of b.filter.documentIds)
           ds.push(await document(c.env, c.get('identity'), c.req.param('org'), doc, 'write'));
+      }
+      if (kind === 'move') {
+        if (ds.length > 500) throw error(400, 'Select at most 500 files to move');
+        if (typeof b.folderId !== 'string') throw error(400, 'Choose a destination folder');
+        const target = await canWriteFolder(c.env, c.get('identity'), b.folderId);
+        if (target.organization_id !== c.req.param('org')) throw error(404, 'Folder not found');
+        const movedAt = Date.now();
+        const changed = ds.filter((d) => d.home_folder_id !== target.id);
+        if (changed.length)
+          await c.env.DB.batch(
+            changed.flatMap((d) => [
+              c.env.DB.prepare(
+                'UPDATE documents SET home_folder_id=?,updated_at=? WHERE id=?',
+              ).bind(target.id, movedAt, d.id),
+              c.env.DB.prepare(
+                'DELETE FROM document_shortcuts WHERE document_id=? AND folder_id=?',
+              ).bind(d.id, target.id),
+              c.env.DB.prepare(
+                'INSERT INTO document_activity(id,document_id,user_id,event,created_at) VALUES(?,?,?,?,?)',
+              ).bind(id('act'), d.id, c.get('identity').userId, 'moved', movedAt),
+            ]),
+          );
+        for (const d of changed)
+          if (d.current_version_id) await enqueueVersion(c.env, d.current_version_id, 'index');
+        return c.json({ moved: changed.length });
       }
       for (const d of ds) {
         if (kind === 'trash')

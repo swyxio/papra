@@ -334,6 +334,71 @@ describe('D1 collaboration authorization and actual routes', () => {
     ).toBe(0);
   });
 
+  test('bulk moves validate every source and destination before changing file homes', async () => {
+    const f = await fixture();
+    const move = async (documentIds: string[], folderId: string, user = 'owner') =>
+      f.request(
+        `${f.base}/documents/batch/move`,
+        'POST',
+        { filter: { documentIds }, folderId },
+        user,
+      );
+    expect((await move(['doc_public', 'doc_secret'], f.open, 'blocked')).status).toBe(404);
+    expect(
+      (
+        await f.DB.prepare('SELECT home_folder_id FROM documents WHERE id=?')
+          .bind('doc_public')
+          .first()
+      )?.home_folder_id,
+    ).toBe(f.home);
+    expect((await move(['doc_public'], f.secret, 'blocked')).status).toBe(404);
+    expect((await move(['doc_public'], organizationHomeFolderId(f.other))).status).toBe(404);
+    await f.DB.prepare(
+      'INSERT INTO document_shortcuts(id,document_id,folder_id,created_by,created_at) VALUES(?,?,?,?,1)',
+    )
+      .bind('redundant', 'doc_public', f.open, 'owner')
+      .run();
+    const response = await move(['doc_public', 'doc_secret'], f.open);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ moved: 2 });
+    expect(
+      (
+        await f.DB.prepare('SELECT home_folder_id FROM documents WHERE id=?')
+          .bind('doc_public')
+          .first()
+      )?.home_folder_id,
+    ).toBe(f.open);
+    expect(
+      await f.DB.prepare('SELECT id FROM document_shortcuts WHERE id=?').bind('redundant').first(),
+    ).toBeNull();
+    expect(
+      (
+        await f.DB.prepare('SELECT COUNT(*) AS count FROM document_activity WHERE event=?')
+          .bind('moved')
+          .first()
+      )?.count,
+    ).toBe(2);
+    expect(await (await move(['doc_public'], f.open)).json()).toEqual({ moved: 0 });
+    expect((await f.request(`${f.base}/documents/doc_public`)).status).toBe(200);
+  });
+
+  test('all-matching moves stay within the selected source folder', async () => {
+    const f = await fixture();
+    const response = await f.request(`${f.base}/documents/batch/move`, 'POST', {
+      filter: { query: '', folderId: f.home },
+      folderId: f.open,
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ moved: 1 });
+    expect(
+      (
+        await f.DB.prepare('SELECT home_folder_id FROM documents WHERE id=?')
+          .bind('doc_secret')
+          .first()
+      )?.home_folder_id,
+    ).toBe(f.secret);
+  });
+
   test('private media URLs are inline range-capable, current-version pinned and never create shares', async () => {
     const f = await fixture();
     await f.DB.prepare('UPDATE documents SET mime_type=? WHERE id=?')

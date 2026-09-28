@@ -11,56 +11,27 @@ export async function uploadDocument({
   organizationId,
   onProgress,
   folderId,
-  resolveDuplicate,
+  documentId,
   completeUpload,
   onShareReady,
+  onNameReady,
 }: {
   file: File;
   completeUpload?: CompleteUpload;
   onShareReady?: (url: string) => void;
+  onNameReady?: (name: string) => void;
   organizationId: string;
   folderId?: string;
-  resolveDuplicate?: (conflict: {
-    name: string;
-    canReplace: boolean;
-  }) => Promise<{ action: 'replace' } | { action: 'rename'; name: string } | undefined>;
+  documentId?: string;
   onProgress?: (progress: TransferProgress) => void;
 }) {
-  let options: { folderId?: string; documentId?: string; fileName?: string } = { folderId };
-  while (true) {
-    try {
-      return await multipartUpload(file, organizationId, onProgress, {
-        ...options,
-        completeUpload,
-        onShareReady,
-      });
-    } catch (error) {
-      const conflict = error as {
-        status?: number;
-        data?: {
-          code?: string;
-          existingDocument?: { id: string; name: string };
-          canReplace?: boolean;
-        };
-      };
-      if (
-        conflict.status !== 409 ||
-        conflict.data?.code !== 'duplicate_file_name' ||
-        !conflict.data.existingDocument ||
-        !resolveDuplicate
-      )
-        throw error;
-      const decision = await resolveDuplicate({
-        name: conflict.data.existingDocument.name,
-        canReplace: !!conflict.data.canReplace,
-      });
-      if (!decision) throw new Error('Upload cancelled. The existing file was kept.');
-      options =
-        decision.action === 'replace'
-          ? { documentId: conflict.data.existingDocument.id }
-          : { folderId, fileName: decision.name.trim() };
-    }
-  }
+  return multipartUpload(file, organizationId, onProgress, {
+    folderId,
+    documentId,
+    completeUpload,
+    onShareReady,
+    onNameReady,
+  });
 }
 
 export async function fetchOrganizationDocuments({

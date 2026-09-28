@@ -13,30 +13,27 @@ afterEach(() => {
   vi.unstubAllGlobals();
   api.mockReset();
 });
-function duplicateFixture() {
+function uploadFixture() {
   const store = new Map<string, string>();
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => store.get(key) || null,
     setItem: (key: string, value: string) => store.set(key, value),
     removeItem: (key: string) => store.delete(key),
   });
-  let conflict = true;
   const attempts: Record<string, unknown>[] = [];
   api.mockImplementation(async ({ method, path, body }) => {
     if (method === 'POST' && path.endsWith('/uploads')) {
       attempts.push(body);
-      if (conflict) {
-        conflict = false;
-        throw {
-          status: 409,
-          data: {
-            code: 'duplicate_file_name',
-            existingDocument: { id: 'existing', name: 'Contract.pdf' },
-            canReplace: true,
-          },
-        };
-      }
-      return { session: { id: 'upload', documentId: body.documentId || 'new', partSize: 1024 } };
+      return {
+        session: {
+          id: 'upload',
+          documentId: body.documentId || 'new',
+          mode: 'single',
+          status: 'stored',
+          fileName: 'Contract (2).pdf',
+          partSize: 1024,
+        },
+      };
     }
     if (method === 'GET') return { session: { id: 'upload', status: 'uploading' }, parts: [] };
     if (path.endsWith('/complete'))
@@ -45,39 +42,20 @@ function duplicateFixture() {
   });
   return { file: new File([], 'Contract.pdf'), attempts };
 }
-test('rename decision uploads under the chosen name without replacing the existing document', async () => {
-  const f = duplicateFixture();
-  await uploadDocument({
-    file: f.file,
-    organizationId: 'org',
-    folderId: 'folder',
-    resolveDuplicate: async (conflict) => {
-      expect(conflict).toEqual({ name: 'Contract.pdf', canReplace: true });
-      return { action: 'rename', name: 'Contract (new).pdf' };
-    },
-  });
-  expect(f.attempts[1]).toMatchObject({ folderId: 'folder', fileName: 'Contract (new).pdf' });
-  expect(f.attempts[1]).not.toHaveProperty('documentId');
-});
-test('replacement decision uses the permanent existing document id', async () => {
-  const f = duplicateFixture();
-  await uploadDocument({
-    file: f.file,
-    organizationId: 'org',
-    resolveDuplicate: async () => ({ action: 'replace' }),
-  });
-  expect(f.attempts[1]).toMatchObject({ documentId: 'existing' });
-});
-test('cancelling a duplicate decision never starts another upload', async () => {
-  const f = duplicateFixture();
-  await expect(
-    uploadDocument({
-      file: f.file,
-      organizationId: 'org',
-      resolveDuplicate: async () => undefined,
-    }),
-  ).rejects.toThrow('existing file was kept');
+test('uploads accept the server-reserved suffix without overwriting a document or asking again', async () => {
+  const f = uploadFixture();
+  const onNameReady = vi.fn();
+  await uploadDocument({ file: f.file, organizationId: 'org', folderId: 'folder', onNameReady });
   expect(f.attempts).toHaveLength(1);
+  expect(f.attempts[0]).toMatchObject({ folderId: 'folder', fileName: 'Contract.pdf' });
+  expect(f.attempts[0].documentId).toBeUndefined();
+  expect(onNameReady).toHaveBeenCalledExactlyOnceWith('Contract (2).pdf');
+});
+test('explicit replacement keeps the permanent existing document id', async () => {
+  const f = uploadFixture();
+  await uploadDocument({ file: f.file, organizationId: 'org', documentId: 'existing' });
+  expect(f.attempts).toHaveLength(1);
+  expect(f.attempts[0]).toMatchObject({ documentId: 'existing' });
 });
 
 test('folder listings pass folder scope and pagination to the document endpoint', async () => {

@@ -1,3 +1,4 @@
+import { limitUploadTransfer, PARTS_PER_UPLOAD } from './upload-scheduling.services';
 import type { Document } from './documents.types';
 import type { AsDto } from '../shared/http/http-client.types';
 import { apiClient } from '../shared/http/api-client';
@@ -13,6 +14,7 @@ export type TransferProgress = {
 };
 type Session = {
   shareUrl?: string;
+  fileName?: string;
   id: string;
   partSize: number;
   documentId: string;
@@ -48,6 +50,7 @@ export async function multipartUpload(
     fileName?: string;
     completeUpload?: CompleteUpload;
     onShareReady?: (url: string) => void;
+    onNameReady?: (name: string) => void;
   } = {},
 ) {
   const fingerprint = await fileFingerprint(file);
@@ -59,7 +62,7 @@ export async function multipartUpload(
   } catch {
     localStorage.removeItem(key);
   }
-  const { completeUpload, onShareReady, ...uploadOptions } = options;
+  const { completeUpload, onShareReady, onNameReady, ...uploadOptions } = options;
   let created = false;
   if (!saved) {
     const { session } = await apiClient<{ session: Session }>({
@@ -91,6 +94,7 @@ export async function multipartUpload(
     if (isHttpErrorWithStatusCode({ error, statusCode: 410 })) localStorage.removeItem(key);
     throw error;
   }
+  if (state.session.fileName) onNameReady?.(state.session.fileName);
   if (state.session.shareUrl) onShareReady?.(state.session.shareUrl);
   let lastPublished = 0;
   let reportedBytes = 0;
@@ -197,35 +201,38 @@ export async function multipartUpload(
   let stopped = false;
   const controllers = new Set<XMLHttpRequest>();
   const send = async (url: string, blob: Blob, n: number, headers: Record<string, string> = {}) =>
-    new Promise<void>((resolve, reject) => {
-      if (stopped) {
-        reject(new Error('Transfer interrupted. Reselect the file to resume.'));
-        return;
-      }
-      const xhr = new XMLHttpRequest();
-      controllers.add(xhr);
-      xhr.open('PUT', url);
-      for (const [name, value] of Object.entries(headers)) xhr.setRequestHeader(name, value);
-      xhr.timeout = 15 * 60 * 1000;
-      xhr.upload.onprogress = (e) => {
-        active.set(n, e.loaded);
-        report();
-      };
-      xhr.onload = () => {
-        controllers.delete(xhr);
-        if (xhr.status >= 200 && xhr.status < 300) resolve();
-        else reject(new Error(`Upload failed (${xhr.status})`));
-      };
-      xhr.onerror =
-        xhr.ontimeout =
-        xhr.onabort =
-          () => {
-            controllers.delete(xhr);
-            reject(new Error('Transfer interrupted. Reload and reselect this file to resume.'));
+    limitUploadTransfer(
+      async () =>
+        new Promise<void>((resolve, reject) => {
+          if (stopped) {
+            reject(new Error('Transfer interrupted. Reselect the file to resume.'));
+            return;
+          }
+          const xhr = new XMLHttpRequest();
+          controllers.add(xhr);
+          xhr.open('PUT', url);
+          for (const [name, value] of Object.entries(headers)) xhr.setRequestHeader(name, value);
+          xhr.timeout = 15 * 60 * 1000;
+          xhr.upload.onprogress = (e) => {
+            active.set(n, e.loaded);
+            report();
           };
-      xhr.send(blob);
-    });
-  // Sign eight adjacent parts once; four transfer workers share the request.
+          xhr.onload = () => {
+            controllers.delete(xhr);
+            if (xhr.status >= 200 && xhr.status < 300) resolve();
+            else reject(new Error(`Upload failed (${xhr.status})`));
+          };
+          xhr.onerror =
+            xhr.ontimeout =
+            xhr.onabort =
+              () => {
+                controllers.delete(xhr);
+                reject(new Error('Transfer interrupted. Reload and reselect this file to resume.'));
+              };
+          xhr.send(blob);
+        }),
+    );
+  // Sign eight adjacent parts once; transfer workers share the request.
   const signedBatches = new Map<
     number,
     Promise<{ parts: { partNumber: number; url: string }[] }>
@@ -319,7 +326,7 @@ export async function multipartUpload(
     }
   };
   try {
-    await Promise.all(Array.from({ length: 4 }, worker));
+    await Promise.all(Array.from({ length: PARTS_PER_UPLOAD }, worker));
   } catch (error) {
     publish(true);
     stopped = true;

@@ -13,6 +13,7 @@ import {
   folderIsDescendant,
   folderPath,
 } from './drive-collaboration.services';
+import { DocumentMoveDialog } from '../documents/components/document-move-dialog.component';
 import { DriveInbox } from './drive-inbox.component';
 
 export const DocumentFolderPicker: Component<{ organizationId: string; documentId: string }> = (
@@ -297,6 +298,8 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
   const [params, setParams] = useSearchParams();
   const [name, setName] = createSignal('');
   const [rename, setRename] = createSignal('');
+  const [moveFilesOpen, setMoveFilesOpen] = createSignal(false);
+  const [showCreate, setShowCreate] = createSignal(false);
   const key = () => ['organizations', props.organizationId, 'folders'];
   const folders = useQuery(() => ({
     queryKey: key(),
@@ -326,6 +329,7 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
       }),
     onSuccess: () => {
       setName('');
+      setShowCreate(false);
       invalidate();
     },
     onError: () =>
@@ -414,107 +418,122 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
               )}
             </For>
           </nav>
-          <Show when={current()?.canWrite || folders.data?.canManageAccess}>
-            <details class="relative shrink-0 text-sm">
-              <summary class="cursor-pointer rounded-md border px-3 py-2">Manage folder</summary>
-              <div class="absolute right-0 z-20 mt-2 w-80 max-w-[calc(100vw-4rem)] space-y-3 rounded-lg border bg-background p-3 shadow-lg">
-                <Show when={current()?.canWrite}>
-                  <form
-                    class="flex gap-2"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      if (name().trim()) create.mutate();
-                    }}
-                  >
-                    <input
-                      aria-label="New folder name"
-                      class="min-w-0 w-44 border rounded-md bg-transparent px-3 text-sm"
-                      maxLength={200}
-                      value={name()}
-                      onInput={(event) => setName(event.currentTarget.value)}
-                      placeholder="New folder name"
-                    />
-                    <Button
-                      type="submit"
-                      variant="outline"
-                      size="sm"
-                      disabled={!name().trim()}
-                      isLoading={create.isPending}
-                    >
-                      Create folder
-                    </Button>
-                  </form>
-                </Show>
-                <Show when={current() && !current()?.isHome && current()?.canWrite}>
-                  <div class="flex gap-2">
-                    <input
-                      aria-label="Rename current folder"
-                      class="min-w-0 w-44 border rounded-md bg-transparent px-3 text-sm"
-                      maxLength={200}
-                      value={rename()}
-                      onInput={(event) => setRename(event.currentTarget.value)}
-                      placeholder={current()?.name}
-                    />
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={!rename().trim() || update.isPending}
-                      onClick={() => update.mutate({ name: rename() })}
-                    >
-                      Rename
-                    </Button>
-                  </div>
-                  <label class="block space-y-1">
-                    <span class="block text-xs text-muted-foreground">Move folder to</span>
-                    <select
-                      aria-label="Move current folder"
-                      class="w-full max-w-80 border rounded-md bg-background p-2 text-sm"
-                      value={current()?.parentId ?? ''}
-                      disabled={update.isPending}
-                      onChange={(event) => update.mutate({ parentId: event.currentTarget.value })}
-                    >
-                      <For
-                        each={folders.data?.folders.filter(
-                          (candidate) =>
-                            candidate.canWrite &&
-                            !folderIsDescendant(
-                              candidate,
-                              folderId()!,
-                              folders.data?.folders ?? [],
-                            ),
-                        )}
+          <div class="flex items-center gap-2 flex-wrap justify-end">
+            <Show when={current()?.canWrite}>
+              <Button variant="outline" size="sm" onClick={() => setShowCreate(!showCreate())}>
+                New folder
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setMoveFilesOpen(true)}>
+                Move existing files here
+              </Button>
+            </Show>
+            <Show
+              when={!current()?.isHome && (current()?.canWrite || folders.data?.canManageAccess)}
+            >
+              <details class="relative shrink-0 text-sm">
+                <summary class="cursor-pointer rounded-md border px-3 py-2">Manage folder</summary>
+                <div class="absolute right-0 z-20 mt-2 w-80 max-w-[calc(100vw-4rem)] space-y-3 rounded-lg border bg-background p-3 shadow-lg">
+                  <Show when={current() && !current()?.isHome && current()?.canWrite}>
+                    <div class="flex gap-2">
+                      <input
+                        aria-label="Rename current folder"
+                        class="min-w-0 w-44 border rounded-md bg-transparent px-3 text-sm"
+                        maxLength={200}
+                        value={rename()}
+                        onInput={(event) => setRename(event.currentTarget.value)}
+                        placeholder={current()?.name}
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={!rename().trim() || update.isPending}
+                        onClick={() => update.mutate({ name: rename() })}
                       >
-                        {(candidate) => (
-                          <option value={candidate.id}>
-                            {folderPath(candidate, folders.data?.folders ?? [])}
-                          </option>
-                        )}
-                      </For>
-                    </select>
-                  </label>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={remove.isPending}
-                    onClick={() => remove.mutate()}
+                        Rename
+                      </Button>
+                    </div>
+                    <label class="block space-y-1">
+                      <span class="block text-xs text-muted-foreground">Move folder to</span>
+                      <select
+                        aria-label="Move current folder"
+                        class="w-full max-w-80 border rounded-md bg-background p-2 text-sm"
+                        value={current()?.parentId ?? ''}
+                        disabled={update.isPending}
+                        onChange={(event) => update.mutate({ parentId: event.currentTarget.value })}
+                      >
+                        <For
+                          each={folders.data?.folders.filter(
+                            (candidate) =>
+                              candidate.canWrite &&
+                              !folderIsDescendant(
+                                candidate,
+                                folderId()!,
+                                folders.data?.folders ?? [],
+                              ),
+                          )}
+                        >
+                          {(candidate) => (
+                            <option value={candidate.id}>
+                              {folderPath(candidate, folders.data?.folders ?? [])}
+                            </option>
+                          )}
+                        </For>
+                      </select>
+                    </label>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={remove.isPending}
+                      onClick={() => remove.mutate()}
+                    >
+                      Delete empty folder
+                    </Button>
+                  </Show>
+                  <Show
+                    when={
+                      current() &&
+                      !current()?.isHome &&
+                      folders.data?.canManageAccess &&
+                      !folders.data.isPersonal
+                    }
                   >
-                    Delete empty folder
-                  </Button>
-                </Show>
-                <Show
-                  when={
-                    current() &&
-                    !current()?.isHome &&
-                    folders.data?.canManageAccess &&
-                    !folders.data.isPersonal
-                  }
-                >
-                  <FolderAccessPanel organizationId={props.organizationId} folderId={folderId()!} />
-                </Show>
-              </div>
-            </details>
-          </Show>
+                    <FolderAccessPanel
+                      organizationId={props.organizationId}
+                      folderId={folderId()!}
+                    />
+                  </Show>
+                </div>
+              </details>
+            </Show>
+          </div>
         </div>
+        <Show when={showCreate() && current()?.canWrite}>
+          <form
+            class="flex gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (name().trim()) create.mutate();
+            }}
+          >
+            <input
+              aria-label="New subfolder name"
+              class="min-w-0 rounded-md border bg-background p-2 text-sm"
+              maxLength={200}
+              placeholder="New folder name"
+              value={name()}
+              onInput={(event) => setName(event.currentTarget.value)}
+            />
+            <Button type="submit" size="sm" disabled={!name().trim()} isLoading={create.isPending}>
+              Create folder
+            </Button>
+          </form>
+        </Show>
+        <DocumentMoveDialog
+          organizationId={props.organizationId}
+          open={moveFilesOpen()}
+          onOpenChange={setMoveFilesOpen}
+          destinationFolderId={folderId()}
+        />
         <Show when={current()}>
           {(folder) => (
             <p class="text-xs text-muted-foreground">

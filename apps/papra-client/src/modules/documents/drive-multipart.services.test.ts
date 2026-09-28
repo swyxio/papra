@@ -282,12 +282,14 @@ test('publishes the reserved link before transfer and reports progress without b
   let xhr: any;
   let sent = false;
   const url = 'https://drive.example/s/abcdefghijklmnop/test';
+  const renamed = vi.fn();
   api.mockImplementation(async ({ method, path, body }) => {
     if (method === 'POST' && path.endsWith('/uploads')) {
       expect(body.share).toBe(true);
       return {
         session: {
           id: 'early',
+          fileName: 'test (2).txt',
           documentId: 'doc',
           mode: 'single',
           partSize: 32 * 1024 ** 2,
@@ -319,9 +321,11 @@ test('publishes the reserved link before transfer and reports progress without b
   });
   const upload = multipartUpload(new File(['hello'], 'test.txt'), 'org', undefined, {
     onShareReady: share,
+    onNameReady: renamed,
   });
   await vi.waitFor(() => expect(sent).toBe(true));
   expect(share).toHaveBeenCalledOnce();
+  expect(renamed).toHaveBeenCalledExactlyOnceWith('test (2).txt');
   xhr.upload.onprogress({ loaded: 5 });
   xhr.onload();
   expect((await upload).document.id).toBe('doc');
@@ -330,4 +334,44 @@ test('publishes the reserved link before transfer and reports progress without b
       api.mock.calls.some(([args]) => args.path.endsWith('/progress') && args.body.bytes === 5),
     ).toBe(true),
   );
+});
+
+test('same-name files in separate folders retain independent resume sessions', async () => {
+  const store = new Map<string, string>();
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => store.get(key) || null,
+    setItem: (key: string, value: string) => store.set(key, value),
+    removeItem: (key: string) => store.delete(key),
+  });
+  api.mockImplementation(async ({ method, body, path }) => ({
+    session: {
+      id: method === 'POST' ? body.folderId : path.split('/').at(-1),
+      mode: 'single',
+      status: 'stored',
+      documentId: 'doc',
+      partSize: 32 * 1024 ** 2,
+    },
+    parts: [],
+  }));
+  const file = new File([], 'same.txt', { lastModified: 20 });
+  const fail = vi.fn().mockRejectedValue({ status: 400 });
+  await expect(
+    multipartUpload(file, 'org', undefined, { folderId: 'folder-a', completeUpload: fail }),
+  ).rejects.toEqual({ status: 400 });
+  await expect(
+    multipartUpload(file, 'org', undefined, { folderId: 'folder-b', completeUpload: fail }),
+  ).rejects.toEqual({ status: 400 });
+  expect(store.size).toBe(2);
+  expect(
+    api.mock.calls
+      .filter(([request]) => request.method === 'POST')
+      .map(([request]) => request.body.folderId),
+  ).toEqual(['folder-a', 'folder-b']);
+  const complete = vi
+    .fn()
+    .mockResolvedValue({ document: { id: 'b', organizationId: 'org', createdAt: 0 } });
+  await multipartUpload(file, 'org', undefined, { folderId: 'folder-b', completeUpload: complete });
+  expect(complete).toHaveBeenCalledExactlyOnceWith('folder-b');
+  expect(store.size).toBe(1);
+  expect(Array.from(store.keys())[0]).toContain(':folder-a:');
 });

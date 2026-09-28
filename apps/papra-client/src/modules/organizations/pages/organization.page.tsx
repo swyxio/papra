@@ -4,6 +4,7 @@ import { useParams } from '@solidjs/router';
 import { keepPreviousData, useQuery } from '@tanstack/solid-query';
 import { Show, Suspense } from 'solid-js';
 import { useDocumentUpload } from '@/modules/documents/components/document-import-status.component';
+import { UploadDestinationPicker } from '@/modules/documents/components/upload-destination-picker.component';
 import { DocumentUploadArea } from '@/modules/documents/components/document-upload-area.component';
 import {
   createdAtColumn,
@@ -47,6 +48,7 @@ export const OrganizationPage: Component = () => {
 
   return (
     <div class="p-6 mt-4 pb-32 max-w-5xl mx-auto">
+      <UploadDestinationPicker organizationId={params.organizationId} />
       <Suspense>
         {documentsQuery.data?.documents?.length === 0 ? (
           <>

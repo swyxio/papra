@@ -8,6 +8,7 @@ export function Toaster(props: Parameters<typeof Sonner>[0]) {
   return (
     <Sonner
       class="toaster group"
+      closeButton
       toastOptions={{
         classes: {
           toast:

@@ -200,24 +200,66 @@ test('semantic query never sends inaccessible namespace and excludes stale versi
   expect(await semanticSources(f.env, f.user, 'org', 'secret')).toEqual([]);
 });
 
-test('duplicate names require an explicit replacement or rename, within the same folder', async () => {
+test('parallel same-folder uploads get distinct suffixes while other folders keep the original name', async () => {
   const f = await fixture();
-  const create = async (fileName: string, options: Record<string, string> = {}) =>
-    f.call('', 'POST', { fileName, size: 0, fingerprint: 'c'.repeat(64), ...options });
-  const original = ((await (await create('Contract.pdf')).json()) as any).session;
-  // Reserve the name while bytes are in flight, so parallel imports cannot silently duplicate it.
-  expect((await create('CONTRACT.PDF')).status).toBe(409);
+  const create = async (fileName: string, options: Record<string, string> = {}) => {
+    const response = await f.call('', 'POST', {
+      fileName,
+      size: 0,
+      fingerprint: 'c'.repeat(64),
+      ...options,
+    });
+    expect(response.status).toBe(201);
+    return ((await response.json()) as any).session;
+  };
+  const original = await create('Contract.pdf');
+  const concurrent = await Promise.all(
+    Array.from({ length: 10 }, async () => create('Contract.pdf')),
+  );
+  expect(new Set(concurrent.map((u) => u.fileName))).toEqual(
+    new Set(Array.from({ length: 10 }, (_, i) => `Contract (${i + 2}).pdf`)),
+  );
+  expect(new Set(concurrent.map((u) => u.documentId)).size).toBe(10);
+  const otherFolder = await create('Contract.pdf', { folderId: 'private' });
+  expect(otherFolder.fileName).toBe('Contract.pdf');
+  expect(otherFolder.folderId).toBe('private');
   await f.call(`/${original.id}/complete`, 'POST', {});
-  const conflict = await create('contract.pdf');
-  expect(conflict.status).toBe(409);
-  expect(await conflict.json()).toMatchObject({
-    code: 'duplicate_file_name',
-    existingDocument: { id: original.documentId },
-    canReplace: true,
-  });
-  expect((await create('Contract (new).pdf')).status).toBe(201);
-  expect((await create('Contract.pdf', { folderId: 'private' })).status).toBe(201);
-  expect((await create('Contract.pdf', { documentId: original.documentId })).status).toBe(201);
+  expect((await create('CONTRACT.PDF')).fileName).toBe('CONTRACT (12).PDF');
+  const replacement = await create('Contract.pdf', { documentId: original.documentId });
+  expect(replacement.fileName).toBe('Contract.pdf');
+  expect(replacement.documentId).toBe(original.documentId);
+  expect(replacement.versionId).not.toBe(original.versionId);
+  await f.call(`/${replacement.id}/complete`, 'POST', {});
+  expect(
+    (
+      await f.DB.prepare('SELECT current_version_id FROM documents WHERE id=?')
+        .bind(original.documentId)
+        .first<any>()
+    ).current_version_id,
+  ).toBe(replacement.versionId);
+});
+test('folder naming reuses free suffixes, preserves extensions and ignores trash/aborted reservations', async () => {
+  const f = await fixture();
+  const create = async (fileName: string) => {
+    const response = await f.call('', 'POST', { fileName, size: 0, fingerprint: 'c'.repeat(64) });
+    expect(response.status).toBe(201);
+    return ((await response.json()) as any).session;
+  };
+  const original = await create('archive.tar.gz');
+  const second = await create('archive.tar.gz');
+  expect(second.fileName).toBe('archive.tar (2).gz');
+  expect((await create('archive.tar.gz')).fileName).toBe('archive.tar (3).gz');
+  await f.call(`/${second.id}`, 'DELETE');
+  expect((await create('archive.tar.gz')).fileName).toBe('archive.tar (2).gz');
+  await f.call(`/${original.id}/complete`, 'POST', {});
+  await f.DB.prepare('UPDATE documents SET is_deleted=1 WHERE id=?')
+    .bind(original.documentId)
+    .run();
+  expect((await create('archive.tar.gz')).fileName).toBe('archive.tar.gz');
+  await create('.env');
+  expect((await create('.env')).fileName).toBe('.env (2)');
+  await create('README');
+  expect((await create('README')).fileName).toBe('README (2)');
 });
 test('upload and replacement Activity records survive accepted-response replays without duplicates', async () => {
   const f = await fixture();

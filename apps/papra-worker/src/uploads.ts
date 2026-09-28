@@ -22,6 +22,7 @@ const dto = (u: Record<string, any>) => ({
   partSize: u.part_size,
   size: u.size,
   fileName: u.file_name,
+  folderId: u.folder_id,
   status: u.status,
   createdAt: new Date(u.created_at).toISOString(),
 });
@@ -184,33 +185,6 @@ export function registerUploadRoutes(app: App) {
     }
     const folder = await canWriteFolder(c.env, user, folderId);
     if (folder.organization_id !== org) throw error(403, 'Folder access denied');
-    if (!replacement) {
-      const existing = await first(
-        c.env,
-        'SELECT id,name FROM documents WHERE organization_id=? AND home_folder_id=? AND is_deleted=0 AND lower(name)=lower(?) LIMIT 1',
-        org,
-        folderId,
-        b.fileName.trim(),
-      );
-      if (existing) {
-        let canReplace = true;
-        try {
-          await ensureDocumentAccess(c.env, user, existing.id, 'write');
-        } catch {
-          canReplace = false;
-        }
-        return c.json(
-          {
-            message:
-              'A file with this name already exists in this folder. Replace it or choose a different name.',
-            code: 'duplicate_file_name',
-            existingDocument: { id: existing.id, name: existing.name },
-            canReplace,
-          },
-          409,
-        );
-      }
-    }
     const documentId = b.documentId || id('doc'),
       versionId = id('ver'),
       uploadId = id('upl'),
@@ -230,40 +204,53 @@ export function registerUploadRoutes(app: App) {
     if (b.size === 0)
       await c.env.FILES.put(key, new Uint8Array(), { httpMetadata: { contentType: mimeType } });
     try {
-      const reservation = await c.env.DB.prepare(
-        "INSERT INTO uploads(id,user_id,organization_id,document_id,version_id,storage_key,upload_id,file_name,mime_type,size,fingerprint,part_size,status,folder_id,replacement,created_at) SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE ?=1 OR NOT EXISTS(SELECT 1 FROM uploads WHERE organization_id=? AND folder_id=? AND lower(file_name)=lower(?) AND replacement=0 AND status='uploading') AND NOT EXISTS(SELECT 1 FROM documents WHERE organization_id=? AND home_folder_id=? AND is_deleted=0 AND lower(name)=lower(?))",
-      )
-        .bind(
-          uploadId,
-          user.userId,
-          org,
-          documentId,
-          versionId,
-          key,
-          providerId,
-          b.fileName.trim(),
-          mimeType,
-          b.size,
-          b.fingerprint,
-          partSize,
-          'uploading',
-          folderId,
-          replacement ? 1 : 0,
-          Date.now(),
-          replacement ? 1 : 0,
-          org,
-          folderId,
-          b.fileName.trim(),
-          org,
-          folderId,
-          b.fileName.trim(),
+      const fileName = b.fileName.trim();
+      const dot = fileName.lastIndexOf('.');
+      const stem = dot > 0 ? fileName.slice(0, dot) : fileName;
+      const extension = dot > 0 ? fileName.slice(dot) : '';
+      // Choose and reserve the first available folder-local name in ONE SQLite write.
+      // A preflight read followed by an insert would race when uploads start together.
+      const reservation = c.env.DB.prepare(
+        `WITH RECURSIVE occupied(name) AS (
+          SELECT lower(name) FROM documents WHERE organization_id=? AND home_folder_id=? AND is_deleted=0 AND ?=0
+          UNION
+          SELECT lower(file_name) FROM uploads WHERE organization_id=? AND folder_id=? AND replacement=0 AND status='uploading' AND ?=0
+        ), candidates(n,file_name) AS (
+          SELECT 1,?
+          UNION ALL
+          SELECT n+1,? || ' (' || (n+1) || ')' || ? FROM candidates
+          WHERE EXISTS(SELECT 1 FROM occupied WHERE name=lower(candidates.file_name))
         )
-        .run();
-      if (!reservation.meta.changes)
-        throw error(
-          409,
-          'Another upload with this name is in progress. Wait for it to finish or choose a different filename.',
-        );
+        INSERT INTO uploads(id,user_id,organization_id,document_id,version_id,storage_key,upload_id,file_name,mime_type,size,fingerprint,part_size,status,folder_id,replacement,created_at)
+        SELECT ?,?,?,?,?,?,?,file_name,?,?,?,?,?,?,?,? FROM candidates
+        WHERE lower(file_name) NOT IN (SELECT name FROM occupied) ORDER BY n LIMIT 1`,
+      ).bind(
+        org,
+        folderId,
+        replacement ? 1 : 0,
+        org,
+        folderId,
+        replacement ? 1 : 0,
+        fileName,
+        stem,
+        extension,
+        uploadId,
+        user.userId,
+        org,
+        documentId,
+        versionId,
+        key,
+        providerId,
+        mimeType,
+        b.size,
+        b.fingerprint,
+        partSize,
+        'uploading',
+        folderId,
+        replacement ? 1 : 0,
+        Date.now(),
+      );
+      await reservation.run();
     } catch (e) {
       if (!['empty', 'single'].includes(providerId))
         await s3(c.env).abortMultipartUpload(key, providerId);

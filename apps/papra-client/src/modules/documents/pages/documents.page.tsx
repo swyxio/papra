@@ -22,6 +22,7 @@ import { useDebounce } from '@/modules/shared/utils/timing';
 import { Button } from '@/modules/ui/components/button';
 import { createToast } from '@/modules/ui/components/sonner';
 import { TextField, TextFieldRoot } from '@/modules/ui/components/textfield';
+import { DocumentMoveDialog } from '../components/document-move-dialog.component';
 import { DocumentsBatchTagDialog } from '../components/documents-batch-tag-dialog.component';
 import {
   createdAtColumn,
@@ -66,6 +67,7 @@ export const DocumentsPage: Component = () => {
   const [getRowSelection, setInternalRowSelection] = createSignal<RowSelectionState>({});
   const [getSelectAllMatchingQuery, setSelectAllMatchingQuery] = createSignal(false);
   const [getTagDialogOpen, setTagDialogOpen] = createSignal(false);
+  const [moveOpen, setMoveOpen] = createSignal(false);
 
   const [getSortField, setSortField] = createParamSynchronizedSignal<DocumentSearchSortField>({
     paramKey: 'sortField',
@@ -540,6 +542,18 @@ export const DocumentsPage: Component = () => {
                   <Button
                     variant="outline"
                     size="sm"
+                    disabled={
+                      tagMutation.isPending || trashMutation.isPending || getEffectiveCount() > 500
+                    }
+                    onClick={() => setMoveOpen(true)}
+                    title={getEffectiveCount() > 500 ? 'Move up to 500 files at a time' : undefined}
+                  >
+                    <div class="i-tabler-folder-symlink size-4 mr-2" />
+                    Move to…
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={() => setTagDialogOpen(true)}
                     disabled={tagMutation.isPending || trashMutation.isPending}
                   >
@@ -632,6 +646,13 @@ export const DocumentsPage: Component = () => {
             ]}
           />
 
+          <DocumentMoveDialog
+            organizationId={params.organizationId}
+            open={moveOpen()}
+            onOpenChange={setMoveOpen}
+            filter={getBatchFilter()}
+            onMoved={clearSelection}
+          />
           <DocumentsBatchTagDialog
             open={getTagDialogOpen()}
             onOpenChange={setTagDialogOpen}

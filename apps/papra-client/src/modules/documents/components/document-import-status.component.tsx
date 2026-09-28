@@ -1,3 +1,8 @@
+import {
+  createUploadScheduler,
+  prioritizeUploadTasks,
+  uploadFolderPaths,
+} from '../upload-scheduling.services';
 import { createShareLink } from '@/modules/document-share-links/document-share-links.services';
 import { TranscriptionProgress } from './transcription-progress.component';
 import { apiClient } from '@/modules/shared/http/api-client';
@@ -8,16 +13,7 @@ import { safely } from '@corentinth/chisels';
 import { A, useSearchParams } from '@solidjs/router';
 import { useQuery } from '@tanstack/solid-query';
 import pLimit from 'p-limit';
-import {
-  createContext,
-  createSignal,
-  Index,
-  Match,
-  onCleanup,
-  Show,
-  Switch,
-  useContext,
-} from 'solid-js';
+import { createContext, createSignal, Index, Match, Show, Switch, useContext } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { useI18n } from '@/modules/i18n/i18n.provider';
 import { promptUploadFiles } from '@/modules/shared/files/upload';
@@ -25,14 +21,6 @@ import { useI18nApiErrors } from '@/modules/shared/http/composables/i18n-api-err
 import { cn } from '@/modules/shared/style/cn';
 import { throttle } from '@/modules/shared/utils/timing';
 import { fetchOrganizationSubscription } from '@/modules/subscriptions/subscriptions.services';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/modules/ui/components/dialog';
 import { getHttpErrorMessage, isHttpErrorWithStatusCode } from '@/modules/shared/http/http-errors';
 import { Button } from '@/modules/ui/components/button';
 import { invalidateOrganizationDocumentsQuery } from '../documents.composables';
@@ -63,7 +51,8 @@ export function useDocumentUpload() {
   const { uploadDocuments } = context;
 
   return {
-    uploadDocuments: async ({ files }: { files: File[] }) => uploadDocuments({ files }),
+    uploadDocuments: async (args: { files: File[]; folderImport?: boolean; folderId?: string }) =>
+      uploadDocuments(args),
     promptImport: async () => {
       const { files } = await promptUploadFiles();
 
@@ -89,6 +78,10 @@ type TaskError = {
 };
 
 type Task = {
+  fileName?: string;
+  folderImport?: boolean;
+  folderId?: string;
+  destination?: string;
   progress?: TransferProgress;
   processing?: DocumentProcessing;
   processingError?: string;
@@ -116,31 +109,10 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
 
   const [getState, setState] = createSignal<'open' | 'closed' | 'collapsed'>('closed');
   const [getTasks, setTasks] = createSignal<Task[]>([]);
-  type DuplicateDecision = { action: 'replace' } | { action: 'rename'; name: string } | undefined;
-  const [duplicate, setDuplicate] = createSignal<{
-    name: string;
-    canReplace: boolean;
-    resolve: (decision: DuplicateDecision) => void;
-  }>();
-  const uploadLimit = pLimit(4);
-  const largeUploadLimit = pLimit(1);
-  const duplicateLimit = pLimit(1);
-  const [newName, setNewName] = createSignal('');
-  const resolveDuplicate = async (conflict: { name: string; canReplace: boolean }) =>
-    duplicateLimit(
-      async () =>
-        new Promise<DuplicateDecision>((resolve) => {
-          setNewName(conflict.name.replace(/(\.[^.]+)?$/, ' (new)$1'));
-          setDuplicate({ ...conflict, resolve });
-        }),
-    );
-  const decideDuplicate = (decision: DuplicateDecision) => {
-    duplicate()?.resolve(decision);
-    setDuplicate(undefined);
-  };
-
-  onCleanup(() => decideDuplicate(undefined));
-
+  const uploadLimit = createUploadScheduler();
+  const [failedOnly, setFailedOnly] = createSignal(false);
+  const [dismissedInterrupted, setDismissedInterrupted] = createSignal<string[]>([]);
+  const [folderLabels, setFolderLabels] = createSignal<Record<string, string>>({});
   const updateTaskStatus = (
     args:
       | { file: File; status: 'success'; document: Document }
@@ -148,7 +120,11 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
       | { file: File; status: 'pending' | 'uploading' },
   ) => {
     setTasks((tasks) =>
-      tasks.map((task) => (task.file === args.file ? { ...task, ...args } : task)),
+      tasks.map((task) =>
+        task.file === args.file
+          ? { ...task, ...args, ...(args.status === 'pending' ? { progress: undefined } : {}) }
+          : task,
+      ),
     );
   };
 
@@ -160,11 +136,20 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
 
   const interruptedQuery = useQuery(() => ({
     queryKey: ['organizations', props.organizationId, 'uploads'],
-    queryFn: async () =>
-      apiClient<{ uploads: { id: string; fileName: string }[] }>({
-        method: 'GET',
-        path: `/api/organizations/${props.organizationId}/uploads`,
-      }),
+    queryFn: async () => {
+      const [result, { folders }] = await Promise.all([
+        apiClient<{ uploads: { id: string; fileName: string; folderId?: string }[] }>({
+          method: 'GET',
+          path: `/api/organizations/${props.organizationId}/uploads`,
+        }),
+        apiClient<{ folders: { id: string; parentId: string | null; name: string }[] }>({
+          method: 'GET',
+          path: `/api/organizations/${props.organizationId}/folders`,
+        }),
+      ]);
+      setFolderLabels(uploadFolderPaths(folders));
+      return result;
+    },
     refetchOnWindowFocus: true,
   }));
 
@@ -244,19 +229,52 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
   const uploadDocuments = async ({
     files,
     folderImport,
-    folderId = typeof searchParams.folder === 'string' ? searchParams.folder : undefined,
+    retry = false,
+    folderId,
   }: {
     files: File[];
     folderImport?: boolean;
     folderId?: string;
+    retry?: boolean;
   }) => {
+    if (!retry && folderId === undefined)
+      folderId = typeof searchParams.folder === 'string' ? searchParams.folder : undefined;
     const organizationId = props.organizationId;
     const completeUpload = createUploadCompleter(organizationId);
-    setTasks((tasks) => [...tasks, ...files.map((file) => ({ file, status: 'pending' }) as const)]);
+    if (retry) {
+      for (const file of files) updateTaskStatus({ file, status: 'pending' });
+    } else {
+      setTasks((tasks) => [
+        ...tasks,
+        ...files.map(
+          (file) =>
+            ({
+              file,
+              status: 'pending',
+              folderId,
+              folderImport,
+              destination: folderImport
+                ? file.webkitRelativePath.split('/').slice(0, -1).join(' / ')
+                : undefined,
+            }) as const,
+        ),
+      ]);
+    }
+    setFailedOnly(false);
     setState('open');
 
     if (!organizationLimitsQuery.data) {
-      await organizationLimitsQuery.promise;
+      try {
+        await organizationLimitsQuery.promise;
+      } catch (error) {
+        for (const file of files)
+          updateTaskStatus({
+            file,
+            status: 'error',
+            error: error instanceof Error ? error : new Error(String(error)),
+          });
+        return;
+      }
     }
 
     // Optimistic prevent upload if file is too large, the server will still validate it
@@ -264,35 +282,67 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
 
     // Folder creation precedes parallel file transfers; only conflicting-name decisions are serialized.
     const folders = new Map<string, string>();
-    if (folderImport) {
+    try {
       const list = await apiClient<{
         folders: { id: string; parentId: string | null; name: string; isHome: boolean }[];
       }>({ method: 'GET', path: `/api/organizations/${organizationId}/folders` });
       folders.set('', folderId || list.folders.find((f) => f.isHome)!.id);
-      for (const file of files) {
-        const segments = file.webkitRelativePath.split('/').slice(0, -1);
-        let path = '';
-        for (const name of segments) {
-          const parentId = folders.get(path)!;
-          path = path ? `${path}/${name}` : name;
-          if (folders.has(path)) continue;
-          let folder = list.folders.find(
-            (f) => f.parentId === parentId && f.name.toLowerCase() === name.toLowerCase(),
-          );
-          if (!folder) {
-            const result = await apiClient<{
-              folder: { id: string; parentId: string; name: string; isHome: boolean };
-            }>({
-              method: 'POST',
-              path: `/api/organizations/${organizationId}/folders`,
-              body: { name, parentId },
-            });
-            folder = result.folder;
-            list.folders.push(folder);
+      const labels = uploadFolderPaths(list.folders);
+      setFolderLabels(labels);
+      setTasks((tasks) =>
+        tasks.map((task) =>
+          files.includes(task.file) ? { ...task, folderId: folders.get('') } : task,
+        ),
+      );
+      if (folderImport)
+        for (const file of files) {
+          const segments = file.webkitRelativePath.split('/').slice(0, -1);
+          let path = '';
+          for (const name of segments) {
+            const parentId = folders.get(path)!;
+            path = path ? `${path}/${name}` : name;
+            if (folders.has(path)) continue;
+            let folder = list.folders.find(
+              (f) => f.parentId === parentId && f.name.toLowerCase() === name.toLowerCase(),
+            );
+            if (!folder) {
+              const result = await apiClient<{
+                folder: { id: string; parentId: string; name: string; isHome: boolean };
+              }>({
+                method: 'POST',
+                path: `/api/organizations/${organizationId}/folders`,
+                body: { name, parentId },
+              });
+              folder = result.folder;
+              list.folders.push(folder);
+            }
+            folders.set(path, folder.id);
           }
-          folders.set(path, folder.id);
         }
-      }
+      const destinationLabels = uploadFolderPaths(list.folders);
+      setFolderLabels(destinationLabels);
+      setTasks((tasks) =>
+        tasks.map((task) => {
+          if (!files.includes(task.file)) return task;
+          const destinationId = folderImport
+            ? folders.get(task.file.webkitRelativePath.split('/').slice(0, -1).join('/'))
+            : folders.get('');
+          return {
+            ...task,
+            folderImport: false,
+            folderId: destinationId,
+            destination: destinationLabels[destinationId || ''] || 'Home',
+          };
+        }),
+      );
+    } catch (error) {
+      for (const file of files)
+        updateTaskStatus({
+          file,
+          status: 'error',
+          error: error instanceof Error ? error : new Error(String(error)),
+        });
+      return;
     }
 
     await Promise.all(
@@ -314,11 +364,14 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
             uploadDocument({
               file,
               organizationId,
-              resolveDuplicate,
               completeUpload,
               folderId: folderImport
                 ? folders.get(file.webkitRelativePath.split('/').slice(0, -1).join('/'))
-                : folderId,
+                : getTasks().find((task) => task.file === file)?.folderId,
+              onNameReady: (fileName) =>
+                setTasks((tasks) =>
+                  tasks.map((task) => (task.file === file ? { ...task, fileName } : task)),
+                ),
               onShareReady: (url) =>
                 setTasks((tasks) =>
                   tasks.map((task) => (task.file === file ? { ...task, shareUrl: url } : task)),
@@ -342,7 +395,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
 
           throttledInvalidateOrganizationDocumentsQuery({ organizationId });
         };
-        await (file.size > 32 * 1024 ** 2 ? largeUploadLimit(transfer) : uploadLimit(transfer));
+        await uploadLimit(transfer);
       }),
     );
     void interruptedQuery.refetch();
@@ -393,7 +446,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
     const totalCount = getTasks().length;
 
     if (errorCount > 0) {
-      return t('import-documents.title.error', { count: errorCount });
+      return `${errorCount} upload${errorCount === 1 ? '' : 's'} failed`;
     }
 
     if (successCount === totalCount) {
@@ -405,67 +458,71 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
 
   const close = () => {
     setState('closed');
-    setTasks([]);
+    // Hiding this panel does not cancel transfers or discard failed files.
   };
+
+  const failedTasks = () => getTasks().filter((task) => task.status === 'error');
+  const retryTasks = async (tasks: Task[]) => {
+    const groups = new Map<string, { files: File[]; folderId?: string; folderImport?: boolean }>();
+    for (const task of tasks) {
+      const key = JSON.stringify([task.folderId, !!task.folderImport]);
+      const group = groups.get(key) || {
+        files: [],
+        folderId: task.folderId,
+        folderImport: task.folderImport,
+      };
+      group.files.push(task.file);
+      groups.set(key, group);
+    }
+    await Promise.all(
+      Array.from(groups.values(), async (group) => uploadDocuments({ ...group, retry: true })),
+    );
+  };
+  const visibleInterrupted = () =>
+    interruptedQuery.data?.uploads.filter(
+      (upload) =>
+        !dismissedInterrupted().includes(upload.id) &&
+        !getTasks().some(
+          (task) =>
+            ['pending', 'uploading'].includes(task.status) &&
+            (task.fileName || task.file.name) === upload.fileName &&
+            (!upload.folderId || task.folderId === upload.folderId),
+        ),
+    );
 
   return (
     <DocumentUploadContext.Provider value={{ uploadDocuments }}>
       {props.children}
-      <Dialog
-        open={!!duplicate()}
-        onOpenChange={(open) => {
-          if (!open) decideDuplicate(undefined);
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>A file with this name already exists</DialogTitle>
-            <DialogDescription>
-              “{duplicate()?.name}” is already in this folder. Replace it to keep its link and
-              version history, or rename the new file.
-            </DialogDescription>
-          </DialogHeader>
-          <label class="block space-y-2 text-sm font-medium">
-            Name for the new file
-            <input
-              class="w-full rounded-md border bg-background px-3 py-2"
-              value={newName()}
-              onInput={(event) => setNewName(event.currentTarget.value)}
-            />
-          </label>
-          <DialogFooter class="flex-wrap gap-2">
-            <Button variant="ghost" onClick={() => decideDuplicate(undefined)}>
-              Cancel upload
-            </Button>
+      <Show when={visibleInterrupted()?.length}>
+        <div class="fixed bottom-2 left-2 z-50 max-w-sm bg-card border rounded-lg p-3 text-sm shadow-lg">
+          <div class="flex items-center justify-between gap-2">
+            <strong>Interrupted uploads ({visibleInterrupted()?.length})</strong>
             <Button
-              variant="outline"
-              disabled={!duplicate()?.canReplace}
-              onClick={() => decideDuplicate({ action: 'replace' })}
-            >
-              Replace existing
-            </Button>
-            <Button
-              disabled={
-                !newName().trim() ||
-                newName().trim().toLowerCase() === duplicate()?.name.toLowerCase()
+              variant="ghost"
+              size="icon"
+              aria-label="Dismiss interrupted upload notice"
+              onClick={() =>
+                setDismissedInterrupted((ids) => [
+                  ...ids,
+                  ...visibleInterrupted()!.map((upload) => upload.id),
+                ])
               }
-              onClick={() => decideDuplicate({ action: 'rename', name: newName() })}
             >
-              Rename and upload
+              <div class="i-tabler-x size-4" />
             </Button>
-          </DialogFooter>
-          <Show when={duplicate() && !duplicate()?.canReplace}>
-            <p class="text-sm text-muted-foreground">
-              You can rename the new file. Replacing the existing file requires edit access.
-            </p>
-          </Show>
-        </DialogContent>
-      </Dialog>
-      <Show when={interruptedQuery.data?.uploads.length}>
-        <div class="fixed bottom-2 left-2 max-w-sm bg-card border rounded-lg p-3 text-sm shadow-lg">
-          Interrupted uploads:{' '}
-          {interruptedQuery.data?.uploads.map((upload) => upload.fileName).join(', ')}. Choose
-          Import and reselect the same files to resume.
+          </div>
+          <p class="break-words">
+            {visibleInterrupted()
+              ?.map(
+                (upload) =>
+                  `${folderLabels()[upload.folderId || ''] || 'Destination folder'} / ${upload.fileName}`,
+              )
+              .join(', ')}
+          </p>
+          <p class="mt-1 text-muted-foreground">
+            Choose Import and reselect the original files in their destination folder to resume.
+            Dismissing this notice does not delete them.
+          </p>
         </div>
       </Show>
       <Portal>
@@ -477,6 +534,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
               <Button
                 variant="ghost"
                 size="icon"
+                aria-label={getState() === 'open' ? 'Collapse upload panel' : 'Expand upload panel'}
                 onClick={() => setState((state) => (state === 'open' ? 'collapsed' : 'open'))}
               >
                 <div
@@ -487,23 +545,60 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
                 />
               </Button>
 
-              <Button variant="ghost" size="icon" onClick={close}>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Dismiss upload panel (uploads continue)"
+                onClick={close}
+              >
                 <div class="i-tabler-x size-5" />
               </Button>
             </div>
 
             <Show when={getState() === 'open'}>
-              <div class="flex flex-col overflow-y-auto h-[450px] pb-4">
-                <Index each={getTasks()}>
+              <div class="px-6 py-3 border-b space-y-2">
+                <p class="text-xs text-muted-foreground" aria-live="polite">
+                  {getTasks().filter((task) => task.status === 'uploading').length} uploading ·{' '}
+                  {getTasks().filter((task) => task.status === 'pending').length} queued ·{' '}
+                  {getTasks().filter((task) => task.status === 'success').length} uploaded ·{' '}
+                  {failedTasks().length} failed
+                </p>
+                <Show when={failedTasks().length}>
+                  <div class="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setFailedOnly((value) => !value)}
+                    >
+                      {failedOnly() ? 'Show all uploads' : `Show failed (${failedTasks().length})`}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void retryTasks(failedTasks())}
+                    >
+                      Retry failed
+                    </Button>
+                  </div>
+                </Show>
+                <p class="text-xs text-muted-foreground">
+                  Up to 10 files upload at once. Closing hides this panel; uploads continue.
+                </p>
+              </div>
+              <div class="flex flex-col overflow-y-auto max-h-[450px] pb-4">
+                <Index each={prioritizeUploadTasks(getTasks(), failedOnly())}>
                   {(task) => (
                     <Switch>
                       <Match when={task().status === 'success'}>
                         <div class="text-sm min-w-0 px-6 py-3 border-b border-border/80 space-y-2">
+                          <p class="text-xs text-muted-foreground break-words">
+                            {task().destination}
+                          </p>
                           <A
                             href={`/organizations/${(task() as TaskSuccess).document.organizationId}/documents/${(task() as TaskSuccess).document.id}`}
                             class="block truncate hover:underline"
                           >
-                            {task().file.name} ↗
+                            {task().fileName || task().file.name} ↗
                           </A>
                           <div class="text-xs text-muted-foreground whitespace-normal">
                             {task().processing
@@ -544,22 +639,46 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
                       </Match>
 
                       <Match when={task().status === 'error'}>
-                        <div class="text-sm truncate min-w-0 flex items-center gap-4 min-h-48px px-6 border-b border-border/80">
-                          <div class="flex-1 truncate">
-                            <div class="flex-1 truncate">{task().file.name}</div>
-
-                            <div class="text-xs text-muted-foreground truncate text-red-500">
-                              {isHttpErrorWithStatusCode({
-                                error: (task() as TaskError).error,
-                                statusCode: 409,
-                              })
-                                ? getHttpErrorMessage((task() as TaskError).error)
-                                : getErrorMessage({ error: (task() as TaskError).error })}
-                            </div>
+                        <div
+                          class="text-sm min-w-0 px-6 py-3 border-b border-border/80 space-y-2"
+                          role="alert"
+                        >
+                          <div class="flex items-start gap-2">
+                            <div class="i-tabler-circle-x text-red-500 size-5 flex-none" />
+                            <strong class="break-words">
+                              {task().fileName || task().file.name}
+                            </strong>
                           </div>
-
-                          <div class="flex-none">
-                            <div class="i-tabler-circle-x text-red-500 size-5.5" />
+                          <p class="text-xs text-muted-foreground break-words">
+                            {task().destination}
+                          </p>
+                          <p class="text-xs text-red-500 whitespace-pre-wrap break-words">
+                            {isHttpErrorWithStatusCode({
+                              error: (task() as TaskError).error,
+                              statusCode: 409,
+                            })
+                              ? getHttpErrorMessage((task() as TaskError).error)
+                              : getErrorMessage({ error: (task() as TaskError).error })}
+                          </p>
+                          <div class="flex gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => void retryTasks([task()])}
+                            >
+                              Retry upload
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() =>
+                                setTasks((tasks) =>
+                                  tasks.filter((item) => item.file !== task().file),
+                                )
+                              }
+                            >
+                              Dismiss
+                            </Button>
                           </div>
                         </div>
                       </Match>
@@ -567,7 +686,15 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
                       <Match when={['pending', 'uploading'].includes(task().status)}>
                         <div class="text-sm min-w-0 flex items-center gap-4 min-h-48px px-6 py-3 border-b border-border/80">
                           <div class="flex-1 min-w-0 space-y-2">
-                            <div class="truncate">{task().file.name}</div>
+                            <div class="break-words">{task().fileName || task().file.name}</div>
+                            <p class="text-xs text-muted-foreground break-words">
+                              {task().destination}
+                            </p>
+                            <p class="text-xs text-muted-foreground">
+                              {task().status === 'pending'
+                                ? 'Queued · waiting for an upload slot'
+                                : 'Uploading'}
+                            </p>
                             <UploadShareLink task={task} />
                             <Show when={task().progress}>
                               {(progress) => (
@@ -579,7 +706,9 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
                                   ·{' '}
                                   {progress().bytes >= progress().total
                                     ? 'Finalizing…'
-                                    : `${Math.ceil(progress().eta)}s left`}{' '}
+                                    : progress().speed > 0
+                                      ? `${Math.ceil(progress().eta)}s left`
+                                      : 'Estimating time…'}{' '}
                                   <Show when={progress().resumedParts > 0}>
                                     · resumed {progress().resumedParts} parts
                                   </Show>
@@ -594,7 +723,13 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
                           </div>
 
                           <div class="flex-none">
-                            <div class="i-tabler-loader-2 animate-spin text-muted-foreground size-5.5" />
+                            <div
+                              class={
+                                task().status === 'pending'
+                                  ? 'i-tabler-clock text-muted-foreground size-5.5'
+                                  : 'i-tabler-loader-2 animate-spin text-muted-foreground size-5.5'
+                              }
+                            />
                           </div>
                         </div>
                       </Match>

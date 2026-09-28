@@ -1,32 +1,52 @@
 import type { Component } from 'solid-js';
-import { createSignal } from 'solid-js';
+import { createSignal, Show } from 'solid-js';
+import { isFileDrag, readDroppedFiles } from '@/modules/shared/files/drop';
 import { cn } from '@/modules/shared/style/cn';
 import { Button } from '@/modules/ui/components/button';
 import { useDocumentUpload } from './document-import-status.component';
 
 export const DocumentUploadArea: Component = () => {
   const [isDragging, setIsDragging] = createSignal(false);
+  const [error, setError] = createSignal<string>();
+  const [reading, setReading] = createSignal(false);
 
   const { promptImport, promptFolderImport, uploadDocuments } = useDocumentUpload();
 
   const handleDragOver = (event: DragEvent) => {
+    if (!isFileDrag(event)) return;
     event.preventDefault();
+    event.stopPropagation();
     setIsDragging(true);
   };
 
-  const handleDragLeave = () => {
+  const handleDragLeave = (event: DragEvent) => {
+    if (
+      event.relatedTarget instanceof Node &&
+      event.currentTarget instanceof Node &&
+      event.currentTarget.contains(event.relatedTarget)
+    )
+      return;
     setIsDragging(false);
   };
 
   const handleDrop = async (event: DragEvent) => {
+    if (!isFileDrag(event) || !event.dataTransfer) return;
     event.preventDefault();
     setIsDragging(false);
-    if (!event.dataTransfer?.files) {
-      return;
+    setError(undefined);
+    setReading(true);
+    const dropped = readDroppedFiles(event.dataTransfer);
+    try {
+      const files = await dropped;
+      setReading(false);
+      await uploadDocuments(files);
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : 'Could not read these files. Try Upload a folder.',
+      );
+    } finally {
+      setReading(false);
     }
-
-    const files = [...event.dataTransfer.files];
-    await uploadDocuments({ files });
   };
 
   return (
@@ -40,13 +60,29 @@ export const DocumentUploadArea: Component = () => {
       onDrop={handleDrop}
     >
       <div class="i-tabler-cloud-upload size-12 mb-4" />
-      <p>{isDragging() ? 'Drop files to upload' : 'Drag and drop files here to upload'}</p>
+      <p>
+        {reading()
+          ? 'Reading folder contents…'
+          : isDragging()
+            ? 'Drop files or folders to upload'
+            : 'Drag and drop files or folders here to upload'}
+      </p>
+      <Show when={error()}>
+        <div role="alert" class="mt-3 text-sm text-red-600 dark:text-red-300">
+          {error()}{' '}
+          <button type="button" class="underline ml-2" onClick={() => setError(undefined)}>
+            Dismiss
+          </button>
+        </div>
+      </Show>
 
       <Button class="mt-4" variant="outline" onClick={promptImport}>
         <div class="i-tabler-upload mr-2" />
         Select files
       </Button>
-      <Button class="mt-2" variant="ghost" onClick={promptFolderImport}>Upload a folder</Button>
+      <Button class="mt-2" variant="ghost" onClick={promptFolderImport}>
+        Upload a folder
+      </Button>
     </div>
   );
 };

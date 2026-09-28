@@ -33,3 +33,19 @@ export async function batchUpdateDocumentTags({
     body: { filter, addTagIds, removeTagIds },
   });
 }
+
+export async function batchMoveDocuments({
+  organizationId,
+  filter,
+  folderId,
+}: {
+  organizationId: string;
+  filter: BatchTargetFilter;
+  folderId: string;
+}) {
+  return apiClient<{ moved: number }>({
+    method: 'POST',
+    path: `/api/organizations/${organizationId}/documents/batch/move`,
+    body: { filter, folderId },
+  });
+}

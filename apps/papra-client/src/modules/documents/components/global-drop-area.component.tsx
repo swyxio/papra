@@ -1,65 +1,103 @@
 import type { Component } from 'solid-js';
-import { createSignal, onCleanup } from 'solid-js';
-import { useI18n } from '@/modules/i18n/i18n.provider';
+import { createSignal, onCleanup, Show } from 'solid-js';
 import { cn } from '@/modules/shared/style/cn';
+import { isFileDrag, readDroppedFiles } from '@/modules/shared/files/drop';
 
-export const GlobalDropArea: Component<{ onFilesDrop?: (args: { files: File[] }) => void }> = (
-  props,
-) => {
-  const { t } = useI18n();
+export const GlobalDropArea: Component<{
+  onFilesDrop?: (args: { files: File[]; folderImport?: boolean }) => void | Promise<void>;
+}> = (props) => {
   const [isDragging, setIsDragging] = createSignal(false);
-
-  const handleDragOver = (e: DragEvent) => {
-    e.preventDefault();
+  const [isReading, setIsReading] = createSignal(false);
+  const [error, setError] = createSignal<string>();
+  let depth = 0;
+  const reset = () => {
+    depth = 0;
+    setIsDragging(false);
+  };
+  const handleDragEnter = (event: DragEvent) => {
+    if (!isFileDrag(event)) return;
+    event.preventDefault();
+    depth++;
     setIsDragging(true);
   };
-
-  const handleDragLeave = (e: DragEvent) => {
-    if (e.relatedTarget === null) {
-      setIsDragging(false);
+  const handleDragOver = (event: DragEvent) => {
+    if (!isFileDrag(event)) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+  };
+  const handleDragLeave = (event: DragEvent) => {
+    if (!isFileDrag(event)) return;
+    depth = Math.max(0, depth - 1);
+    if (!depth) setIsDragging(false);
+  };
+  const handleDrop = async (event: DragEvent) => {
+    reset();
+    if (event.defaultPrevented || !isFileDrag(event) || !event.dataTransfer) return;
+    event.preventDefault();
+    setError(undefined);
+    setIsReading(true);
+    // Start reading while the drop's DataTransfer is still accessible.
+    const reading = readDroppedFiles(event.dataTransfer);
+    try {
+      const dropped = await reading;
+      setIsReading(false);
+      await props.onFilesDrop?.(dropped);
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : 'Could not read these files. Try Upload a folder.',
+      );
+    } finally {
+      setIsReading(false);
     }
   };
-
-  const handleDrop = (e: DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-    const files = Array.from(e.dataTransfer?.files ?? []);
-
-    if (files.length === 0) {
-      return;
-    }
-
-    props.onFilesDrop?.({ files });
-  };
-
-  // Adding global event listeners for drag and drop
+  document.addEventListener('dragenter', handleDragEnter);
   document.addEventListener('dragover', handleDragOver);
   document.addEventListener('dragleave', handleDragLeave);
   document.addEventListener('drop', handleDrop);
-
-  // Cleanup listeners when component unmounts
+  document.addEventListener('dragend', reset);
+  window.addEventListener('blur', reset);
   onCleanup(() => {
+    document.removeEventListener('dragenter', handleDragEnter);
     document.removeEventListener('dragover', handleDragOver);
     document.removeEventListener('dragleave', handleDragLeave);
     document.removeEventListener('drop', handleDrop);
+    document.removeEventListener('dragend', reset);
+    window.removeEventListener('blur', reset);
   });
-
   return (
-    <div
-      class={cn(
-        'fixed top-0 left-0 w-screen h-screen z-80 bg-background bg-opacity-50 backdrop-blur transition-colors',
-        isDragging() ? 'block' : 'hidden',
-      )}
-    >
-      <div class="flex items-center justify-center h-full text-center flex-col">
-        <div class="i-tabler-file-plus text-6xl text-muted-foreground mx-auto" />
-        <div class="text-xl my-2 font-semibold text-muted-foreground">
-          {t('documents.import.drop-area.title')}
-        </div>
-        <div class="text-base text-muted-foreground">
-          {t('documents.import.drop-area.description')}
+    <>
+      <div
+        class={cn(
+          'fixed inset-0 z-80 bg-background/80 backdrop-blur pointer-events-none',
+          isDragging() || isReading() ? 'block' : 'hidden',
+        )}
+      >
+        <div class="flex items-center justify-center h-full text-center flex-col">
+          <div class="i-tabler-folder-up text-6xl text-primary" />
+          <div class="text-xl my-2 font-semibold">
+            {isReading() ? 'Reading folder contents…' : 'Drop files or folders to upload'}
+          </div>
+          <div class="text-muted-foreground">
+            Folder structure is preserved in the current destination.
+          </div>
         </div>
       </div>
-    </div>
+      <Show when={error()}>
+        <div
+          class="fixed bottom-4 left-4 z-90 max-w-sm rounded-lg border bg-background p-4 shadow-lg"
+          role="alert"
+        >
+          <button
+            type="button"
+            class="float-right ml-3"
+            aria-label="Dismiss folder upload error"
+            onClick={() => setError(undefined)}
+          >
+            <span class="i-tabler-x size-4" />
+          </button>
+          {error()}
+        </div>
+      </Show>
+    </>
   );
 };
