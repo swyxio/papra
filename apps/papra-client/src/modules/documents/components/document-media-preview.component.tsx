@@ -206,7 +206,9 @@ export function MediaPlaybackPlayer(props: {
     quality() === '1080' || selectedQuality() === '1080' ? ('1080' as const) : ('720' as const);
   const canGenerate1080 = () => {
     const original = media.data?.original;
-    return !original?.width || !original.height || Math.min(original.width, original.height) > 720;
+    return (
+      !!original?.width && !!original.height && Math.min(original.width, original.height) >= 1080
+    );
   };
   const busy = () =>
     preparing() || ['queued', 'processing'].includes(media.data?.preview?.status ?? '');

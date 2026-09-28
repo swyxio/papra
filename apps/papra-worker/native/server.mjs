@@ -564,6 +564,9 @@ export async function convertVideoJob(rawJob, callerSignal) {
     const file = join(dir, 'playback.mp4');
     await encodePlayback(job.source.url, file, metadata, job.height, signal);
     const outputMetadata = checkedVideoMetadata(await probeMedia(file, signal));
+    if (outputMetadata.width > metadata.width || outputMetadata.height > metadata.height) {
+      throw new ProcessingError('playback_output_upscaled');
+    }
     if (
       Math.abs(outputMetadata.durationSeconds - metadata.durationSeconds) >
       Math.max(1, metadata.durationSeconds * 0.01)

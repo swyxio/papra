@@ -206,3 +206,39 @@ test('real FFmpeg does not upscale small silent video and respects cancellation'
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('real FFmpeg encode path never upscales a small incompatible video even when 1080p is requested', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'papra-video-no-upscale-test-'));
+  try {
+    const source = join(dir, 'source.mov');
+    const output = join(dir, 'preview.mp4');
+    await run('ffmpeg', [
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc2=size=320x180:rate=24:duration=0.5',
+      '-c:v',
+      'libx264',
+      '-pix_fmt',
+      'yuv444p',
+      '-threads',
+      '1',
+      '-y',
+      source,
+    ]);
+    const before = normalizeMediaMetadata(await probeMedia(source, AbortSignal.timeout(10_000)));
+    assert.equal(before.pixelFormat, 'yuv444p');
+    assert.equal(canRemuxPlayback(before, 1080), false);
+    await encodePlayback(source, output, before, 1080, AbortSignal.timeout(10_000));
+    const after = normalizeMediaMetadata(await probeMedia(output, AbortSignal.timeout(10_000)));
+    assert.equal(after.pixelFormat, 'yuv420p');
+    assert.equal(after.width, 320);
+    assert.equal(after.height, 180);
+    assert.ok(after.width <= before.width && after.height <= before.height);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
