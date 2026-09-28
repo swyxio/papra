@@ -330,7 +330,7 @@ export const OrganizationLayout: ParentComponent = (props) => {
 
 const OrganizationLayoutImportButton: Component = () => {
   const params = useParams();
-  const { uploadDocuments, promptImport } = useDocumentUpload();
+  const { uploadDocuments, promptImport, promptFolderImport } = useDocumentUpload();
   const { t } = useI18n();
 
   return (
@@ -346,7 +346,8 @@ const OrganizationLayoutImportButton: Component = () => {
               <div class="i-tabler-chevron-down size-4 ml-2" />
             </DropdownMenuTrigger>
             <DropdownMenuContent>
-              <DropdownMenuItem onSelect={promptImport}>Upload files or folders</DropdownMenuItem>
+              <DropdownMenuItem onSelect={promptImport}>Upload files</DropdownMenuItem>
+              <DropdownMenuItem onSelect={promptFolderImport}>Upload a folder</DropdownMenuItem>
               <DropdownMenuItem onSelect={openGoogleImport}>Import Google Doc URL</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

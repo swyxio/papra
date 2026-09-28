@@ -22,6 +22,7 @@ import { cn } from '@/modules/shared/style/cn';
 import { throttle } from '@/modules/shared/utils/timing';
 import { fetchOrganizationSubscription } from '@/modules/subscriptions/subscriptions.services';
 import { getHttpErrorMessage, isHttpErrorWithStatusCode } from '@/modules/shared/http/http-errors';
+import { getUploadErrorFallback } from '../upload-errors';
 import { Button } from '@/modules/ui/components/button';
 import { invalidateOrganizationDocumentsQuery } from '../documents.composables';
 import { uploadDocument } from '../documents.services';
@@ -658,7 +659,12 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
                               statusCode: 409,
                             })
                               ? getHttpErrorMessage((task() as TaskError).error)
-                              : getErrorMessage({ error: (task() as TaskError).error })}
+                              : getErrorMessage({
+                                  error: (task() as TaskError).error,
+                                  defaultMessage: getUploadErrorFallback(
+                                    (task() as TaskError).error,
+                                  ),
+                                })}
                           </p>
                           <div class="flex gap-2">
                             <Button
