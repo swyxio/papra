@@ -126,7 +126,11 @@ export const deletedAtColumn: ColumnDef<Document> = {
 export const standardActionsColumn: ColumnDef<Document> = {
   header: () => {
     const { t } = useI18n();
-    return <span class="block text-right">{t('documents.list.table.headers.actions')}</span>;
+    return (
+      <span class="sr-only sm:not-sr-only sm:block text-right">
+        {t('documents.list.table.headers.actions')}
+      </span>
+    );
   },
   id: 'actions',
   enableSorting: false,
