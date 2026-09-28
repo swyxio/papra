@@ -183,14 +183,14 @@ export const DocumentsPaginatedList: Component<{
         accessorFn: (row) => row.name,
         enableSorting: true,
         cell: (data) => (
-          <div class="overflow-hidden flex gap-4 items-center max-w-500px">
-            <div class="bg-muted flex items-center justify-center p-2 rounded-lg">
+          <div class="overflow-hidden min-w-0 flex gap-2 sm:gap-4 items-center max-w-500px">
+            <div class="bg-muted shrink-0 flex items-center justify-center p-2 rounded-lg">
               <div
                 class={cn(getDocumentIcon({ document: data.row.original }), 'size-6 text-primary')}
               />
             </div>
 
-            <div class="flex-1 flex flex-col gap-1 truncate">
+            <div class="min-w-0 flex-1 flex flex-col gap-1 truncate">
               <A
                 href={`/organizations/${data.row.original.organizationId}/documents/${data.row.original.id}`}
                 class="font-bold truncate block hover:underline"
@@ -251,7 +251,7 @@ export const DocumentsPaginatedList: Component<{
     <div>
       <Switch>
         <Match when={props.documentsCount > 0}>
-          <Table>
+          <Table class="table-fixed sm:table-auto">
             <TableHeader>
               <For each={table.getHeaderGroups()}>
                 {(headerGroup) => (
@@ -259,7 +259,13 @@ export const DocumentsPaginatedList: Component<{
                     <For each={headerGroup.headers}>
                       {(header) => {
                         return (
-                          <TableHead>
+                          <TableHead
+                            class={cn(
+                              !['select', 'name', 'actions'].includes(header.column.id) &&
+                                'hidden sm:table-cell',
+                              ['select', 'actions'].includes(header.column.id) && 'w-10 sm:w-auto',
+                            )}
+                          >
                             <Show when={!header.isPlaceholder}>
                               <Show
                                 when={header.column.getCanSort()}
@@ -302,7 +308,13 @@ export const DocumentsPaginatedList: Component<{
                     <TableRow data-state={row.getIsSelected() && 'selected'}>
                       <For each={row.getVisibleCells()}>
                         {(cell) => (
-                          <TableCell>
+                          <TableCell
+                            class={cn(
+                              !['select', 'name', 'actions'].includes(cell.column.id) &&
+                                'hidden sm:table-cell',
+                              ['select', 'actions'].includes(cell.column.id) && 'w-10 sm:w-auto',
+                            )}
+                          >
                             {flexRender(cell.column.columnDef.cell, cell.getContext())}
                           </TableCell>
                         )}

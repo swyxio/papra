@@ -42,8 +42,13 @@ export const DocumentManagementDropdown: Component<{ document: Document }> = (pr
     <>
       <DropdownMenu>
         <DropdownMenuTrigger
-          as={(props: DropdownMenuSubTriggerProps) => (
-            <Button variant="ghost" size="icon" {...props}>
+          as={(triggerProps: DropdownMenuSubTriggerProps) => (
+            <Button
+              variant="ghost"
+              size="icon"
+              {...triggerProps}
+              aria-label={`Actions for ${props.document.name}`}
+            >
               <div class="i-tabler-dots-vertical size-4" />
             </Button>
           )}

@@ -1,3 +1,4 @@
+import type { DriveFolder } from './drive-collaboration.services';
 import type { Component } from 'solid-js';
 import { A, useSearchParams } from '@solidjs/router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/solid-query';
@@ -384,6 +385,11 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
     }
     return result;
   };
+  const contentsLabel = (folder: DriveFolder) => {
+    const subfolders =
+      folders.data?.folders.filter((candidate) => candidate.parentId === folder.id).length ?? 0;
+    return `${folder.documentsCount} ${folder.documentsCount === 1 ? 'file' : 'files'} · ${subfolders} ${subfolders === 1 ? 'subfolder' : 'subfolders'}`;
+  };
   const openFolder = (id: string) =>
     setParams({ folder: id, scope: undefined, query: undefined, page: undefined });
   const accessLabel = (restricted: boolean) =>
@@ -537,12 +543,12 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
         <Show when={current()}>
           {(folder) => (
             <p class="text-xs text-muted-foreground">
-              {accessLabel(folder().effectiveRestricted)} · {folder().documentsCount} files
+              {accessLabel(folder().effectiveRestricted)} · {contentsLabel(folder())}
               <Show when={folder().shortcutsCount > 0}>
                 {' '}
                 · {folder().shortcutsCount} shortcuts
               </Show>{' '}
-              · {formatBytes({ bytes: folder().documentsSize })}
+              · {formatBytes({ bytes: folder().documentsSize })} in this folder
             </p>
           )}
         </Show>
@@ -577,12 +583,12 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
                   <div class="min-w-0 flex-1">
                     <span class="block truncate text-sm font-medium">{folder.name}</span>
                     <span class="block text-xs text-muted-foreground">
-                      {folder.documentsCount} files
+                      {contentsLabel(folder)}
                       <Show when={folder.shortcutsCount > 0}>
                         {' '}
                         · {folder.shortcutsCount} shortcuts
                       </Show>{' '}
-                      · {formatBytes({ bytes: folder.documentsSize })} ·{' '}
+                      · {formatBytes({ bytes: folder.documentsSize })} in this folder ·{' '}
                       {accessLabel(folder.effectiveRestricted)}
                     </span>
                   </div>

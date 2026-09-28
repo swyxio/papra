@@ -15,6 +15,7 @@ import { useQuery } from '@tanstack/solid-query';
 import pLimit from 'p-limit';
 import { createContext, createSignal, Index, Match, Show, Switch, useContext } from 'solid-js';
 import { Portal } from 'solid-js/web';
+import { createPersistedSignal } from '@/modules/shared/signals/persistence/persistence.signals';
 import { useI18n } from '@/modules/i18n/i18n.provider';
 import { promptUploadFiles } from '@/modules/shared/files/upload';
 import { useI18nApiErrors } from '@/modules/shared/http/composables/i18n-api-errors';
@@ -112,7 +113,19 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
   const [getTasks, setTasks] = createSignal<Task[]>([]);
   const uploadLimit = createUploadScheduler();
   const [failedOnly, setFailedOnly] = createSignal(false);
-  const [dismissedInterrupted, setDismissedInterrupted] = createSignal<string[]>([]);
+  const [dismissedInterrupted, setDismissedInterrupted] = (() => {
+    try {
+      return createPersistedSignal<string[]>([], {
+        key: `drive-dismissed-interrupted:${props.organizationId}`,
+        deserialize: (value) => {
+          const ids: unknown = JSON.parse(value);
+          return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : [];
+        },
+      });
+    } catch {
+      return createSignal<string[]>([]);
+    }
+  })();
   const [folderLabels, setFolderLabels] = createSignal<Record<string, string>>({});
   const updateTaskStatus = (
     args:
@@ -439,7 +452,9 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
 
   const getTitle = () => {
     if (getTasks().length === 0) {
-      return t('import-documents.title.none');
+      return interruptedQuery.data?.uploads.length
+        ? 'Upload recovery'
+        : t('import-documents.title.none');
     }
 
     const successCount = getTasks().filter((task) => task.status === 'success').length;
@@ -494,8 +509,8 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
   return (
     <DocumentUploadContext.Provider value={{ uploadDocuments }}>
       {props.children}
-      <Show when={visibleInterrupted()?.length}>
-        <div class="fixed bottom-2 left-2 z-50 max-w-sm bg-card border rounded-lg p-3 text-sm shadow-lg">
+      <Show when={getState() === 'closed' && visibleInterrupted()?.length}>
+        <div class="fixed bottom-16 left-2 z-50 max-w-[calc(100vw-1rem)] sm:max-w-sm bg-card border rounded-lg p-3 text-sm shadow-lg">
           <div class="flex items-center justify-between gap-2">
             <strong>Interrupted uploads ({visibleInterrupted()?.length})</strong>
             <Button
@@ -527,8 +542,38 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
         </div>
       </Show>
       <Portal>
+        <Show
+          when={
+            getState() === 'closed' && (getTasks().length || interruptedQuery.data?.uploads.length)
+          }
+        >
+          <Button
+            class="fixed bottom-3 right-3 z-40 shadow-lg"
+            variant="outline"
+            aria-label="Open uploads"
+            onClick={() => setState('open')}
+          >
+            <span class="i-tabler-upload size-4 mr-2" />
+            Uploads
+            <Show
+              when={getTasks().some(
+                (task) => task.status === 'pending' || task.status === 'uploading',
+              )}
+            >
+              {' '}
+              ·{' '}
+              {
+                getTasks().filter(
+                  (task) => task.status === 'pending' || task.status === 'uploading',
+                ).length
+              }{' '}
+              active
+            </Show>
+            <Show when={failedTasks().length}> · {failedTasks().length} failed</Show>
+          </Button>
+        </Show>
         <Show when={getState() !== 'closed'}>
-          <div class="fixed bottom-0 right-0 sm:right-20px w-full sm:w-400px bg-card border-l border-t border-r sm:rounded-t-xl shadow-lg">
+          <div class="fixed bottom-0 right-0 z-40 sm:right-20px w-full sm:w-400px bg-card border-l border-t border-r sm:rounded-t-xl shadow-lg">
             <div class="flex items-center gap-1 pl-6 pr-4 py-3 border-b">
               <h2 class="text-base font-bold flex-1">{getTitle()}</h2>
 
@@ -586,7 +631,24 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
                   Up to 10 files upload at once. Closing hides this panel; uploads continue.
                 </p>
               </div>
-              <div class="flex flex-col overflow-y-auto max-h-[450px] pb-4">
+              <div class="flex flex-col overflow-y-auto max-h-[min(450px,60dvh)] pb-4">
+                <Show when={interruptedQuery.data?.uploads.length}>
+                  <div class="px-6 py-3 border-b text-sm space-y-2">
+                    <strong>Interrupted uploads ({interruptedQuery.data?.uploads.length})</strong>
+                    <p class="break-words">
+                      {interruptedQuery.data?.uploads
+                        .map(
+                          (upload) =>
+                            `${folderLabels()[upload.folderId || ''] || 'Destination folder'} / ${upload.fileName}`,
+                        )
+                        .join(', ')}
+                    </p>
+                    <p class="text-xs text-muted-foreground">
+                      Choose Import and reselect the original files in their destination folder to
+                      resume.
+                    </p>
+                  </div>
+                </Show>
                 <Index each={prioritizeUploadTasks(getTasks(), failedOnly())}>
                   {(task) => (
                     <Switch>
