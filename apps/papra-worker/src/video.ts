@@ -271,6 +271,7 @@ export async function mediaResponse(env: Env, doc: MediaDocument, requested?: st
     },
     preview: {
       status,
+      thumbnailStatus: jobs.find((j) => j.kind === 'video:thumbnails-v2')?.status,
       phase: progress?.phase,
       percent: progress?.percent ?? undefined,
       error: job?.error,

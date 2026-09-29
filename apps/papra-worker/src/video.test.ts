@@ -5,6 +5,7 @@ import type { Env } from './types';
 import {
   mediaResponse,
   recordVideoMetadata,
+  recordVideoProgress,
   requestVideoPreview,
   reserveVideoCompute,
   settleVideoCompute,
@@ -301,4 +302,44 @@ test('missing cached preview is regenerable without changing the original', asyn
   }>();
   expect(job).toEqual({ status: 'pending', generation: 1 });
   expect(send).toHaveBeenCalledTimes(2);
+});
+
+test('measured progress accepts only valid percentages on the active generation', async () => {
+  const { env, DB } = await fixture();
+  await DB.exec(
+    "INSERT INTO jobs(id,version_id,kind,status,generation,created_at,updated_at) VALUES('progress','v','video:720-full-v2','processing',2,1,1);",
+  );
+  await recordVideoProgress(
+    env,
+    { id: 'progress', generation: 1 },
+    { phase: 'encoding', percent: 50 },
+  );
+  expect(await DB.prepare('SELECT phase FROM video_preview_progress').first()).toBeNull();
+  await recordVideoProgress(
+    env,
+    { id: 'progress', generation: 2 },
+    { phase: 'encoding', percent: 50 },
+  );
+  expect(await DB.prepare('SELECT phase,percent FROM video_preview_progress').first()).toEqual({
+    phase: 'encoding',
+    percent: 50,
+  });
+  await recordVideoProgress(
+    env,
+    { id: 'progress', generation: 2 },
+    { phase: 'uploading', percent: NaN },
+  );
+  expect(await DB.prepare('SELECT phase,percent FROM video_preview_progress').first()).toEqual({
+    phase: 'uploading',
+    percent: null,
+  });
+  await DB.exec("UPDATE documents SET is_deleted=1 WHERE id='d'");
+  await recordVideoProgress(
+    env,
+    { id: 'progress', generation: 2 },
+    { phase: 'finalizing', percent: 100 },
+  );
+  expect(await DB.prepare('SELECT phase FROM video_preview_progress').first()).toEqual({
+    phase: 'uploading',
+  });
 });

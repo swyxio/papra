@@ -51,6 +51,7 @@ export type MediaPlayback = {
     costTracking?: 'estimated';
     automaticMonthlyBudgetUsd?: number;
     scope?: 'full' | 'teaser';
+    thumbnailStatus?: string;
     phase?: 'encoding' | 'uploading' | 'finalizing';
     thumbnails?: { timestampSeconds: number; url: string; cover: boolean }[];
     variants: {
@@ -130,7 +131,10 @@ export function MediaPlaybackPlayer(props: {
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     refetchInterval: (query) =>
-      ['queued', 'processing'].includes(query.state.data?.preview?.status ?? '') ? 3000 : false,
+      ['queued', 'processing'].includes(query.state.data?.preview?.status ?? '') ||
+      ['pending', 'processing'].includes(query.state.data?.preview?.thumbnailStatus ?? '')
+        ? 3000
+        : false,
   }));
   const rememberPlayback = () => {
     if (pendingSeek !== undefined) resumeAt = pendingSeek;
