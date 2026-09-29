@@ -215,7 +215,14 @@ export async function mediaResponse(env: Env, doc: MediaDocument, requested?: st
       : variants.some((v) => v.quality === '1080-full-v2')
         ? '1080-full-v2'
         : desired;
-  const variant = variants.find((v) => v.quality === selection);
+  const requestedVariant = variants.find((v) => v.quality === selection);
+  // Keep an available rendition playable while a requested upgrade is prepared.
+  const variant =
+    requestedVariant ??
+    (selection !== 'original'
+      ? (variants.find((v) => v.quality === '720-full-v2') ??
+        variants.find((v) => v.quality === automaticProfile(metadata)))
+      : undefined);
   const job =
     jobs.find((j) => j.kind === `video:${selection}`) ?? jobs.find((j) => j.kind === 'video:probe');
   const progress =
@@ -228,7 +235,7 @@ export async function mediaResponse(env: Env, doc: MediaDocument, requested?: st
         )
       : null;
   const needs = video && (!metadata || needsVideoPreview(metadata));
-  const status = variant
+  const status = requestedVariant
     ? 'ready'
     : job?.status === 'paused'
       ? 'budget_paused'
@@ -261,7 +268,7 @@ export async function mediaResponse(env: Env, doc: MediaDocument, requested?: st
     mimeType: variant ? 'video/mp4' : doc.mime_type,
     versionId: doc.current_version_id,
     expiresAt: new Date(Date.now() + 900_000).toISOString(),
-    selected: variant ? selection : canOriginal ? 'original' : selection,
+    selected: variant ? variant.quality : canOriginal ? 'original' : selection,
     original: {
       size: doc.original_size,
       width: metadata?.width,

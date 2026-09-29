@@ -347,9 +347,15 @@ export function MediaPlaybackPlayer(props: {
                 setQuality(event.currentTarget.value as MediaQuality);
               }}
             >
-              <option value="original">{originalLabel()}</option>
+              <option value="original" selected={selectedQuality() === 'original'}>
+                {originalLabel()}
+              </option>
               <For each={media.data?.preview?.variants ?? []}>
-                {(variant) => <option value={variant.quality}>{previewLabel(variant)}</option>}
+                {(variant) => (
+                  <option value={variant.quality} selected={selectedQuality() === variant.quality}>
+                    {previewLabel(variant)}
+                  </option>
+                )}
               </For>
               <Show
                 when={
@@ -359,7 +365,7 @@ export function MediaPlaybackPlayer(props: {
                   )
                 }
               >
-                <option value={selectedQuality()}>
+                <option value={selectedQuality()} selected>
                   {previewLabel({ quality: requestedPreviewQuality() })} ·{' '}
                   {busy() ? 'preparing' : 'not ready'}
                 </option>

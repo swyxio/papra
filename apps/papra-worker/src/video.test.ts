@@ -204,7 +204,7 @@ test('explicit full long preview is deduplicated and does not consume automatic 
   await recordVideoMetadata(env, 'v', { ...metadata, durationSeconds: 900 });
   send.mockClear();
   await Promise.all(
-    Array.from({ length: 5 }, () => requestVideoPreview(env, doc, '720-full-v2', false)),
+    Array.from({ length: 5 }, async () => requestVideoPreview(env, doc, '720-full-v2', false)),
   );
   expect(send).toHaveBeenCalledOnce();
   const period = new Date().toISOString().slice(0, 7);
@@ -294,7 +294,7 @@ test('missing cached preview is regenerable without changing the original', asyn
   await DB.exec(
     "INSERT INTO video_previews(version_id,quality,storage_key,size,sha256,created_at) VALUES('v','720-full-v2','derived/missing.mp4',1234,'sha',1); INSERT INTO jobs(id,version_id,kind,status,created_at,updated_at) VALUES('cached','v','video:720-full-v2','done',1,1);",
   );
-  vi.mocked(env.FILES.head).mockResolvedValue(null);
+  env.FILES.head = vi.fn(async () => null);
   await requestVideoPreview(env, doc, '720', false);
   const job = await DB.prepare("SELECT status,generation FROM jobs WHERE id='cached'").first<{
     status: string;
@@ -342,4 +342,21 @@ test('measured progress accepts only valid percentages on the active generation'
   expect(await DB.prepare('SELECT phase FROM video_preview_progress').first()).toEqual({
     phase: 'uploading',
   });
+});
+
+test('a ready teaser stays playable while full playback is requested', async () => {
+  const { env, DB, doc } = await fixture();
+  await recordVideoMetadata(env, 'v', { ...metadata, durationSeconds: 900 });
+  await DB.prepare(
+    "INSERT INTO video_previews(version_id,quality,storage_key,size,sha256,created_at,metadata_json,scope) VALUES('v','720-teaser-v2','derived/teaser.mp4',1234,'sha',1,?,'teaser')",
+  )
+    .bind(JSON.stringify({ ...metadata, durationSeconds: 60, width: 720, height: 1280 }))
+    .run();
+  await requestVideoPreview(env, doc, '720-full-v2', false);
+  const response = await mediaResponse(env, doc, '720-full-v2');
+  expect(response.selected).toBe('720-teaser-v2');
+  expect(response.url).toContain('derived/teaser.mp4');
+  expect(response.preview.status).toBe('queued');
+  expect(response.preview.scope).toBe('teaser');
+  expect(response.preview.durationSeconds).toBe(60);
 });
