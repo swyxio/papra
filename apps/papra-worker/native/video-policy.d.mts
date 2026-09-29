@@ -10,3 +10,5 @@ export function canRemuxPlayback(metadata: MediaMetadata, height: 720 | 1080): b
 
 export function playbackFilter(metadata: MediaMetadata, scale: string): string;
 export function thumbnailPositions(durationSeconds: number): number[];
+
+export function playbackScale(metadata: MediaMetadata, maxWidth: number, maxHeight: number): string;

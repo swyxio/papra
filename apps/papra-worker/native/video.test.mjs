@@ -553,3 +553,77 @@ test('invalid video input fails safely rather than creating a corrupt derivative
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('real FFmpeg preserves anamorphic display aspect ratio without upscaling physical pixels', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'papra-sar-test-'));
+  try {
+    for (const sar of ['16/15', '1/2']) {
+      const source = join(dir, `sar-${sar.replace('/', '-')}.mov`);
+      const output = source + '.mp4';
+      await run('ffmpeg', [
+        '-v',
+        'error',
+        '-f',
+        'lavfi',
+        '-i',
+        'testsrc2=size=720x576:rate=24:duration=0.2',
+        '-vf',
+        `setsar=${sar}`,
+        '-c:v',
+        'libx264',
+        '-pix_fmt',
+        'yuv444p',
+        '-threads',
+        '1',
+        '-y',
+        source,
+      ]);
+      const before = normalizeMediaMetadata(await probeMedia(source, AbortSignal.timeout(10_000)));
+      const expectedSar = sar === '16/15' ? 16 / 15 : 1 / 2;
+      assert.ok(Math.abs(before.sampleAspectRatio - expectedSar) < 0.000001);
+      assert.equal(
+        canRemuxPlayback({ ...before, pixelFormat: 'yuv420p' }, 720),
+        false,
+        'anamorphic originals must normalize pixel aspect ratio',
+      );
+      await encodePlayback(source, output, before, 720, AbortSignal.timeout(20_000));
+      const after = normalizeMediaMetadata(await probeMedia(output, AbortSignal.timeout(10_000)));
+      assert.equal(after.sampleAspectRatio, 1);
+      const originalDisplayAspect = (before.width * before.sampleAspectRatio) / before.height;
+      assert.ok(Math.abs(after.width / after.height - originalDisplayAspect) < 0.005);
+      assert.ok(after.width <= before.width && after.height <= before.height);
+      assert.ok(
+        Math.min(after.width, after.height) <= 720 && Math.max(after.width, after.height) <= 1280,
+      );
+      const cover = source + '.jpg';
+      await thumbnail(source, cover, AbortSignal.timeout(10_000), 0, before);
+      const coverMetadata = normalizeMediaMetadata(
+        await probeMedia(cover, AbortSignal.timeout(10_000)),
+      );
+      assert.equal(coverMetadata.sampleAspectRatio, 1);
+      assert.ok(
+        Math.abs(coverMetadata.width / coverMetadata.height - originalDisplayAspect) < 0.005,
+      );
+      assert.ok(coverMetadata.width <= before.width && coverMetadata.height <= before.height);
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('rotation transposes non-square pixel geometry', () => {
+  const metadata = normalizeMediaMetadata({
+    streams: [
+      {
+        codec_type: 'video',
+        width: 720,
+        height: 576,
+        sample_aspect_ratio: '16:15',
+        side_data_list: [{ rotation: -90 }],
+      },
+    ],
+  });
+  assert.equal(metadata.width, 576);
+  assert.equal(metadata.height, 720);
+  assert.equal(metadata.sampleAspectRatio, 15 / 16);
+});

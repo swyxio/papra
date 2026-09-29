@@ -9,6 +9,7 @@ import { Transform, Readable } from 'node:stream';
 import { createHash } from 'node:crypto';
 import {
   normalizeMediaMetadata,
+  playbackScale,
   playbackEncodingArgs,
   canRemuxPlayback,
   playbackFilter,
@@ -269,7 +270,9 @@ export async function thumbnail(source, destination, signal, seek = 0, metadata 
       '-vf',
       playbackFilter(
         metadata,
-        "scale=w='trunc(min(iw,1280)/2)*2':h='trunc(min(ih,1280)/2)*2':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1",
+        metadata.width && metadata.height
+          ? playbackScale(metadata, 1280, 1280)
+          : "scale=w='trunc(min(iw,1280)/2)*2':h='trunc(min(ih,1280)/2)*2':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1",
       ),
       '-q:v',
       '3',

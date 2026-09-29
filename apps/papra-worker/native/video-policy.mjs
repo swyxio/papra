@@ -18,6 +18,8 @@ export function normalizeMediaMetadata(info) {
       0,
   );
   const rotated = Math.abs(rotation % 180) === 90;
+  const [sarNumerator, sarDenominator = '1'] = String(video?.sample_aspect_ratio ?? '1').split(':');
+  const sourceSar = positive(Number(sarNumerator) / Number(sarDenominator)) ?? 1;
   return {
     durationSeconds:
       positive(info.format?.duration) ?? positive(video?.duration) ?? positive(audio?.duration),
@@ -26,6 +28,7 @@ export function normalizeMediaMetadata(info) {
     audioCodec: audio?.codec_name,
     width: positive(rotated ? video?.height : video?.width),
     height: positive(rotated ? video?.width : video?.height),
+    sampleAspectRatio: rotated ? 1 / sourceSar : sourceSar,
     pixelFormat: video?.pix_fmt,
     bitrate: positive(info.format?.bit_rate) ?? positive(video?.bit_rate),
     formatName:
@@ -59,18 +62,17 @@ export function needsVideoPreview(metadata) {
     !width ||
     !height ||
     !bitrate ||
-    Math.min(width, height) > 1080 ||
-    Math.max(width, height) > 1920 ||
+    Math.min(width * (metadata.sampleAspectRatio ?? 1), height) > 1080 ||
+    Math.max(width * (metadata.sampleAspectRatio ?? 1), height) > 1920 ||
     bitrate > 8_000_000
   );
 }
 export function playbackEncodingArgs(metadata, height) {
-  const portrait = metadata.height > metadata.width;
+  const portrait = metadata.height > metadata.width * (metadata.sampleAspectRatio ?? 1);
   const longEdge = height === 1080 ? 1920 : 1280;
   const maxWidth = portrait ? height : longEdge;
   const maxHeight = portrait ? longEdge : height;
-  // min(iw/ih, bound) prevents upscaling. div-by-two keeps H.264 output dimensions valid.
-  const scale = `scale=w='trunc(min(iw,${maxWidth})/2)*2':h='trunc(min(ih,${maxHeight})/2)*2':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1`;
+  const scale = playbackScale(metadata, maxWidth, maxHeight);
   return [
     '-map',
     '0:v:0',
@@ -117,6 +119,7 @@ export function canRemuxPlayback(metadata, height) {
     metadata.videoCodec === 'h264' &&
     metadata.pixelFormat === 'yuv420p' &&
     !metadata.hasAudio &&
+    Math.abs((metadata.sampleAspectRatio ?? 1) - 1) < 0.000001 &&
     metadata.fps > 0 &&
     metadata.fps <= 30 &&
     metadata.bitrate > 0 &&
@@ -126,6 +129,19 @@ export function canRemuxPlayback(metadata, height) {
     Math.min(metadata.width, metadata.height) <= height &&
     Math.max(metadata.width, metadata.height) <= longEdge
   );
+}
+
+// Work in display aspect ratio, then emit square pixels. Cap both physical
+// dimensions too: stretching anamorphic pixels to display width would upscale.
+export function playbackScale(metadata, maxWidth, maxHeight) {
+  const aspect = (metadata.width * (metadata.sampleAspectRatio ?? 1)) / metadata.height;
+  const width =
+    Math.floor(
+      Math.min(metadata.width, maxWidth, metadata.height * aspect, maxHeight * aspect) / 2,
+    ) * 2;
+  const height = Math.floor(width / aspect / 2) * 2;
+  if (width < 2 || height < 2) throw new Error('video_dimensions_unavailable');
+  return `scale=${width}:${height},setsar=1`;
 }
 
 // Tone mapping runs in linear light. Explicit SDR tags prevent browsers from

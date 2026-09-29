@@ -423,7 +423,7 @@ export function MediaPlaybackPlayer(props: {
             needed.
           </p>
           <Button variant="outline" disabled={busy()} onClick={() => requestFull(blockedSeek()!)}>
-            {busy() ? 'Full preview preparing…' : 'Open or generate full preview'}
+            {busy() ? 'Preview preparing…' : 'Open or generate full preview'}
           </Button>
         </div>
       </Show>

@@ -48,6 +48,7 @@ export type MediaMetadata = {
   bitrate?: number;
   formatName?: string;
   fps?: number;
+  sampleAspectRatio?: number;
   colorTransfer?: string;
   colorPrimaries?: string;
   colorSpace?: string;
