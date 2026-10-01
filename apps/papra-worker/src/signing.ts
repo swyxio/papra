@@ -38,6 +38,7 @@ type RecipientRow = Record<string, any> & {
   signed_at: number | null;
 };
 const encoder = new TextEncoder();
+const RESEND_COOLDOWN_MS = 60_000;
 function clean(value: unknown, max = 100) {
   if (
     typeof value !== 'string' ||
@@ -127,6 +128,8 @@ export async function signingDto(env: Env, request: RequestRow, links = true) {
     'SELECT * FROM signing_recipients WHERE request_id=? ORDER BY position',
     request.id,
   );
+  const mail = await all(env, 'SELECT * FROM signing_mail WHERE request_id=?', request.id);
+  const now = Date.now();
   return {
     id: request.id,
     name: request.name,
@@ -141,20 +144,47 @@ export async function signingDto(env: Env, request: RequestRow, links = true) {
     signedSize: request.signed_size,
     fields: JSON.parse(request.fields),
     recipients: await Promise.all(
-      recipients.map(async (r) => ({
-        id: r.id,
-        name: r.name,
-        email: r.email,
-        signedAt: r.signed_at,
-        rejectedAt: r.rejected_at,
-        url: links ? `${env.APP_URL}/sign/${await recipientToken(env, r)}` : undefined,
-      })),
+      recipients.map(async (r) => {
+        const invitation = mail.find((m) => m.recipient_id === r.id && m.kind === 'request');
+        const resendAvailableAt = invitation
+          ? Math.max(invitation.queued_at || 0, invitation.last_sent_at || 0) + RESEND_COOLDOWN_MS
+          : null;
+        const active =
+          request.status === 'pending' &&
+          request.expires_at > now &&
+          !r.signed_at &&
+          !r.rejected_at;
+        return {
+          id: r.id,
+          name: r.name,
+          email: r.email,
+          signedAt: r.signed_at,
+          rejectedAt: r.rejected_at,
+          url: links ? `${env.APP_URL}/sign/${await recipientToken(env, r)}` : undefined,
+          delivery: {
+            status: invitation?.status || 'unknown',
+            firstSentAt: invitation?.first_sent_at ?? null,
+            lastSentAt: invitation?.last_sent_at ?? null,
+            sendCount: invitation?.send_count ?? null,
+            lastQueuedAt: invitation?.queued_at ?? null,
+            error: invitation?.error ?? null,
+            canResend:
+              links &&
+              active &&
+              !!invitation &&
+              !['pending', 'sending'].includes(invitation.status) &&
+              now >= (resendAvailableAt || 0),
+            resendAvailableAt: active ? resendAvailableAt : null,
+          },
+        };
+      }),
     ),
-    mail: await all(
-      env,
-      'SELECT recipient_id,kind,status,error FROM signing_mail WHERE request_id=?',
-      request.id,
-    ),
+    mail: mail.map(({ recipient_id, kind, status, error }) => ({
+      recipient_id,
+      kind,
+      status,
+      error,
+    })),
   };
 }
 async function dispatch(env: Env, requestId: string) {
@@ -326,8 +356,8 @@ export function registerSigningRoutes(app: App) {
             'INSERT INTO signing_recipients(id,request_id,position,name,email) SELECT ?,?,?,?,? FROM signing_requests WHERE id=?',
           ).bind(r.id, requestId, r.position, r.name, r.email, requestId),
           c.env.DB.prepare(
-            "INSERT INTO signing_mail(id,request_id,recipient_id,kind,updated_at) SELECT ?,?,?, 'request',? FROM signing_requests WHERE id=?",
-          ).bind(id('sigmail'), requestId, r.id, now, requestId),
+            "INSERT INTO signing_mail(id,request_id,recipient_id,kind,updated_at,queued_at,send_count) SELECT ?,?,?, 'request',?,?,0 FROM signing_requests WHERE id=?",
+          ).bind(id('sigmail'), requestId, r.id, now, now, requestId),
         ]),
       ]);
     } catch (e) {
@@ -364,6 +394,72 @@ export function registerSigningRoutes(app: App) {
       c.req.param('doc'),
     );
     return c.json({ ok: true });
+  });
+  app.post(`${base}/:requestId/recipients/:recipientId/resend`, async (c) => {
+    await manageDocument(c.env, c.get('identity'), c.req.param('org'), c.req.param('doc'));
+    const request = await first<RequestRow>(
+      c.env,
+      'SELECT * FROM signing_requests WHERE id=? AND document_id=? AND organization_id=?',
+      c.req.param('requestId'),
+      c.req.param('doc'),
+      c.req.param('org'),
+    );
+    if (!request) throw error(404, 'Signing request not found');
+    const recipient = await first<RecipientRow>(
+      c.env,
+      'SELECT * FROM signing_recipients WHERE id=? AND request_id=?',
+      c.req.param('recipientId'),
+      request.id,
+    );
+    if (!recipient) throw error(404, 'Signing recipient not found');
+    const now = Date.now();
+    if (
+      request.status !== 'pending' ||
+      request.expires_at <= now ||
+      recipient.signed_at ||
+      recipient.rejected_at
+    )
+      throw error(409, 'This recipient no longer needs a signing invitation');
+    const mail = await first(
+      c.env,
+      "SELECT * FROM signing_mail WHERE request_id=? AND recipient_id=? AND kind='request'",
+      request.id,
+      recipient.id,
+    );
+    if (!mail) throw error(409, 'Signing invitation unavailable');
+    if (['pending', 'sending'].includes(mail.status))
+      return c.json({ request: await signingDto(c.env, request), alreadyQueued: true }, 202);
+    const availableAt = Math.max(mail.queued_at || 0, mail.last_sent_at || 0) + RESEND_COOLDOWN_MS;
+    if (now < availableAt) {
+      c.header('Retry-After', String(Math.ceil((availableAt - now) / 1000)));
+      throw error(429, 'Please wait a minute before resending this invitation');
+    }
+    const queued = await run(
+      c.env,
+      "UPDATE signing_mail SET status='pending',generation=generation+1,attempts=0,error=NULL,provider_id=NULL,queued_at=?,updated_at=? WHERE id=? AND status IN ('sent','error','cancelled') AND generation=? AND coalesce(queued_at,0)<=? AND coalesce(last_sent_at,0)<=? AND EXISTS(SELECT 1 FROM signing_requests r JOIN signing_recipients p ON p.request_id=r.id WHERE r.id=signing_mail.request_id AND p.id=signing_mail.recipient_id AND r.status='pending' AND r.expires_at>? AND p.signed_at IS NULL AND p.rejected_at IS NULL)",
+      now,
+      now,
+      mail.id,
+      mail.generation,
+      now - RESEND_COOLDOWN_MS,
+      now - RESEND_COOLDOWN_MS,
+      now,
+    );
+    if (!queued.meta.changes) {
+      const latest = await first(c.env, 'SELECT status FROM signing_mail WHERE id=?', mail.id);
+      if (!latest || !['pending', 'sending'].includes(latest.status))
+        throw error(409, 'The signing request changed; reload before resending');
+    } else {
+      try {
+        await dispatch(c.env, request.id);
+      } catch {
+        /* Scheduler repairs the durable outbox. */
+      }
+    }
+    return c.json(
+      { request: await signingDto(c.env, request), alreadyQueued: !queued.meta.changes },
+      202,
+    );
   });
   app.post(`${base}/:requestId/retry`, async (c) => {
     await manageDocument(c.env, c.get('identity'), c.req.param('org'), c.req.param('doc'));
@@ -538,10 +634,11 @@ async function deliverMail(env: Env, r: RequestRow) {
     const lease = crypto.randomUUID();
     const claim = await run(
       env,
-      "UPDATE signing_mail SET status='sending',lease_token=?,attempts=attempts+1,updated_at=? WHERE id=? AND status='pending'",
+      "UPDATE signing_mail SET status='sending',lease_token=?,attempts=attempts+1,updated_at=? WHERE id=? AND status='pending' AND generation=?",
       lease,
       Date.now(),
       mail.id,
+      mail.generation,
     );
     if (!claim.meta.changes) continue;
     try {
@@ -559,7 +656,8 @@ async function deliverMail(env: Env, r: RequestRow) {
         !current ||
         !p ||
         ['cancelled', 'rejected'].includes(current.status) ||
-        current.expires_at < Date.now()
+        current.expires_at < Date.now() ||
+        (mail.kind === 'request' && (current.status !== 'pending' || p.signed_at || p.rejected_at))
       ) {
         await run(
           env,
@@ -578,7 +676,7 @@ async function deliverMail(env: Env, r: RequestRow) {
         headers: {
           'Authorization': `Bearer ${env.RESEND_API_KEY}`,
           'Content-Type': 'application/json',
-          'Idempotency-Key': `drive-${mail.id}`,
+          'Idempotency-Key': `drive-${mail.id}${mail.generation ? `-${mail.generation}` : ''}`,
         },
         body: JSON.stringify({
           from: env.SIGNING_FROM,
@@ -593,11 +691,14 @@ async function deliverMail(env: Env, r: RequestRow) {
       });
       const result = (await res.json()) as { id?: string };
       if (!res.ok || !result.id) throw new Error('mail_provider_failed');
+      const acceptedAt = Date.now();
       await run(
         env,
-        "UPDATE signing_mail SET status='sent',provider_id=?,lease_token=NULL,error=NULL,updated_at=? WHERE id=? AND lease_token=?",
+        "UPDATE signing_mail SET status='sent',provider_id=?,lease_token=NULL,error=NULL,first_sent_at=CASE WHEN send_count IS NULL THEN NULL ELSE coalesce(first_sent_at,?) END,last_sent_at=?,send_count=CASE WHEN send_count IS NULL THEN NULL ELSE send_count+1 END,updated_at=? WHERE id=? AND lease_token=?",
         result.id,
-        Date.now(),
+        acceptedAt,
+        acceptedAt,
+        acceptedAt,
         mail.id,
         lease,
       );
@@ -732,7 +833,7 @@ export async function processSigning(env: Env, requestId: string) {
       ).bind(now, now, versionId, outputKey, sha, signed.length, auditKey, r.id, lease),
       ...people.map((p) =>
         env.DB.prepare(
-          "INSERT OR IGNORE INTO signing_mail(id,request_id,recipient_id,kind,updated_at) SELECT ?,?,?,'completed',? FROM signing_requests WHERE id=? AND status='completed' AND signed_key=?",
+          "INSERT OR IGNORE INTO signing_mail(id,request_id,recipient_id,kind,updated_at,send_count) SELECT ?,?,?,'completed',?,0 FROM signing_requests WHERE id=? AND status='completed' AND signed_key=?",
         ).bind(id('sigmail'), r!.id, p.id, now, r!.id, outputKey),
       ),
     ]);

@@ -7,44 +7,9 @@ import { PdfFields } from './pdf-fields.component';
 import { formatSigningDate } from './signing-date';
 import type { SigningField } from './pdf-fields.component';
 
-type SigningRequest = {
-  id: string;
-  name: string;
-  status: string;
-  versionId: string;
-  createdAt: number;
-  error?: string;
-  recipients: { id: string; name: string; email: string; signedAt: number | null; url?: string }[];
-  mail: { recipient_id: string; kind: string; status: string; error?: string }[];
-};
-function CopySigningLink(props: { url: string }) {
-  const [copied, setCopied] = createSignal(false);
-  const [error, setError] = createSignal('');
-  return (
-    <span>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={async () => {
-          try {
-            await navigator.clipboard.writeText(props.url);
-            setCopied(true);
-            setError('');
-          } catch {
-            setError('Could not copy. Open the signing link and copy its address.');
-          }
-        }}
-      >
-        {copied() ? 'Link copied' : 'Copy signing link'}
-      </Button>
-      <Show when={error()}>
-        <span role="alert" class="block text-sm text-destructive">
-          {error()}
-        </span>
-      </Show>
-    </span>
-  );
-}
+import { CopySigningLink, SigningRequestCard } from './signing-request-card.component';
+import type { SigningRequest } from './signing-request-card.component';
+
 const inputClass = 'w-full rounded-md border bg-background px-3 py-2 text-sm';
 const validEmail = (email: string) => /^\S+@[^@\s]+\.[^@\s]+$/.test(email.trim());
 async function downloadPdf(path: string, name: string) {
@@ -106,20 +71,11 @@ export function DocumentSigning(props: {
       return value;
     }
   });
-  const [error, setError] = createSignal('');
   const timer = setInterval(() => {
     if (data.latest?.requests.some((r) => ['pending', 'sealing'].includes(r.status)))
       void refetch();
   }, 5000);
   onCleanup(() => clearInterval(timer));
-  async function action(id: string, kind: string) {
-    try {
-      await apiClient({ path: `${base()}/${id}/${kind}`, method: 'POST' });
-      void refetch();
-    } catch (e) {
-      setError(message(e));
-    }
-  }
   return (
     <Show when={!props.isDeleted}>
       <div class="my-5 border-t pt-4">
@@ -135,9 +91,9 @@ export function DocumentSigning(props: {
             </Button>
           </Show>
         </div>
-        <Show when={error() || loadError()}>
+        <Show when={loadError()}>
           <p role="alert" class="text-sm text-red-700">
-            {error() || loadError()}
+            {loadError()}
           </p>
         </Show>
         <Show when={!data.latest?.requests.length && !loadError()}>
@@ -147,69 +103,22 @@ export function DocumentSigning(props: {
               : 'Create or upload a PDF to request signatures.'}
           </p>
         </Show>
-        <For each={data.latest?.requests}>
-          {(r) => (
-            <div class="rounded-md border p-3 mb-3 text-sm">
-              <div class="flex justify-between">
-                <strong>{r.name}</strong>
-                <span>{r.status === 'sealing' ? 'Preparing signed PDF…' : r.status}</span>
-              </div>
-              <p class="text-xs text-muted-foreground mt-1">
-                Sent {new Date(r.createdAt).toLocaleString()}
-              </p>
-              <For each={r.recipients}>
-                {(p) => (
-                  <div class="mt-2 flex gap-2 items-center flex-wrap">
-                    <span>
-                      {p.name} · {p.signedAt ? 'Signed' : 'Awaiting signature'}
-                    </span>
-                    <Show when={p.url && !p.signedAt && r.status === 'pending'}>
-                      <CopySigningLink url={p.url!} />
-                    </Show>
-                  </div>
-                )}
-              </For>
-              <For each={r.mail.filter((m) => m.status === 'error')}>
-                {(m) => <p class="text-red-700 mt-2">{m.error}</p>}
-              </For>
-              <Show when={r.error}>
-                <p class="text-red-700 mt-2">{r.error}</p>
-              </Show>
-              <div class="flex gap-2 mt-3">
-                <Show when={r.status === 'completed'}>
-                  <Button
-                    size="sm"
-                    onClick={() =>
-                      void downloadPdf(
-                        `${base()}/${r.id}/file?inline=true`,
-                        `${r.name.replace(/\.pdf$/i, '')}-signed.pdf`,
-                      ).catch((e: unknown) => setError(message(e)))
-                    }
-                  >
-                    Download signed PDF
-                  </Button>
-                </Show>
-                <Show
-                  when={data.latest?.canSend && ['pending', 'sealing', 'error'].includes(r.status)}
-                >
-                  <Button size="sm" variant="outline" onClick={() => void action(r.id, 'cancel')}>
-                    Cancel request
-                  </Button>
-                </Show>
-                <Show
-                  when={
-                    data.latest?.canSend &&
-                    (r.status === 'error' || r.mail.some((m) => m.status === 'error'))
-                  }
-                >
-                  <Button size="sm" variant="outline" onClick={() => void action(r.id, 'retry')}>
-                    Retry
-                  </Button>
-                </Show>
-              </div>
-            </div>
+        <Index each={data.latest?.requests}>
+          {(request) => (
+            <SigningRequestCard
+              request={request()}
+              canSend={!!data.latest?.canSend}
+              base={base()}
+              refresh={() => void refetch()}
+              download={async () =>
+                downloadPdf(
+                  `${base()}/${request().id}/file?inline=true`,
+                  `${request().name.replace(/\.pdf$/i, '')}-signed.pdf`,
+                )
+              }
+            />
           )}
-        </For>
+        </Index>
       </div>
     </Show>
   );

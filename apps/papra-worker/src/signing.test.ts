@@ -277,6 +277,129 @@ describe('native signing authorization and lifecycle', () => {
     expect((await f.DB.prepare('SELECT count(*) n FROM signing_requests').first())?.n).toBe(1);
     expect((await f.DB.prepare('SELECT count(*) n FROM signing_mail').first())?.n).toBe(1);
   });
+  test('recipient delivery records successful provider acceptance, preserves links and deduplicates resend', async () => {
+    const f = await fixture();
+    const initial = (await (await f.request(f.base, f.payload)).json()) as any;
+    const r = initial.request,
+      recipient = r.recipients[0];
+    expect(recipient.delivery.status).toBe('pending');
+    expect(recipient.delivery.firstSentAt).toBeNull();
+    expect(recipient.delivery.sendCount).toBe(0);
+    const mailFetch = vi.fn(async (_url: unknown, _options: any) =>
+      Response.json({ id: 'provider-test' }),
+    );
+    vi.stubGlobal('fetch', mailFetch);
+    const before = Date.now();
+    await processSigning(f.env, r.id);
+    const sent = (await (await f.request()).json()) as any;
+    const delivery = sent.requests[0].recipients[0].delivery;
+    expect(delivery.status).toBe('sent');
+    expect(delivery.firstSentAt).toBeGreaterThanOrEqual(before);
+    expect(delivery.lastSentAt).toBe(delivery.firstSentAt);
+    expect(delivery.sendCount).toBe(1);
+    const resend = `${f.base}/${r.id}/recipients/${recipient.id}/resend`;
+    expect((await f.request(resend, {})).status).toBe(429);
+    await f.DB.prepare('UPDATE signing_mail SET queued_at=1,last_sent_at=1 WHERE request_id=?')
+      .bind(r.id)
+      .run();
+    const results = await Promise.all([f.request(resend, {}), f.request(resend, {})]);
+    expect(results.map((x) => x.status)).toEqual([202, 202]);
+    const responses = (await Promise.all(results.map(async (x) => x.json()))) as any[];
+    expect(responses.filter((x) => !x.alreadyQueued)).toHaveLength(1);
+    expect(responses[0].request.recipients[0].url).toBe(recipient.url);
+    expect(
+      (
+        await f.DB.prepare('SELECT generation FROM signing_mail WHERE request_id=?')
+          .bind(r.id)
+          .first()
+      )?.generation,
+    ).toBe(1);
+    await processSigning(f.env, r.id);
+    expect(mailFetch).toHaveBeenCalledTimes(2);
+    expect(mailFetch.mock.calls[0][1].headers['Idempotency-Key']).not.toBe(
+      mailFetch.mock.calls[1][1].headers['Idempotency-Key'],
+    );
+    expect(JSON.parse(mailFetch.mock.calls[1][1].body).text).toContain(recipient.url);
+    const final = (await (await f.request()).json()) as any;
+    expect(final.requests[0].recipients[0].delivery.sendCount).toBe(2);
+    expect(final.requests[0].recipients[0].delivery.firstSentAt).toBe(delivery.firstSentAt);
+  });
+  test('mail failure reports no fictitious sent time and retry uses the same delivery key', async () => {
+    const f = await fixture();
+    const r = ((await (await f.request(f.base, f.payload)).json()) as any).request;
+    const mailFetch = vi.fn(
+      async (_url: unknown, _options: any) => new Response('{}', { status: 500 }),
+    );
+    vi.stubGlobal('fetch', mailFetch);
+    for (let attempt = 0; attempt < 3; attempt++)
+      await expect(processSigning(f.env, r.id)).rejects.toThrow('signing_email_failed');
+    const dto = (await (await f.request()).json()) as any;
+    expect(dto.requests[0].recipients[0].delivery).toMatchObject({
+      status: 'error',
+      firstSentAt: null,
+      lastSentAt: null,
+      sendCount: 0,
+    });
+    const keys = mailFetch.mock.calls.map((call) => call[1].headers['Idempotency-Key']);
+    expect(new Set(keys).size).toBe(1);
+  });
+  test('resend checks manager role, recipient scope, closure, expiry, signing and trash', async () => {
+    const f = await fixture();
+    const r = ((await (await f.request(f.base, f.payload)).json()) as any).request;
+    const resend = `${f.base}/${r.id}/recipients/${r.recipients[0].id}/resend`;
+    expect((await f.request(resend, {}, 'writer')).status).toBe(403);
+    expect((await f.request(resend, {}, 'other')).status).toBe(403);
+    expect((await f.request(`${f.base}/${r.id}/recipients/missing/resend`, {})).status).toBe(404);
+    await f.DB.prepare("UPDATE signing_requests SET status='cancelled' WHERE id=?")
+      .bind(r.id)
+      .run();
+    expect((await f.request(resend, {})).status).toBe(409);
+    await f.DB.prepare("UPDATE signing_requests SET status='pending',expires_at=1 WHERE id=?")
+      .bind(r.id)
+      .run();
+    expect((await f.request(resend, {})).status).toBe(409);
+    await f.DB.prepare('UPDATE signing_requests SET expires_at=? WHERE id=?')
+      .bind(Date.now() + 600000, r.id)
+      .run();
+    await f.DB.prepare('UPDATE signing_recipients SET signed_at=1 WHERE request_id=?')
+      .bind(r.id)
+      .run();
+    expect((await f.request(resend, {})).status).toBe(409);
+    await f.DB.prepare('UPDATE documents SET is_deleted=1 WHERE id=?').bind('document').run();
+    expect((await f.request(resend, {})).status).toBe(410);
+  });
+  test('historical sent rows show unknown timestamps and do not manufacture a send count', async () => {
+    const f = await fixture();
+    const r = ((await (await f.request(f.base, f.payload)).json()) as any).request;
+    await f.DB.prepare(
+      "UPDATE signing_mail SET status='sent',queued_at=NULL,send_count=NULL WHERE request_id=?",
+    )
+      .bind(r.id)
+      .run();
+    const dto = (await (await f.request()).json()) as any;
+    expect(dto.requests[0].recipients[0].delivery).toMatchObject({
+      status: 'sent',
+      firstSentAt: null,
+      lastSentAt: null,
+      lastQueuedAt: null,
+      sendCount: null,
+      canResend: true,
+    });
+    const memberDto = (await (await f.request(f.base, undefined, 'writer')).json()) as any;
+    expect(memberDto.requests[0].recipients[0].delivery.canResend).toBe(false);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ id: 'historical-resend-test' })),
+    );
+    expect(
+      (await f.request(`${f.base}/${r.id}/recipients/${r.recipients[0].id}/resend`, {})).status,
+    ).toBe(202);
+    await processSigning(f.env, r.id);
+    const afterResend = (await (await f.request()).json()) as any;
+    expect(afterResend.requests[0].recipients[0].delivery.firstSentAt).toBeNull();
+    expect(afterResend.requests[0].recipients[0].delivery.sendCount).toBeNull();
+    expect(afterResend.requests[0].recipients[0].delivery.lastSentAt).toBeGreaterThan(0);
+  });
   test('writers and another team cannot initiate signing; stale revisions cannot be sent', async () => {
     const f = await fixture();
     expect((await f.request(f.base, f.payload, 'writer')).status).toBe(403);
@@ -396,7 +519,8 @@ describe('native signing authorization and lifecycle', () => {
       (await f.DB.prepare('SELECT status FROM signing_requests WHERE id=?').bind(r.id).first())
         ?.status,
     ).toBe('pending');
-    expect(mailFetch).toHaveBeenCalledTimes(2);
+    // A recipient who signed before delivery no longer receives an invitation.
+    expect(mailFetch).toHaveBeenCalledTimes(1);
     const secondToken = new URL(r.recipients[1].url).pathname.split('/').pop();
     await f.request(`/api/signing/${secondToken}/sign`, {
       name: 'Second Test Signer',
@@ -499,8 +623,8 @@ describe('native signing authorization and lifecycle', () => {
     );
     const before = stored.signed_key;
     await processSigning(f.env, r.id);
-    expect(mailFetch).toHaveBeenCalledTimes(5);
-    expect(acceptedMail.size).toBe(4);
+    expect(mailFetch).toHaveBeenCalledTimes(4);
+    expect(acceptedMail.size).toBe(3);
     expect(
       (await f.DB.prepare('SELECT signed_key FROM signing_requests WHERE id=?').bind(r.id).first())
         ?.signed_key,
