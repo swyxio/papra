@@ -61,7 +61,7 @@ async function explicitSpaces(DB: D1Database, email: string) {
     .all<Organization>();
   return results;
 }
-async function approvedIdentityEmail(email: string, verified: unknown, DB?: D1Database) {
+export async function approvedIdentityEmail(email: string, verified: unknown, DB?: D1Database) {
   if (isApprovedEmail(email, verified)) return true;
   if (verified !== true || !DB) return false;
   return (await explicitSpaces(DB, email)).length > 0;

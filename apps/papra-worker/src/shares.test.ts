@@ -295,7 +295,7 @@ describe('Worker share link permission and revocation', () => {
       false,
     );
   });
-  test('ordinary members cannot create, change or delete sharing; personal scope rejects crafted membership', async () => {
+  test('members cannot publish other people’s uploads; personal scope rejects crafted membership', async () => {
     const { request, create } = await fixture();
     const share = await create();
     expect(
@@ -465,15 +465,19 @@ describe('Worker share link permission and revocation', () => {
     ).toBe(204);
     expect((await request(`/api/share-links/${share.token}/document`)).status).toBe(404);
   });
-  test('public delegation is revoked when its author loses admin access, is disabled, or the backing file is deleted', async () => {
+  test('public delegation is revoked when its author loses membership, is disabled, or the backing file is deleted', async () => {
     const { request, create, DB } = await fixture();
     const share = await create();
     await DB.prepare(
       "UPDATE organization_members SET role='member' WHERE organization_id='team' AND user_id='owner'",
     ).run();
+    expect((await request(`/api/share-links/${share.token}/document`)).status).toBe(200);
+    await DB.prepare(
+      "DELETE FROM organization_members WHERE organization_id='team' AND user_id='owner'",
+    ).run();
     expect((await request(`/api/share-links/${share.token}/document`)).status).toBe(410);
     await DB.prepare(
-      "UPDATE organization_members SET role='owner' WHERE organization_id='team' AND user_id='owner'",
+      "INSERT INTO organization_members(id,organization_id,user_id,role,created_at,updated_at) VALUES('restored','team','owner','owner',0,0)",
     ).run();
     await DB.prepare("UPDATE users SET disabled_at=? WHERE id='owner'").bind(Date.now()).run();
     expect((await request(`/api/share-links/${share.token}/document`)).status).toBe(410);
@@ -654,4 +658,61 @@ test('transcript preserves full text from truncated legacy segments and retries 
   });
   env.FILES = { get: async () => null } as any;
   expect((await request(path)).status).toBe(503);
+});
+
+test('members publish their own uploads but lose public delegation with folder write access', async () => {
+  const { request, DB } = await fixture();
+  await DB.prepare("UPDATE documents SET created_by='member' WHERE id IN ('open','secret')").run();
+  const response = await request(
+    '/api/organizations/team/documents/open/share-links',
+    'POST',
+    {},
+    'member',
+  );
+  expect(response.status).toBe(201);
+  const { shareLink } = (await response.json()) as any;
+  expect((await request(`/api/share-links/${shareLink.token}/document`)).status).toBe(200);
+  const listing = (await (
+    await request('/api/organizations/team/documents/open/share-links', 'GET', undefined, 'member')
+  ).json()) as any;
+  expect(listing.canManage).toBe(true);
+  expect(
+    (await request('/api/organizations/team/documents/secret/share-links', 'POST', {}, 'member'))
+      .status,
+  ).toBe(404);
+  await DB.prepare(
+    "INSERT INTO folder_acl(folder_id,user_id,role)VALUES('restricted','member','writer')",
+  ).run();
+  const restricted = (await (
+    await request('/api/organizations/team/documents/secret/share-links', 'POST', {}, 'member')
+  ).json()) as any;
+  expect((await request(`/api/share-links/${restricted.shareLink.token}/document`)).status).toBe(
+    200,
+  );
+  await DB.prepare(
+    "UPDATE folder_acl SET role='reader' WHERE folder_id='restricted' AND user_id='member'",
+  ).run();
+  expect((await request(`/api/share-links/${restricted.shareLink.token}/document`)).status).toBe(
+    410,
+  );
+  expect(
+    (
+      await request(
+        `/api/organizations/team/share-links/${shareLink.id}`,
+        'PATCH',
+        { isEnabled: false },
+        'member',
+      )
+    ).status,
+  ).toBe(200);
+  expect(
+    (
+      await request(
+        `/api/organizations/team/share-links/${shareLink.id}`,
+        'DELETE',
+        undefined,
+        'member',
+      )
+    ).status,
+  ).toBe(204);
 });

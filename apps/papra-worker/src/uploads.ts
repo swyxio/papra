@@ -178,10 +178,12 @@ export function registerUploadRoutes(app: App) {
       throw error(400, 'Invalid upload metadata');
     let folderId = b.folderId || organizationHomeFolderId(org);
     const replacement = !!b.documentId;
+    let ownDocument = !replacement;
     if (replacement) {
       const d = await ensureDocumentAccess(c.env, user, b.documentId, 'write');
       if (d.organization_id !== org || d.is_deleted) throw error(404, 'Document not found');
       folderId = d.home_folder_id;
+      ownDocument = d.created_by === user.userId;
     }
     const folder = await canWriteFolder(c.env, user, folderId);
     if (folder.organization_id !== org) throw error(403, 'Folder access denied');
@@ -257,7 +259,11 @@ export function registerUploadRoutes(app: App) {
       else await c.env.FILES.delete(key);
       throw e;
     }
-    if (b.share === true && ['owner', 'admin'].includes(role) && !user.serviceScope) {
+    if (
+      b.share === true &&
+      (ownDocument || ['owner', 'admin'].includes(role)) &&
+      !user.serviceScope
+    ) {
       await reserveUploadShare(c.env, uploadId);
     }
     return c.json(

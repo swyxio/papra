@@ -1,7 +1,7 @@
 import type { App, Env, Identity } from './types';
 import { jwtVerify, SignJWT } from 'jose';
 import { HTTPException } from 'hono/http-exception';
-import { isApprovedEmail, OWNER_EMAIL } from './auth';
+import { approvedIdentityEmail, OWNER_EMAIL } from './auth';
 import { ensureDocumentAccess, ensureOrganizationMember } from './collaboration';
 import { getDocument } from './db';
 import { shareUrl, newShareId, validShareId } from './share-urls';
@@ -147,10 +147,15 @@ async function documentScope(
   manage = false,
 ) {
   const role = await ensureOrganizationMember(env, identity, organizationId);
-  if (manage && !['admin', 'owner'].includes(role))
-    return fail(403, 'Only a team administrator or personal owner can manage sharing');
   const document = await ensureDocumentAccess(env, identity, documentId, manage ? 'write' : 'read');
   if (document.organization_id !== organizationId) return fail(404, 'File not found');
+  if (manage && !['admin', 'owner'].includes(role) && document.created_by !== identity.userId)
+    return fail(
+      403,
+      'You can publish your own uploads. Ask the uploader or a team administrator to share this file.',
+    );
+  if (manage && identity.serviceScope)
+    return fail(403, 'Use your account to manage public sharing');
   return document;
 }
 async function canManageSharing(
@@ -203,7 +208,7 @@ export async function publicShare(env: Env, token: string) {
   if (
     !creator ||
     creator.disabled_at !== null ||
-    !isApprovedEmail(creator.email, creator.email_verified === 1)
+    !(await approvedIdentityEmail(creator.email, creator.email_verified === 1, env.DB))
   )
     return fail(410, 'Share link unavailable');
   const identity: Identity = {

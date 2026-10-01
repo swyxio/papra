@@ -458,7 +458,7 @@ test('reserved short ID exposes progress before bytes arrive, activates atomical
   expect((await f.call(`/${session.id}/complete`, 'POST', {})).status).toBe(200);
   expect((await f.DB.prepare('SELECT count(*) n FROM share_links').first<any>()).n).toBe(1);
 });
-test('pending delegation is revoked with admin access and aborted links are unavailable', async () => {
+test('pending delegation respects member uploads and account revocation and aborted links are unavailable', async () => {
   const f = await fixture();
   await f.DB.prepare("UPDATE organization_members SET role='admin' WHERE user_id='writer'").run();
   const { session } = (await (
@@ -475,7 +475,10 @@ test('pending delegation is revoked with admin access and aborted links are unav
     document: { upload: { interrupted: true } },
   });
   await f.DB.prepare("UPDATE organization_members SET role='member' WHERE user_id='writer'").run();
+  expect((await f.publicGet(token)).status).toBe(200);
+  await f.DB.prepare("UPDATE users SET disabled_at=1 WHERE id='writer'").run();
   expect((await f.publicGet(token)).status).toBe(410);
+  await f.DB.prepare("UPDATE users SET disabled_at=NULL WHERE id='writer'").run();
   const ordinary = (await (
     await f.call('', 'POST', {
       fileName: 'ordinary.txt',
@@ -484,7 +487,7 @@ test('pending delegation is revoked with admin access and aborted links are unav
       share: true,
     })
   ).json()) as any;
-  expect(ordinary.session.shareUrl).toBeUndefined();
+  expect(ordinary.session.shareUrl).toContain('/s/');
   await f.DB.prepare("UPDATE organization_members SET role='admin' WHERE user_id='writer'").run();
   await f.call(`/${session.id}`, 'DELETE');
   expect((await f.publicGet(token)).status).toBe(410);
@@ -511,4 +514,29 @@ test('ID collisions retry with a longer ID, and slug spelling never contributes 
   } finally {
     random.mockRestore();
   }
+});
+
+test('member upload links stay scoped to original uploader across replacement versions', async () => {
+  const f = await fixture();
+  const { session } = (await (
+    await f.call('', 'POST', {
+      fileName: 'own.txt',
+      size: 0,
+      fingerprint: 'c'.repeat(64),
+      share: true,
+    })
+  ).json()) as any;
+  expect(session.shareUrl).toContain('/s/');
+  expect((await f.call(`/${session.id}/complete`, 'POST', {})).status).toBe(200);
+  f.user.userId = 'other';
+  const replacement = (await (
+    await f.call('', 'POST', {
+      fileName: 'replacement.txt',
+      size: 0,
+      fingerprint: 'd'.repeat(64),
+      documentId: session.documentId,
+      share: true,
+    })
+  ).json()) as any;
+  expect(replacement.session.shareUrl).toBeUndefined();
 });

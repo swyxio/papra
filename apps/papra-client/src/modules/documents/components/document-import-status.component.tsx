@@ -89,6 +89,7 @@ type Task = {
   processingError?: string;
   shareUrl?: string;
   shareError?: string;
+  shareForbidden?: boolean;
   sharing?: boolean;
   copied?: boolean;
 } & (
@@ -224,7 +225,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
       setTasks((tasks) =>
         tasks.map((task) => (task.file === file ? ({ ...task, ...changes } as Task) : task)),
       );
-    update({ sharing: true, shareError: undefined });
+    update({ sharing: true, shareError: undefined, shareForbidden: false });
     try {
       const { shareLink } = await shareLimit(async () =>
         createShareLink({
@@ -235,7 +236,12 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
       );
       update({ shareUrl: shareLink.url });
     } catch (error) {
-      update({ shareError: getHttpErrorMessage(error) });
+      update({
+        shareError: getHttpErrorMessage(error),
+        shareForbidden:
+          isHttpErrorWithStatusCode({ error, statusCode: 403 }) ||
+          isHttpErrorWithStatusCode({ error, statusCode: 404 }),
+      });
     } finally {
       update({ sharing: false });
     }
@@ -682,7 +688,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
                             <p class="text-xs text-red-500" role="alert">
                               {task().shareError}
                             </p>
-                            <Show when={!task().shareUrl}>
+                            <Show when={!task().shareUrl && !task().shareForbidden}>
                               <Button
                                 size="sm"
                                 variant="outline"

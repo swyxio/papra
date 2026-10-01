@@ -30,8 +30,8 @@ export const ShareDocumentDialogListView: Component<{
 
       <Show when={!props.canManage}>
         <p class="rounded-md border bg-muted p-3 text-sm">
-          Only a team administrator or personal owner can create or change public links. You can
-          copy existing links below; ask your team administrator to create one.
+          You can publish your own uploads when you have edit access to their folder. For this file,
+          copy an existing link below or ask the uploader or a team administrator to create one.
         </p>
       </Show>
       <Show when={!props.shareLinks.length}>
