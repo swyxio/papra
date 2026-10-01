@@ -4,6 +4,7 @@ import type { AsDto } from '../shared/http/http-client.types';
 import { apiClient } from '../shared/http/api-client';
 import { isHttpErrorWithStatusCode } from '../shared/http/http-errors';
 import { coerceDates } from '../shared/http/http-client.models';
+import { trackUploadActivity } from './upload-activity.services';
 
 export type TransferProgress = {
   bytes: number;
@@ -40,18 +41,33 @@ export async function fileFingerprint(file: File) {
     ]),
   );
 }
+type MultipartOptions = {
+  folderId?: string;
+  documentId?: string;
+  fileName?: string;
+  completeUpload?: CompleteUpload;
+  onShareReady?: (url: string) => void;
+  onNameReady?: (name: string) => void;
+};
 export async function multipartUpload(
   file: File,
   organizationId: string,
   onProgress?: (progress: TransferProgress) => void,
-  options: {
-    folderId?: string;
-    documentId?: string;
-    fileName?: string;
-    completeUpload?: CompleteUpload;
-    onShareReady?: (url: string) => void;
-    onNameReady?: (name: string) => void;
-  } = {},
+  options: MultipartOptions = {},
+) {
+  const activity = { stop: () => {} };
+  try {
+    return await transfer(file, organizationId, onProgress, options, activity);
+  } finally {
+    activity.stop();
+  }
+}
+async function transfer(
+  file: File,
+  organizationId: string,
+  onProgress: ((progress: TransferProgress) => void) | undefined,
+  options: MultipartOptions,
+  activity: { stop: () => void },
 ) {
   const fingerprint = await fileFingerprint(file);
   const key = `drive-upload:${organizationId}:${options.documentId || options.folderId || 'home'}:${options.fileName || file.name}:${fingerprint}`;
@@ -90,6 +106,7 @@ export async function multipartUpload(
       : await apiClient({ method: 'GET', path });
     state.session = status.session;
     localStorage.setItem(key, JSON.stringify(state));
+    activity.stop = trackUploadActivity(state.session.id);
   } catch (error) {
     if (isHttpErrorWithStatusCode({ error, statusCode: 410 })) localStorage.removeItem(key);
     throw error;

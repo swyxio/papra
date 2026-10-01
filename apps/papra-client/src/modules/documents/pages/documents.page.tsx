@@ -206,9 +206,12 @@ export const DocumentsPage: Component = () => {
     setSelectAllMatchingQuery(false);
   }
 
+  const getListingScope = createMemo(() =>
+    JSON.stringify([debouncedSearchQuery(), queryFolderId(), params.organizationId]),
+  );
   createEffect(
     on(
-      () => [debouncedSearchQuery(), queryFolderId(), params.organizationId],
+      getListingScope,
       () => {
         clearSelection();
         setPagination((current) => ({ ...current, pageIndex: 0 }));
