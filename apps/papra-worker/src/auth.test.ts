@@ -19,6 +19,8 @@ CREATE TABLE users(id TEXT PRIMARY KEY,google_sub TEXT UNIQUE NOT NULL,email TEX
 CREATE TABLE organizations(id TEXT PRIMARY KEY,name TEXT,personal_owner_id TEXT,created_at INTEGER,updated_at INTEGER);
 CREATE TABLE folders(id TEXT PRIMARY KEY,organization_id TEXT,parent_id TEXT,name TEXT,is_home INTEGER,is_restricted INTEGER,created_by TEXT,created_at INTEGER,updated_at INTEGER);
 CREATE TABLE organization_members(id TEXT PRIMARY KEY,organization_id TEXT,user_id TEXT,role TEXT,created_at INTEGER,updated_at INTEGER,UNIQUE(organization_id,user_id));
+CREATE TABLE IF NOT EXISTS organization_email_grants ( organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE, email TEXT NOT NULL CHECK(email = lower(trim(email))), created_at INTEGER NOT NULL, PRIMARY KEY(email, organization_id) );
+CREATE TRIGGER IF NOT EXISTS revoke_organization_email_grant AFTER DELETE ON organization_email_grants BEGIN DELETE FROM organization_members WHERE organization_id=OLD.organization_id AND role='member' AND user_id IN (SELECT id FROM users WHERE email=OLD.email); END;
 CREATE TABLE auth_sessions(id TEXT PRIMARY KEY,token_hash TEXT UNIQUE,user_id TEXT,expires_at INTEGER,created_at INTEGER);
 CREATE TABLE auth_oauth_states(state_hash TEXT PRIMARY KEY,nonce TEXT,verifier TEXT,callback_url TEXT,expires_at INTEGER);
 `;
@@ -216,6 +218,86 @@ describe('Worker Google admission', () => {
       ).results,
     ).toEqual([{ organization_id: getDriveTeamOrganizationId('latent.space') }]);
     await expect(provisionUser(env, { ...profile, email: 'outside@gmail.com' })).rejects.toThrow();
+  });
+  test('explicit guest grants require verified email, enroll only the granted team and survive repeat sign-in', async () => {
+    const { env, DB } = await fixture();
+    const org = getDriveTeamOrganizationId('latent.space');
+    await DB.prepare('INSERT INTO organizations(id,name,created_at,updated_at) VALUES (?, ?,1,1)')
+      .bind(org, 'Latent Space')
+      .run();
+    await DB.prepare('INSERT INTO organization_email_grants VALUES (?,?,1)')
+      .bind(org, 'guest@gmail.com')
+      .run();
+    const local = createLocalJWKSet({ keys: [publicJwk] });
+    const token = await jwt({ email: 'guest@gmail.com' });
+    const profile = await verifyGoogleIdentity(token, 'nonce', 'client', local, DB);
+    await expect(
+      verifyGoogleIdentity(
+        await jwt({ email: 'guest@gmail.com', email_verified: false }),
+        'nonce',
+        'client',
+        local,
+        DB,
+      ),
+    ).rejects.toThrow();
+    await expect(
+      verifyGoogleIdentity(await jwt({ email: 'other@gmail.com' }), 'nonce', 'client', local, DB),
+    ).rejects.toThrow();
+    const user = await provisionUser(env, profile);
+    await provisionUser(env, profile);
+    expect(
+      (
+        await DB.prepare(
+          "SELECT organization_id,role FROM organization_members WHERE user_id=? AND role='member'",
+        )
+          .bind(user)
+          .all()
+      ).results,
+    ).toEqual([{ organization_id: org, role: 'member' }]);
+    await DB.prepare('DELETE FROM organization_email_grants WHERE email=?')
+      .bind(profile.email)
+      .run();
+    await expect(provisionUser(env, profile)).rejects.toThrow();
+    await expect(verifyGoogleIdentity(token, 'nonce', 'client', local, DB)).rejects.toThrow();
+  });
+  test('guest OAuth login produces a usable scoped session and grant revocation closes it', async () => {
+    const { app, env, DB } = await fixture();
+    const org = getDriveTeamOrganizationId('latent.space');
+    await DB.prepare('INSERT INTO organizations(id,name,created_at,updated_at) VALUES (?, ?,1,1)')
+      .bind(org, 'Latent Space')
+      .run();
+    await DB.prepare('INSERT INTO organization_email_grants VALUES (?,?,1)')
+      .bind(org, 'guest@gmail.com')
+      .run();
+    const login = await begin(app, env);
+    googleResponses(
+      login.url.searchParams.get('nonce')!,
+      { email: 'guest@gmail.com' },
+      { email: 'guest@gmail.com' },
+    );
+    const response = await app.request(
+      `https://drive.example/api/auth/callback/google?state=${login.url.searchParams.get('state')}&code=code`,
+      { headers: { cookie: login.cookie } },
+      env,
+    );
+    const sessionCookie = cookieFrom(response, 'session');
+    expect(sessionCookie).toBeTruthy();
+    const request = new Request(env.APP_URL, { headers: { cookie: sessionCookie } });
+    const identity = await getIdentity(request, env);
+    expect(identity?.organizations.filter((o) => o.role === 'member')).toEqual([
+      { id: org, name: 'Latent Space', role: 'member' },
+    ]);
+    await DB.prepare('DELETE FROM organization_email_grants WHERE email=?')
+      .bind('guest@gmail.com')
+      .run();
+    expect(await getIdentity(request, env)).toBeNull();
+    expect(
+      (
+        await DB.prepare('SELECT * FROM organization_members WHERE organization_id=? AND user_id=?')
+          .bind(org, identity!.userId)
+          .all()
+      ).results,
+    ).toHaveLength(0);
   });
   test('parallel owner enrollment grants all spaces without duplicates', async () => {
     const { env, DB } = await fixture();

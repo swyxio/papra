@@ -51,6 +51,21 @@ export function isApprovedEmail(email: string, emailVerified: unknown): boolean 
     (normalized === OWNER_EMAIL || TEAMS.some((team) => parts[1] === team.domain))
   );
 }
+async function explicitSpaces(DB: D1Database, email: string) {
+  const { results } = await DB.prepare(
+    `SELECT o.id,o.name,'member' AS role FROM organization_email_grants g
+     JOIN organizations o ON o.id=g.organization_id
+     WHERE g.email=? AND o.personal_owner_id IS NULL`,
+  )
+    .bind(email.trim().toLowerCase())
+    .all<Organization>();
+  return results;
+}
+async function approvedIdentityEmail(email: string, verified: unknown, DB?: D1Database) {
+  if (isApprovedEmail(email, verified)) return true;
+  if (verified !== true || !DB) return false;
+  return (await explicitSpaces(DB, email)).length > 0;
+}
 export function getDriveTeamOrganizationId(domain: string) {
   const team = TEAMS.find((entry) => entry.domain === domain);
   if (!team) throw authError('Unknown team');
@@ -164,6 +179,7 @@ export async function verifyGoogleIdentity(
   nonce: string,
   clientId: string,
   keys: JWTVerifyGetKey = googleKeys,
+  DB?: D1Database,
 ) {
   const { payload } = await jwtVerify(token, keys, {
     issuer: ['https://accounts.google.com', 'accounts.google.com'],
@@ -179,7 +195,7 @@ export async function verifyGoogleIdentity(
     typeof payload.email !== 'string'
   )
     throw authError('Google identity could not be verified');
-  if (!isApprovedEmail(payload.email, payload.email_verified))
+  if (!(await approvedIdentityEmail(payload.email, payload.email_verified, DB)))
     throw new LoginFailure('google_account_not_allowed');
   return {
     sub: payload.sub,
@@ -194,7 +210,9 @@ export async function provisionUser(
   profile: { sub: string; email: string; name: string; image: string | null },
 ) {
   const email = profile.email.trim().toLowerCase();
-  if (!isApprovedEmail(email, true)) throw authError('Identity is not approved');
+  const grants = await explicitSpaces(env.DB, email);
+  if (!isApprovedEmail(email, true) && grants.length === 0)
+    throw authError('Identity is not approved');
   const existing = await env.DB.prepare('SELECT * FROM users WHERE google_sub = ?')
     .bind(profile.sub)
     .first<UserRow>();
@@ -204,6 +222,7 @@ export async function provisionUser(
   const personalId = await getDrivePersonalOrganizationId(userId);
   const spaces = [
     { id: personalId, name: email === OWNER_EMAIL ? 'swyx' : 'Personal', role: 'owner' },
+    ...grants,
     ...TEAMS.filter((team) => email === OWNER_EMAIL || team.domain === email.split('@')[1]).map(
       (team) => ({
         ...team,
@@ -219,7 +238,11 @@ export async function provisionUser(
   // Domain changes must not keep ordinary automatic access to an old team.
   // Elevated roles are explicitly preserved, as required by the enrollment policy.
   for (const team of TEAMS) {
-    if (email !== OWNER_EMAIL && team.domain !== email.split('@')[1]) {
+    if (
+      email !== OWNER_EMAIL &&
+      team.domain !== email.split('@')[1] &&
+      !grants.some((grant) => grant.id === team.id)
+    ) {
       statements.push(
         env.DB.prepare(
           "DELETE FROM organization_members WHERE user_id=? AND organization_id=? AND role='member'",
@@ -256,7 +279,11 @@ export async function getIdentity(request: Request, env: AuthEnv): Promise<Ident
   )
     .bind(await hash(token), Date.now())
     .first<UserRow & { session_id: string; expires_at: number }>();
-  if (!row || row.disabled_at !== null || !isApprovedEmail(row.email, row.email_verified === 1))
+  if (
+    !row ||
+    row.disabled_at !== null ||
+    !(await approvedIdentityEmail(row.email, row.email_verified === 1, env.DB))
+  )
     return null;
   const result = await env.DB.prepare(
     'SELECT o.id,o.name,m.role FROM organizations o JOIN organization_members m ON m.organization_id=o.id WHERE m.user_id=? AND (o.personal_owner_id IS NULL OR o.personal_owner_id=?)',
@@ -380,6 +407,8 @@ export function registerAuthRoutes(app: App) {
         tokens.id_token,
         record.nonce,
         env.GOOGLE_CLIENT_ID,
+        undefined,
+        env.DB,
       );
       const infoResponse = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
         headers: { authorization: `Bearer ${tokens.access_token}` },
