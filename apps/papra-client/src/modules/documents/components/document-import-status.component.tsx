@@ -24,6 +24,7 @@ import { throttle } from '@/modules/shared/utils/timing';
 import { fetchOrganizationSubscription } from '@/modules/subscriptions/subscriptions.services';
 import { getHttpErrorMessage, isHttpErrorWithStatusCode } from '@/modules/shared/http/http-errors';
 import { getUploadErrorFallback } from '../upload-errors';
+import { isUploadActiveElsewhere } from '../upload-activity.services';
 import { Button } from '@/modules/ui/components/button';
 import { invalidateOrganizationDocumentsQuery } from '../documents.composables';
 import { uploadDocument } from '../documents.services';
@@ -458,9 +459,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
 
   const getTitle = () => {
     if (getTasks().length === 0) {
-      return interruptedQuery.data?.uploads.length
-        ? 'Upload recovery'
-        : t('import-documents.title.none');
+      return visibleInterrupted()?.length ? 'Upload recovery' : t('import-documents.title.none');
     }
 
     const successCount = getTasks().filter((task) => task.status === 'success').length;
@@ -504,6 +503,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
     interruptedQuery.data?.uploads.filter(
       (upload) =>
         !dismissedInterrupted().includes(upload.id) &&
+        !isUploadActiveElsewhere(upload.id) &&
         !getTasks().some(
           (task) =>
             ['pending', 'uploading'].includes(task.status) &&
@@ -548,11 +548,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
         </div>
       </Show>
       <Portal>
-        <Show
-          when={
-            getState() === 'closed' && (getTasks().length || interruptedQuery.data?.uploads.length)
-          }
-        >
+        <Show when={getState() === 'closed' && (getTasks().length || visibleInterrupted()?.length)}>
           <Button
             class="fixed bottom-3 right-3 z-40 shadow-lg"
             variant="outline"
@@ -637,13 +633,13 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
                   Up to 10 files upload at once. Closing hides this panel; uploads continue.
                 </p>
               </div>
-              <div class="flex flex-col overflow-y-auto max-h-[min(450px,60dvh)] pb-4">
-                <Show when={interruptedQuery.data?.uploads.length}>
+              <div class="overflow-y-auto max-h-[min(450px,60dvh)] pb-4">
+                <Show when={visibleInterrupted()?.length}>
                   <div class="px-6 py-3 border-b text-sm space-y-2">
-                    <strong>Interrupted uploads ({interruptedQuery.data?.uploads.length})</strong>
+                    <strong>Interrupted uploads ({visibleInterrupted()?.length})</strong>
                     <p class="break-words">
-                      {interruptedQuery.data?.uploads
-                        .map(
+                      {visibleInterrupted()
+                        ?.map(
                           (upload) =>
                             `${folderLabels()[upload.folderId || ''] || 'Destination folder'} / ${upload.fileName}`,
                         )
@@ -812,7 +808,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
                 </Index>
 
                 <Show when={getTasks().length === 0}>
-                  <div class="flex flex-col items-center justify-center gap-2 h-full mb-10">
+                  <div class="flex flex-col items-center justify-center gap-2 mt-6 mb-10">
                     <div class="flex flex-col items-center justify-center gap-2 ">
                       <div class="i-tabler-file-import size-10 text-muted-foreground" />
                     </div>
