@@ -1,6 +1,6 @@
 import {
   createUploadScheduler,
-  prioritizeUploadTasks,
+  groupUploadTasks,
   uploadFolderPaths,
 } from '../upload-scheduling.services';
 import { createShareLink } from '@/modules/document-share-links/document-share-links.services';
@@ -83,6 +83,7 @@ type TaskError = {
 type Task = {
   fileName?: string;
   folderImport?: boolean;
+  group?: { id: string; name: string; destination?: string };
   folderId?: string;
   destination?: string;
   progress?: TransferProgress;
@@ -114,6 +115,8 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
   const [getState, setState] = createSignal<'open' | 'closed' | 'collapsed'>('closed');
   const [getTasks, setTasks] = createSignal<Task[]>([]);
   const uploadLimit = createUploadScheduler();
+  let folderDropCount = 0;
+  const [expandedFolders, setExpandedFolders] = createSignal<string[]>([]);
   const [failedOnly, setFailedOnly] = createSignal(false);
   const [dismissedInterrupted, setDismissedInterrupted] = (() => {
     try {
@@ -265,6 +268,11 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
     if (retry) {
       for (const file of files) updateTaskStatus({ file, status: 'pending' });
     } else {
+      const drop = ++folderDropCount;
+      const group = (file: File) => {
+        const [name, ...rest] = file.webkitRelativePath.split('/');
+        return folderImport && rest.length ? { id: `${drop}:${name}`, name } : undefined;
+      };
       setTasks((tasks) => [
         ...tasks,
         ...files.map(
@@ -274,6 +282,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
               status: 'pending',
               folderId,
               folderImport,
+              group: group(file),
               destination: folderImport
                 ? file.webkitRelativePath.split('/').slice(0, -1).join(' / ')
                 : undefined,
@@ -340,6 +349,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
             folders.set(path, folder.id);
           }
         }
+      if (folderImport) void invalidateOrganizationDocumentsQuery({ organizationId });
       const destinationLabels = uploadFolderPaths(list.folders);
       setFolderLabels(destinationLabels);
       setTasks((tasks) =>
@@ -353,6 +363,10 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
             folderImport: false,
             folderId: destinationId,
             destination: destinationLabels[destinationId || ''] || 'Home',
+            group: task.group && {
+              ...task.group,
+              destination: destinationLabels[folders.get(task.group.name) || ''],
+            },
           };
         }),
       );
@@ -512,6 +526,197 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
         ),
     );
 
+  const UploadTaskRow = (props: { task: () => Task }) => {
+    const task = props.task;
+    return (
+      <Switch>
+        <Match when={task().status === 'success'}>
+          <div class="text-sm min-w-0 px-6 py-3 border-b border-border/80 space-y-2">
+            <p class="text-xs text-muted-foreground break-words">{task().destination}</p>
+            <A
+              href={`/organizations/${(task() as TaskSuccess).document.organizationId}/documents/${(task() as TaskSuccess).document.id}`}
+              class="block truncate hover:underline"
+            >
+              {task().fileName || task().file.name} ↗
+            </A>
+            <div class="text-xs text-muted-foreground whitespace-normal">
+              {task().processing
+                ? processingLabel(task().processing!)
+                : task().processingError ||
+                  (processingQuery.isError
+                    ? 'Uploaded · processing status unavailable'
+                    : 'Uploaded · backup and search processing continue')}
+            </div>
+            <Show when={task().processing?.transcription}>
+              {(state) => <TranscriptionProgress state={state()} />}
+            </Show>
+            <UploadShareLink task={task} />
+            <Show when={task().sharing}>
+              <p class="text-xs">Creating share link…</p>
+            </Show>
+            <Show when={task().shareError}>
+              <p class="text-xs text-red-500" role="alert">
+                {task().shareError}
+              </p>
+              <Show when={!task().shareUrl && !task().shareForbidden}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={task().sharing}
+                  onClick={() =>
+                    void createUploadShare(task().file, (task() as TaskSuccess).document)
+                  }
+                >
+                  Retry share link
+                </Button>
+              </Show>
+            </Show>
+          </div>
+        </Match>
+
+        <Match when={task().status === 'error'}>
+          <div class="text-sm min-w-0 px-6 py-3 border-b border-border/80 space-y-2" role="alert">
+            <div class="flex items-start gap-2">
+              <div class="i-tabler-circle-x text-red-500 size-5 flex-none" />
+              <strong class="break-words">{task().fileName || task().file.name}</strong>
+            </div>
+            <p class="text-xs text-muted-foreground break-words">{task().destination}</p>
+            <p class="text-xs text-red-500 whitespace-pre-wrap break-words">
+              {isHttpErrorWithStatusCode({
+                error: (task() as TaskError).error,
+                statusCode: 409,
+              })
+                ? getHttpErrorMessage((task() as TaskError).error)
+                : getErrorMessage({
+                    error: (task() as TaskError).error,
+                    defaultMessage: getUploadErrorFallback((task() as TaskError).error),
+                  })}
+            </p>
+            <div class="flex gap-2">
+              <Button size="sm" variant="outline" onClick={() => void retryTasks([task()])}>
+                Retry upload
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() =>
+                  setTasks((tasks) => tasks.filter((item) => item.file !== task().file))
+                }
+              >
+                Dismiss
+              </Button>
+            </div>
+          </div>
+        </Match>
+
+        <Match when={['pending', 'uploading'].includes(task().status)}>
+          <div class="text-sm min-w-0 flex items-center gap-4 min-h-48px px-6 py-3 border-b border-border/80">
+            <div class="flex-1 min-w-0 space-y-2">
+              <div class="break-words">{task().fileName || task().file.name}</div>
+              <p class="text-xs text-muted-foreground break-words">{task().destination}</p>
+              <p class="text-xs text-muted-foreground">
+                {task().status === 'pending' ? 'Queued · waiting for an upload slot' : 'Uploading'}
+              </p>
+              <UploadShareLink task={task} />
+              <Show when={task().progress}>
+                {(progress) => (
+                  <div class="text-xs text-muted-foreground">
+                    {progress().total
+                      ? ((progress().bytes / progress().total) * 100).toFixed(1)
+                      : '0'}
+                    % transferred · {(progress().speed / 1024 ** 2).toFixed(1)} MiB/s ·{' '}
+                    {progress().bytes >= progress().total
+                      ? 'Finalizing…'
+                      : progress().speed > 0
+                        ? `${Math.ceil(progress().eta)}s left`
+                        : 'Estimating time…'}{' '}
+                    <Show when={progress().resumedParts > 0}>
+                      · resumed {progress().resumedParts} parts
+                    </Show>
+                    <progress class="w-full" value={progress().bytes} max={progress().total} />
+                  </div>
+                )}
+              </Show>
+            </div>
+
+            <div class="flex-none">
+              <div
+                class={
+                  task().status === 'pending'
+                    ? 'i-tabler-clock text-muted-foreground size-5.5'
+                    : 'i-tabler-loader-2 animate-spin text-muted-foreground size-5.5'
+                }
+              />
+            </div>
+          </div>
+        </Match>
+      </Switch>
+    );
+  };
+
+  const UploadFolderRow = (props: {
+    folder: () => { id: string; name: string; tasks: Task[] };
+  }) => {
+    const folder = props.folder;
+    const count = (status: Task['status']) =>
+      folder().tasks.filter((task) => task.status === status).length;
+    const total = () => folder().tasks.reduce((sum, task) => sum + task.file.size, 0);
+    const transferred = () =>
+      folder().tasks.reduce(
+        (sum, task) =>
+          sum + (task.status === 'success' ? task.file.size : (task.progress?.bytes ?? 0)),
+        0,
+      );
+    const expanded = () => expandedFolders().includes(folder().id);
+    return (
+      <div class="text-sm min-w-0 border-b border-border/80">
+        <button
+          type="button"
+          class="w-full flex items-center gap-3 px-6 py-3 text-left hover:bg-muted/50"
+          aria-expanded={expanded()}
+          onClick={() =>
+            setExpandedFolders((ids) =>
+              expanded() ? ids.filter((id) => id !== folder().id) : [...ids, folder().id],
+            )
+          }
+        >
+          <div class="i-tabler-folder size-5 flex-none text-muted-foreground" />
+          <div class="flex-1 min-w-0 space-y-1">
+            <div class="break-words font-medium">{folder().name}</div>
+            <Show when={folder().tasks[0]?.group?.destination}>
+              {(destination) => (
+                <p class="text-xs text-muted-foreground break-words">{destination()}</p>
+              )}
+            </Show>
+            <p class="text-xs text-muted-foreground">
+              {count('success')} of {folder().tasks.length} files uploaded
+              <Show when={count('uploading')}> · {count('uploading')} uploading</Show>
+              <Show when={count('pending')}> · {count('pending')} queued</Show>
+              <Show when={count('error')}>
+                {' '}
+                · <span class="text-red-500">{count('error')} failed</span>
+              </Show>
+            </p>
+            <Show when={count('success') < folder().tasks.length}>
+              <progress class="w-full" value={transferred()} max={total() || 1} />
+            </Show>
+          </div>
+          <div
+            class={cn(
+              'i-tabler-chevron-down size-5 flex-none text-muted-foreground transition-transform',
+              expanded() && 'rotate-180',
+            )}
+          />
+        </button>
+        <Show when={expanded()}>
+          <div class="pl-4 border-t border-border/80">
+            <Index each={folder().tasks}>{(task) => <UploadTaskRow task={task} />}</Index>
+          </div>
+        </Show>
+      </div>
+    );
+  };
+
   return (
     <DocumentUploadContext.Provider value={{ uploadDocuments }}>
       {props.children}
@@ -651,160 +856,27 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
                     </p>
                   </div>
                 </Show>
-                <Index each={prioritizeUploadTasks(getTasks(), failedOnly())}>
-                  {(task) => (
-                    <Switch>
-                      <Match when={task().status === 'success'}>
-                        <div class="text-sm min-w-0 px-6 py-3 border-b border-border/80 space-y-2">
-                          <p class="text-xs text-muted-foreground break-words">
-                            {task().destination}
-                          </p>
-                          <A
-                            href={`/organizations/${(task() as TaskSuccess).document.organizationId}/documents/${(task() as TaskSuccess).document.id}`}
-                            class="block truncate hover:underline"
-                          >
-                            {task().fileName || task().file.name} ↗
-                          </A>
-                          <div class="text-xs text-muted-foreground whitespace-normal">
-                            {task().processing
-                              ? processingLabel(task().processing!)
-                              : task().processingError ||
-                                (processingQuery.isError
-                                  ? 'Uploaded · processing status unavailable'
-                                  : 'Uploaded · backup and search processing continue')}
-                          </div>
-                          <Show when={task().processing?.transcription}>
-                            {(state) => <TranscriptionProgress state={state()} />}
-                          </Show>
-                          <UploadShareLink task={task} />
-                          <Show when={task().sharing}>
-                            <p class="text-xs">Creating share link…</p>
-                          </Show>
-                          <Show when={task().shareError}>
-                            <p class="text-xs text-red-500" role="alert">
-                              {task().shareError}
-                            </p>
-                            <Show when={!task().shareUrl && !task().shareForbidden}>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                disabled={task().sharing}
-                                onClick={() =>
-                                  void createUploadShare(
-                                    task().file,
-                                    (task() as TaskSuccess).document,
-                                  )
-                                }
-                              >
-                                Retry share link
-                              </Button>
-                            </Show>
-                          </Show>
-                        </div>
-                      </Match>
-
-                      <Match when={task().status === 'error'}>
-                        <div
-                          class="text-sm min-w-0 px-6 py-3 border-b border-border/80 space-y-2"
-                          role="alert"
-                        >
-                          <div class="flex items-start gap-2">
-                            <div class="i-tabler-circle-x text-red-500 size-5 flex-none" />
-                            <strong class="break-words">
-                              {task().fileName || task().file.name}
-                            </strong>
-                          </div>
-                          <p class="text-xs text-muted-foreground break-words">
-                            {task().destination}
-                          </p>
-                          <p class="text-xs text-red-500 whitespace-pre-wrap break-words">
-                            {isHttpErrorWithStatusCode({
-                              error: (task() as TaskError).error,
-                              statusCode: 409,
-                            })
-                              ? getHttpErrorMessage((task() as TaskError).error)
-                              : getErrorMessage({
-                                  error: (task() as TaskError).error,
-                                  defaultMessage: getUploadErrorFallback(
-                                    (task() as TaskError).error,
-                                  ),
-                                })}
-                          </p>
-                          <div class="flex gap-2">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => void retryTasks([task()])}
-                            >
-                              Retry upload
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() =>
-                                setTasks((tasks) =>
-                                  tasks.filter((item) => item.file !== task().file),
-                                )
-                              }
-                            >
-                              Dismiss
-                            </Button>
-                          </div>
-                        </div>
-                      </Match>
-
-                      <Match when={['pending', 'uploading'].includes(task().status)}>
-                        <div class="text-sm min-w-0 flex items-center gap-4 min-h-48px px-6 py-3 border-b border-border/80">
-                          <div class="flex-1 min-w-0 space-y-2">
-                            <div class="break-words">{task().fileName || task().file.name}</div>
-                            <p class="text-xs text-muted-foreground break-words">
-                              {task().destination}
-                            </p>
-                            <p class="text-xs text-muted-foreground">
-                              {task().status === 'pending'
-                                ? 'Queued · waiting for an upload slot'
-                                : 'Uploading'}
-                            </p>
-                            <UploadShareLink task={task} />
-                            <Show when={task().progress}>
-                              {(progress) => (
-                                <div class="text-xs text-muted-foreground">
-                                  {progress().total
-                                    ? ((progress().bytes / progress().total) * 100).toFixed(1)
-                                    : '0'}
-                                  % transferred · {(progress().speed / 1024 ** 2).toFixed(1)} MiB/s
-                                  ·{' '}
-                                  {progress().bytes >= progress().total
-                                    ? 'Finalizing…'
-                                    : progress().speed > 0
-                                      ? `${Math.ceil(progress().eta)}s left`
-                                      : 'Estimating time…'}{' '}
-                                  <Show when={progress().resumedParts > 0}>
-                                    · resumed {progress().resumedParts} parts
-                                  </Show>
-                                  <progress
-                                    class="w-full"
-                                    value={progress().bytes}
-                                    max={progress().total}
-                                  />
-                                </div>
-                              )}
-                            </Show>
-                          </div>
-
-                          <div class="flex-none">
-                            <div
-                              class={
-                                task().status === 'pending'
-                                  ? 'i-tabler-clock text-muted-foreground size-5.5'
-                                  : 'i-tabler-loader-2 animate-spin text-muted-foreground size-5.5'
-                              }
-                            />
-                          </div>
-                        </div>
-                      </Match>
-                    </Switch>
-                  )}
+                <Index each={groupUploadTasks(getTasks(), failedOnly())}>
+                  {(entry) => {
+                    const folder = () => {
+                      const current = entry();
+                      return current.kind === 'folder' ? current : undefined;
+                    };
+                    const task = () => {
+                      const current = entry();
+                      return current.kind === 'task' ? current.task : undefined;
+                    };
+                    return (
+                      <Show
+                        when={folder()}
+                        fallback={
+                          <Show when={task()}>{(task) => <UploadTaskRow task={task} />}</Show>
+                        }
+                      >
+                        {(folder) => <UploadFolderRow folder={folder} />}
+                      </Show>
+                    );
+                  }}
                 </Index>
 
                 <Show when={getTasks().length === 0}>

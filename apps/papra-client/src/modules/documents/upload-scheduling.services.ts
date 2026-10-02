@@ -37,3 +37,28 @@ export function uploadFolderPaths(
   };
   return Object.fromEntries(folders.map((folder) => [folder.id, path(folder.id)]));
 }
+
+export type UploadPanelEntry<T> =
+  | { kind: 'task'; task: T }
+  | { kind: 'folder'; id: string; name: string; tasks: T[] };
+
+export function groupUploadTasks<
+  T extends { status: string; group?: { id: string; name: string } },
+>(tasks: T[], failedOnly = false): UploadPanelEntry<T>[] {
+  const entries: UploadPanelEntry<T>[] = [];
+  const folders = new Map<string, { kind: 'folder'; id: string; name: string; tasks: T[] }>();
+  for (const task of prioritizeUploadTasks(tasks, failedOnly)) {
+    if (!task.group) {
+      entries.push({ kind: 'task', task });
+      continue;
+    }
+    let folder = folders.get(task.group.id);
+    if (!folder) {
+      folder = { kind: 'folder', id: task.group.id, name: task.group.name, tasks: [] };
+      folders.set(task.group.id, folder);
+      entries.push(folder);
+    }
+    folder.tasks.push(task);
+  }
+  return entries;
+}
