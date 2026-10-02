@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest';
 import {
   createUploadScheduler,
+  groupUploadTasks,
   MAX_SIMULTANEOUS_UPLOADS,
   prioritizeUploadTasks,
   uploadFolderPaths,
@@ -65,4 +66,20 @@ test('same-name files can be identified by their full destination ancestry', () 
       { id: 'b', parentId: 'a', name: 'Camera 1' },
     ]),
   ).toEqual({ home: 'Home', a: 'Home / Recordings', b: 'Home / Recordings / Camera 1' });
+});
+
+test('files from one dropped folder collapse into a single folder entry at its most urgent position', () => {
+  const shoot = { id: '1:Shoot', name: 'Shoot' };
+  const tasks = [
+    { name: 'loose.txt', status: 'success' },
+    { name: 'a.mp4', status: 'success', group: shoot },
+    { name: 'b.mp4', status: 'uploading', group: shoot },
+    { name: 'other.txt', status: 'pending', group: { id: '1:Other', name: 'Other' } },
+  ];
+  expect(groupUploadTasks(tasks)).toEqual([
+    { kind: 'folder', id: '1:Shoot', name: 'Shoot', tasks: [tasks[2], tasks[1]] },
+    { kind: 'folder', id: '1:Other', name: 'Other', tasks: [tasks[3]] },
+    { kind: 'task', task: tasks[0] },
+  ]);
+  expect(groupUploadTasks(tasks, true)).toEqual([]);
 });
