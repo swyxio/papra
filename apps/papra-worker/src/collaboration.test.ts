@@ -408,7 +408,7 @@ describe('D1 collaboration authorization and actual routes', () => {
       .bind(6 * 1024 ** 3, 'version:doc_public')
       .run();
     const response = await f.request(
-      `${f.base}/documents/doc_public/media`,
+      `${f.base}/documents/doc_public/media?quality=original`,
       'GET',
       undefined,
       'blocked',
@@ -429,10 +429,10 @@ describe('D1 collaboration authorization and actual routes', () => {
       (await f.request(`${f.base}/documents/doc_secret/media`, 'GET', undefined, 'blocked')).status,
     ).toBe(404);
     expect(
-      (await f.request(`/api/organizations/${f.other}/documents/doc_public/media`)).status,
+      (await f.request(`/api/organizations/${f.other}/documents/doc_public/media?quality=original`)).status,
     ).toBe(404);
     expect(
-      (await f.request(`${f.base}/documents/doc_public/media`, 'GET', undefined, 'outsider'))
+      (await f.request(`${f.base}/documents/doc_public/media?quality=original`, 'GET', undefined, 'outsider'))
         .status,
     ).toBe(403);
     await f.DB.prepare(
@@ -451,12 +451,12 @@ describe('D1 collaboration authorization and actual routes', () => {
       .bind('version:replacement', 'doc_public')
       .run();
     const replaced = (await (
-      await f.request(`${f.base}/documents/doc_public/media`)
+      await f.request(`${f.base}/documents/doc_public/media?quality=original`)
     ).json()) as any;
     expect(new URL(replaced.url).pathname).toBe('/private/private/replacement');
     expect(replaced.versionId).toBe('version:replacement');
     await f.DB.prepare('UPDATE documents SET is_deleted=1 WHERE id=?').bind('doc_public').run();
-    expect((await f.request(`${f.base}/documents/doc_public/media`)).status).toBe(404);
+    expect((await f.request(`${f.base}/documents/doc_public/media?quality=original`)).status).toBe(404);
   });
 
   test('inline PDF URLs support large originals without file buffering; unsafe HTML stays attachment-only', async () => {

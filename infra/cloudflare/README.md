@@ -85,3 +85,26 @@ The six former envelopes were all explicitly TEST ONLY: two completed, three pen
 Before retirement, the PostgreSQL dump was restored into a temporary database and all six envelopes were recovered. All eight source PDFs and the 211,933-byte database dump were copied to private `papra-drive-backups/retired/documenso/2026-09-16/`, with complete SHA-256 readbacks. Its manifest is written last. Stable recovery credentials and the original certificate remain in owner-only local configuration, outside source control.
 
 All four Railway deployments (web, backup, Redis and Postgres) were stopped. Project `55ef0045-dc4a-468d-98e1-84edf2dafcae` deletion was accepted, with provider `deletedAt: 2026-09-18T18:52:31.376Z`; this is scheduled removal, not proof that delayed deletion has completed. The public Documenso source fork remains available for its former modified instance.
+
+## Automatic production releases
+
+Cloudflare Workers Builds connects `swyxio/papra`, branch `main`, to `papra-drive`.
+Repository root: `/`; Node version: `26`; pnpm version: `11.22.0`.
+Preview builds are disabled so feature branches cannot publish the production bindings.
+
+- Build command: `bash infra/cloudflare/scripts/build.sh`
+- Deploy command: `node infra/cloudflare/scripts/deploy.mjs`
+
+The build installs the frozen lockfile, checks both application types, runs Worker
+and client tests, then builds the client. The inherited unused-English-translation
+lint is excluded from this release gate because retained upstream strings currently
+fail it; translation validity tests still run. Upstream CI retains that lint.
+
+Deployment preserves live variables/secrets and records the complete Git SHA.
+It compares native source/config with the currently deployed revision and rebuilds
+the Container only when those paths changed. It fails if the deployed revision
+cannot be identified, and verifies `/api/health` reports the exact new SHA afterward.
+Build logs and retries are in Cloudflare → papra-drive → Deployments.
+The managed build token stays in Cloudflare; no personal OAuth refresh token or
+application secret belongs in GitHub. Database schema changes still require an
+explicit reviewed migration; this pipeline never reinitializes the live database.
