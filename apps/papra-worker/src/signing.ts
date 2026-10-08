@@ -1,4 +1,5 @@
 import type { App, Env, Identity } from './types';
+import { HTTPException } from 'hono/http-exception';
 import { all, first, run, error, id } from './db';
 import { ensureDocumentAccess, ensureOrganizationMember } from './collaboration';
 import { isApprovedEmail } from './auth';
@@ -88,7 +89,7 @@ async function publicSigning(env: Env, token: string) {
   if (!request || !recipient) throw error(404, 'Signing link unavailable');
   if (request.expires_at < Date.now() || ['cancelled', 'rejected'].includes(request.status))
     throw error(410, 'Signing request is closed');
-  // Recheck sender admission, role, personal ownership and folder access for every link use.
+  // Recheck sender admission, membership and write access for every link use.
   const sender = await first(env, 'SELECT * FROM users WHERE id=?', request.created_by);
   if (!sender || sender.disabled_at || !isApprovedEmail(sender.email, sender.email_verified === 1))
     throw error(410, 'Signing request is closed');
@@ -113,14 +114,33 @@ async function publicSigning(env: Env, token: string) {
   return { request, recipient };
 }
 async function manageDocument(env: Env, identity: Identity, org: string, doc: string) {
-  if (identity.serviceScope) throw error(403, 'Signing requires a personal owner or team admin');
-  const role = await ensureOrganizationMember(env, identity, org);
-  if (!['owner', 'admin'].includes(role))
-    throw error(403, 'Signing requires a personal owner or team admin');
-  const document = await ensureDocumentAccess(env, identity, doc, 'read');
+  if (identity.serviceScope) throw error(403, 'Signing requires a personal account');
+  await ensureOrganizationMember(env, identity, org);
+  const document = await ensureDocumentAccess(env, identity, doc, 'write');
   if (document.organization_id !== org) throw error(404, 'File not found');
   if (document.is_deleted) throw error(410, 'File is deleted');
   return document;
+}
+async function manageableRequest(
+  env: Env,
+  identity: Identity,
+  org: string,
+  doc: string,
+  requestId: string,
+) {
+  await manageDocument(env, identity, org, doc);
+  const request = await first<RequestRow>(
+    env,
+    'SELECT * FROM signing_requests WHERE id=? AND document_id=? AND organization_id=?',
+    requestId,
+    doc,
+    org,
+  );
+  if (!request) throw error(404, 'Signing request not found');
+  const role = await ensureOrganizationMember(env, identity, org);
+  if (!['owner', 'admin'].includes(role) && request.created_by !== identity.userId)
+    throw error(403, 'Only the sender or a team admin can manage this request');
+  return request;
 }
 export async function signingDto(env: Env, request: RequestRow, links = true) {
   const recipients = await all<RecipientRow>(
@@ -142,6 +162,7 @@ export async function signingDto(env: Env, request: RequestRow, links = true) {
     error: request.error,
     signedSha256: request.signed_sha256,
     signedSize: request.signed_size,
+    canManage: links,
     fields: JSON.parse(request.fields),
     recipients: await Promise.all(
       recipients.map(async (r) => {
@@ -230,15 +251,32 @@ export function registerSigningRoutes(app: App) {
     const d = await ensureDocumentAccess(c.env, c.get('identity'), c.req.param('doc'));
     if (d.organization_id !== c.req.param('org')) throw error(404, 'File not found');
     const role = await ensureOrganizationMember(c.env, c.get('identity'), d.organization_id);
-    const links = ['owner', 'admin'].includes(role) && !c.get('identity').serviceScope;
+    let canSend = false;
+    if (!c.get('identity').serviceScope && !d.is_deleted) {
+      try {
+        await manageDocument(c.env, c.get('identity'), d.organization_id, d.id);
+        canSend = true;
+      } catch (e) {
+        if (!(e instanceof HTTPException) || ![403, 404, 410].includes(e.status)) throw e;
+      }
+    }
     const rows = await all<RequestRow>(
       c.env,
       'SELECT * FROM signing_requests WHERE document_id=? ORDER BY created_at DESC',
       d.id,
     );
     return c.json({
-      canSend: links,
-      requests: await Promise.all(rows.map(async (r) => signingDto(c.env, r, links))),
+      canSend,
+      requests: await Promise.all(
+        rows.map(async (r) =>
+          signingDto(
+            c.env,
+            r,
+            canSend &&
+              (['owner', 'admin'].includes(role) || r.created_by === c.get('identity').userId),
+          ),
+        ),
+      ),
       maxBytes: SIGNING_MAX_BYTES,
     });
   });
@@ -385,7 +423,13 @@ export function registerSigningRoutes(app: App) {
     return c.json({ request: await signingDto(c.env, request) }, 201);
   });
   app.post(`${base}/:requestId/cancel`, async (c) => {
-    await manageDocument(c.env, c.get('identity'), c.req.param('org'), c.req.param('doc'));
+    await manageableRequest(
+      c.env,
+      c.get('identity'),
+      c.req.param('org'),
+      c.req.param('doc'),
+      c.req.param('requestId'),
+    );
     await run(
       c.env,
       "UPDATE signing_requests SET status='cancelled',lease_token=NULL,updated_at=? WHERE id=? AND document_id=? AND status IN ('pending','sealing','error')",
@@ -396,15 +440,13 @@ export function registerSigningRoutes(app: App) {
     return c.json({ ok: true });
   });
   app.post(`${base}/:requestId/recipients/:recipientId/resend`, async (c) => {
-    await manageDocument(c.env, c.get('identity'), c.req.param('org'), c.req.param('doc'));
-    const request = await first<RequestRow>(
+    const request = await manageableRequest(
       c.env,
-      'SELECT * FROM signing_requests WHERE id=? AND document_id=? AND organization_id=?',
-      c.req.param('requestId'),
-      c.req.param('doc'),
+      c.get('identity'),
       c.req.param('org'),
+      c.req.param('doc'),
+      c.req.param('requestId'),
     );
-    if (!request) throw error(404, 'Signing request not found');
     const recipient = await first<RecipientRow>(
       c.env,
       'SELECT * FROM signing_recipients WHERE id=? AND request_id=?',
@@ -462,14 +504,13 @@ export function registerSigningRoutes(app: App) {
     );
   });
   app.post(`${base}/:requestId/retry`, async (c) => {
-    await manageDocument(c.env, c.get('identity'), c.req.param('org'), c.req.param('doc'));
-    const r = await first<RequestRow>(
+    const r = await manageableRequest(
       c.env,
-      'SELECT * FROM signing_requests WHERE id=? AND document_id=?',
-      c.req.param('requestId'),
+      c.get('identity'),
+      c.req.param('org'),
       c.req.param('doc'),
+      c.req.param('requestId'),
     );
-    if (!r) throw error(404, 'Request not found');
     await c.env.DB.batch([
       c.env.DB.prepare(
         "UPDATE signing_requests SET status='pending',attempts=0,error=NULL,updated_at=? WHERE id=? AND status='error'",

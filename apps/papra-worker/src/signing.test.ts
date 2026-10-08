@@ -257,7 +257,7 @@ describe('native signing authorization and lifecycle', () => {
     });
     expect(
       (await f.request(`${f.base}/source/original?check=true`, undefined, 'writer')).status,
-    ).toBe(403);
+    ).toBe(200);
     expect(
       (await f.request(`${f.base}/source/original?check=true`, undefined, 'other')).status,
     ).toBe(403);
@@ -400,11 +400,54 @@ describe('native signing authorization and lifecycle', () => {
     expect(afterResend.requests[0].recipients[0].delivery.sendCount).toBeNull();
     expect(afterResend.requests[0].recipients[0].delivery.lastSentAt).toBeGreaterThan(0);
   });
-  test('writers and another team cannot initiate signing; stale revisions cannot be sent', async () => {
+  test('members with write access can send, while another team and stale revisions are rejected', async () => {
     const f = await fixture();
-    expect((await f.request(f.base, f.payload, 'writer')).status).toBe(403);
+    const memberView = (await (await f.request(f.base, undefined, 'writer')).json()) as any;
+    expect(memberView.canSend).toBe(true);
+    const sent = await f.request(f.base, f.payload, 'writer');
+    expect(sent.status).toBe(201);
+    const memberRequest = ((await sent.json()) as any).request;
+    expect(memberRequest.canManage).toBe(true);
+    expect(
+      (
+        await f.request(
+          `/api/signing/${new URL(memberRequest.recipients[0].url).pathname.split('/').pop()}`,
+        )
+      ).status,
+    ).toBe(200);
     expect((await f.request(f.base, f.payload, 'other')).status).toBe(403);
     expect((await f.request(f.base, { ...f.payload, versionId: 'stale' })).status).toBe(409);
+  });
+  test('members manage only their own requests, and read-only folder access cannot send', async () => {
+    const f = await fixture();
+    const adminRequest = ((await (await f.request(f.base, f.payload)).json()) as any).request;
+    const memberPayload = { ...f.payload, idempotencyKey: 'member-send-key' };
+    const memberRequest = ((await (await f.request(f.base, memberPayload, 'writer')).json()) as any)
+      .request;
+    const memberView = (await (await f.request(f.base, undefined, 'writer')).json()) as any;
+    expect(memberView.requests.find((r: any) => r.id === adminRequest.id).canManage).toBe(false);
+    expect(
+      memberView.requests.find((r: any) => r.id === adminRequest.id).recipients[0].url,
+    ).toBeUndefined();
+    expect(memberView.requests.find((r: any) => r.id === memberRequest.id).canManage).toBe(true);
+    expect((await f.request(`${f.base}/${adminRequest.id}/cancel`, {}, 'writer')).status).toBe(403);
+    expect((await f.request(`${f.base}/${adminRequest.id}/retry`, {}, 'writer')).status).toBe(403);
+    expect((await f.request(`${f.base}/${memberRequest.id}/cancel`, {}, 'writer')).status).toBe(
+      200,
+    );
+    await f.DB.prepare('UPDATE folders SET is_restricted=1 WHERE id=?').bind('fld_home_team').run();
+    await f.DB.prepare('INSERT INTO folder_acl(folder_id,user_id,role) VALUES (?,?,?)')
+      .bind('fld_home_team', 'writer', 'reader')
+      .run();
+    const readOnlyView = (await (await f.request(f.base, undefined, 'writer')).json()) as any;
+    expect(readOnlyView.canSend).toBe(false);
+    expect(
+      (await f.request(f.base, { ...memberPayload, idempotencyKey: 'another-send-key' }, 'writer'))
+        .status,
+    ).toBe(404);
+    expect(
+      (await f.request(`${f.base}/source/original?check=true`, undefined, 'writer')).status,
+    ).toBe(404);
   });
   test('every recipient needs an assigned signature; invalid geometry and duplicate emails fail', async () => {
     const f = await fixture();
@@ -463,9 +506,11 @@ describe('native signing authorization and lifecycle', () => {
     const f = await fixture();
     const { request: r } = (await (await f.request(f.base, f.payload)).json()) as any;
     const token = new URL(r.recipients[0].url).pathname.split('/').pop();
-    await f.DB.prepare("UPDATE organization_members SET role='member' WHERE user_id='admin'").run();
+    await f.DB.prepare("DELETE FROM organization_members WHERE user_id='admin'").run();
     expect((await f.request(`/api/signing/${token}`)).status).toBe(410);
-    await f.DB.prepare("UPDATE organization_members SET role='admin' WHERE user_id='admin'").run();
+    await f.DB.prepare(
+      "INSERT INTO organization_members(id,organization_id,user_id,role,created_at,updated_at) VALUES ('admin','team','admin','admin',1,1)",
+    ).run();
     expect((await f.request(`${f.base}/${r.id}/cancel`, {})).status).toBe(200);
     expect(
       (
