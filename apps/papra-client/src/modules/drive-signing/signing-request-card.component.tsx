@@ -7,6 +7,7 @@ export type SigningRequest = {
   id: string;
   name: string;
   status: string;
+  canManage: boolean;
   versionId: string;
   createdAt: number;
   expiresAt: number;
@@ -50,7 +51,7 @@ function Time(props: { value: number }) {
 }
 export function SigningRequestCard(props: {
   request: SigningRequest;
-  canSend: boolean;
+  canManage: boolean;
   base: string;
   refresh: () => void;
   download: () => Promise<void>;
@@ -174,7 +175,7 @@ export function SigningRequestCard(props: {
                 }
               >
                 <div class="flex flex-wrap gap-2 sm:shrink-0">
-                  <Show when={props.canSend}>
+                  <Show when={props.canManage}>
                     <Button
                       size="sm"
                       variant="outline"
@@ -249,7 +250,7 @@ export function SigningRequestCard(props: {
       <Show
         when={
           props.request.status === 'completed' ||
-          (props.canSend && ['pending', 'sealing', 'error'].includes(props.request.status))
+          (props.canManage && ['pending', 'sealing', 'error'].includes(props.request.status))
         }
       >
         <footer class="border-t px-4 py-3 flex flex-wrap gap-2">
@@ -262,7 +263,7 @@ export function SigningRequestCard(props: {
               Download signed PDF
             </Button>
           </Show>
-          <Show when={props.canSend && props.request.status === 'error'}>
+          <Show when={props.canManage && props.request.status === 'error'}>
             <Button
               size="sm"
               variant="outline"
@@ -277,7 +278,7 @@ export function SigningRequestCard(props: {
             </Button>
           </Show>
           <Show
-            when={props.canSend && ['pending', 'sealing', 'error'].includes(props.request.status)}
+            when={props.canManage && ['pending', 'sealing', 'error'].includes(props.request.status)}
           >
             <Button
               size="sm"

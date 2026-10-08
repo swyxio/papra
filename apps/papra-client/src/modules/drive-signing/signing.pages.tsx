@@ -107,7 +107,7 @@ export function DocumentSigning(props: {
           {(request) => (
             <SigningRequestCard
               request={request()}
-              canSend={!!data.latest?.canSend}
+              canManage={request().canManage}
               base={base()}
               refresh={() => void refetch()}
               download={async () =>
