@@ -15,7 +15,9 @@ export function EmailTestCard() {
   const query = useQuery(() => ({
     queryKey: ['email-test'],
     queryFn: async () =>
-      apiClient<{ recipients: string[]; from: string | null }>({ path: '/users/me/email-test' }),
+      apiClient<{ recipients: string[]; from: string | null }>({
+        path: '/api/users/me/email-test',
+      }),
   }));
   const [busy, setBusy] = createSignal<string | null>(null);
   const [results, setResults] = createSignal<Record<string, Result>>({});
@@ -27,7 +29,7 @@ export function EmailTestCard() {
     keys[to] ??= crypto.randomUUID();
     try {
       const result = await apiClient<Result>({
-        path: '/users/me/email-test',
+        path: '/api/users/me/email-test',
         method: 'POST',
         body: { to, key: keys[to] },
         retry: 0,
@@ -45,7 +47,7 @@ export function EmailTestCard() {
     }
   };
   return (
-    <Show when={query.data?.recipients.length}>
+    <Show when={query.data?.recipients?.length}>
       <Card>
         <CardHeader class="border-b">
           <CardTitle>Email delivery test</CardTitle>
