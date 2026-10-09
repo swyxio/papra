@@ -20,6 +20,7 @@ import { useUpdateCurrentUser } from '../users.composables';
 import { nameSchema } from '../users.schemas';
 import { fetchCurrentUser } from '../users.services';
 import { authPagesPaths } from '@/modules/auth/auth.constants';
+import { EmailTestCard } from '../components/email-test-card';
 
 const LogoutCard: Component = () => {
   const [getIsLoading, setIsLoading] = createSignal(false);
@@ -154,6 +155,7 @@ export const UserSettingsPage: Component = () => {
               <div class="mt-6 flex flex-col gap-6">
                 <UserEmailCard email={getUser().email} />
                 <UpdateFullNameCard name={getUser().name} />
+                <EmailTestCard />
                 <LogoutCard />
               </div>
             </>

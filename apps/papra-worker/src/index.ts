@@ -19,6 +19,7 @@ import { registerSigningRoutes, processSigning, repairSigning } from './signing'
 import { isDocumentPage, pageMetadata, rewritePageMetadata } from './page-metadata';
 import { registerTemplateRoutes } from './templates';
 import { registerCanonicalOrigin } from './request-origin';
+import { registerEmailTestRoutes } from './email-test';
 
 export { ImageProcessorContainer, ContainerProxy } from '../native/container';
 export { MetadataBackupWorkflow } from './backup-workflow';
@@ -113,6 +114,7 @@ app.use('/api/*', async (c, next) => {
   await next();
 });
 registerSpaceRoutes(app);
+registerEmailTestRoutes(app);
 registerDocumentRoutes(app);
 registerUploadRoutes(app);
 registerProcessingRoutes(app);
