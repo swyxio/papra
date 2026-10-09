@@ -36,7 +36,13 @@ export function registerEmailTestRoutes(app: App) {
         'Content-Type': 'application/json',
         'Idempotency-Key': `drive-email-test:${identity.userId}:${body.to}:${body.key}`,
       },
-      body: JSON.stringify({ from: c.env.SIGNING_FROM, to: [body.to], subject, text }),
+      body: JSON.stringify({
+        from: c.env.SIGNING_FROM,
+        to: [body.to],
+        reply_to: identity.email,
+        subject,
+        text,
+      }),
       signal: AbortSignal.timeout(15000),
     }).catch(() => null);
     if (!response?.ok)

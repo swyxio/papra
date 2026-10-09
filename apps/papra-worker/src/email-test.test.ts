@@ -17,7 +17,7 @@ function fixture(email = 'swyx@latent.space', success = true) {
   registerEmailTestRoutes(app);
   const env = {
     APP_URL: 'https://drive.swyx.io',
-    SIGNING_FROM: 'SwyxDrive <auth@smol.ai>',
+    SIGNING_FROM: 'SwyxDrive <notifications@drive.swyx.io>',
     RESEND_API_KEY: 'test-key',
     AUTH_LIMITER: { limit: async () => ({ success }) },
   } as unknown as Env;
@@ -55,7 +55,8 @@ test('sends the existing sender, static login URL and stable retry key, reportin
   const [url, options] = fetcher.mock.calls[0] as unknown as [string, RequestInit];
   expect(url).toBe('https://api.resend.com/emails');
   const mail = JSON.parse(options.body as string);
-  expect(mail.from).toBe('SwyxDrive <auth@smol.ai>');
+  expect(mail.from).toBe('SwyxDrive <notifications@drive.swyx.io>');
+  expect(mail.reply_to).toBe('swyx@latent.space');
   expect(mail.to).toEqual([payload.to]);
   expect(mail.text).toContain('https://drive.swyx.io/login');
   expect(mail.text).toContain('not a one-time authentication link');

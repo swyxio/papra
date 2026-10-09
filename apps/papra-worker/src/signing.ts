@@ -722,6 +722,7 @@ async function deliverMail(env: Env, r: RequestRow) {
         body: JSON.stringify({
           from: env.SIGNING_FROM,
           to: [p.email],
+          reply_to: current.sender_email,
           subject: `${completed ? 'Signed' : 'Signature requested'}: ${current.name}`,
           text: completed
             ? `${current.name} has been signed by every recipient.\n\n${attachment ? `The sealed PDF is attached as ${attachment.filename}.` : 'The sealed PDF exceeds the email attachment limit. Use the download link below.'}\n\nDownload the sealed PDF and view the signing record:\n${url}\n\nSwyxDrive`

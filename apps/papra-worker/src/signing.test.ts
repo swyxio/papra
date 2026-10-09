@@ -291,6 +291,7 @@ describe('native signing authorization and lifecycle', () => {
     vi.stubGlobal('fetch', mailFetch);
     const before = Date.now();
     await processSigning(f.env, r.id);
+    expect(JSON.parse(mailFetch.mock.calls[0][1].body).reply_to).toBe('admin@ai.engineer');
     const sent = (await (await f.request()).json()) as any;
     const delivery = sent.requests[0].recipients[0].delivery;
     expect(delivery.status).toBe('sent');
