@@ -79,8 +79,9 @@ async function fixture() {
   app.onError((e, c) =>
     c.json({ message: e.message }, e instanceof HTTPException ? e.status : 500),
   );
-  const request = async (p: string, body?: unknown, user = 'owner') =>
-    app.request(
+  const request = async (p: string, body?: unknown, user = 'owner') => {
+    const background: Promise<unknown>[] = [];
+    const response = await app.request(
       'https://test.example' + p,
       {
         method: body ? 'POST' : 'GET',
@@ -88,8 +89,12 @@ async function fixture() {
         body: body ? JSON.stringify(body) : undefined,
       },
       env,
-      { waitUntil: () => {}, passThroughOnException: () => {}, props: {} },
+      { waitUntil: (task: Promise<unknown>) => { background.push(task); }, passThroughOnException: () => {}, props: {} },
     );
+    // Keep the test database and fetch mocks alive until request work finishes.
+    await Promise.all(background);
+    return response;
+  };
   const create = async () => request(path + '/google-source', { url, name: 'TEST ONLY', key });
   const pdf = PDF.create();
   pdf.addPage();
