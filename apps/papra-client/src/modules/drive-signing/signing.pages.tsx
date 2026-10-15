@@ -15,7 +15,7 @@ const validEmail = (email: string) => /^\S+@[^@\s]+\.[^@\s]+$/.test(email.trim()
 async function downloadPdf(path: string, name: string) {
   const response = await fetch(path);
   if (!response.ok || !response.headers.get('Content-Type')?.startsWith('application/pdf'))
-    throw Error('Could not download the signed PDF. Please retry.');
+    throw Error('Could not download the PDF. Please retry.');
   const url = URL.createObjectURL(await response.blob()),
     link = document.createElement('a');
   link.href = url;
@@ -550,9 +550,18 @@ export function PublicSigningPage() {
           <>
             <h1 class="text-2xl font-semibold my-4 break-words">{r().name}</h1>
             <p class="text-sm mb-3">{r().senderName} requests your signature. No account needed.</p>
-            <a class="text-sm underline inline-block mb-6" href={`${base()}/file?download=true`}>
+            <button
+              type="button"
+              class="text-sm underline inline-block mb-6"
+              onClick={() => {
+                setError('');
+                void downloadPdf(`${base()}/file`, r().name).catch((e: unknown) =>
+                  setError(message(e)),
+                );
+              }}
+            >
               Download PDF to review
-            </a>
+            </button>
             <div class="grid md:grid-cols-[minmax(0,1fr)_300px] gap-6">
               <PdfFields
                 url={`${base()}/file${r().status === 'completed' ? '?signed=true' : ''}`}
