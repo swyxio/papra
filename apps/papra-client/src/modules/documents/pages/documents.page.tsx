@@ -71,7 +71,7 @@ export const DocumentsPage: Component = () => {
   const [getTagDialogOpen, setTagDialogOpen] = createSignal(false);
   const [moveOpen, setMoveOpen] = createSignal(false);
 
-  const [getSortField, setSortField] = createParamSynchronizedSignal<DocumentSearchSortField>({
+  const [getSortField] = createParamSynchronizedSignal<DocumentSearchSortField>({
     paramKey: 'sortField',
     defaultValue: DEFAULT_DOCUMENT_SEARCH_SORT_FIELD,
     deserialize: (value) =>
@@ -79,7 +79,7 @@ export const DocumentsPage: Component = () => {
         ? (value as DocumentSearchSortField)
         : DEFAULT_DOCUMENT_SEARCH_SORT_FIELD,
   });
-  const [getSortOrder, setSortOrder] = createParamSynchronizedSignal<DocumentSearchSortOrder>({
+  const [getSortOrder] = createParamSynchronizedSignal<DocumentSearchSortOrder>({
     paramKey: 'sortOrder',
     defaultValue: DEFAULT_DOCUMENT_SEARCH_SORT_ORDER,
     deserialize: (value) =>
@@ -94,12 +94,18 @@ export const DocumentsPage: Component = () => {
     const next = resolveSetterValue(valueOrUpdater, getSorting());
     const first = next[0];
     if (!first) {
-      setSortField(DEFAULT_DOCUMENT_SEARCH_SORT_FIELD);
-      setSortOrder(DEFAULT_DOCUMENT_SEARCH_SORT_ORDER);
+      setSearchParams({
+        sortField: DEFAULT_DOCUMENT_SEARCH_SORT_FIELD,
+        sortOrder: DEFAULT_DOCUMENT_SEARCH_SORT_ORDER,
+        page: undefined,
+      });
       return next;
     }
-    setSortField(first.id as DocumentSearchSortField);
-    setSortOrder(first.desc ? 'desc' : 'asc');
+    setSearchParams({
+      sortField: first.id,
+      sortOrder: first.desc ? 'desc' : 'asc',
+      page: undefined,
+    });
     return next;
   };
 
@@ -493,9 +499,7 @@ export const DocumentsPage: Component = () => {
                 value={`${getSortField()}:${getSortOrder()}`}
                 onChange={(e) => {
                   const [field, order] = e.currentTarget.value.split(':');
-                  setSortField(field as DocumentSearchSortField);
-                  setSortOrder(order as DocumentSearchSortOrder);
-                  setPagination((current) => ({ ...current, pageIndex: 0 }));
+                  setSearchParams({ sortField: field, sortOrder: order, page: undefined });
                 }}
               >
                 <For
