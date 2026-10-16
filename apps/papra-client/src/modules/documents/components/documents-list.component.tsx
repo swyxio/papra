@@ -115,6 +115,7 @@ export const createdAtColumn: ColumnDef<Document> = {
 export const uploadedByColumn: ColumnDef<Document> = {
   header: () => <span class="sr-only sm:not-sr-only">Uploaded by</span>,
   id: 'uploadedBy',
+  accessorFn: (row) => row.uploadedBy?.name || row.uploadedBy?.email || '',
   enableSorting: true,
   cell: (data) => {
     const person = data.row.original.uploadedBy;
@@ -129,6 +130,7 @@ export const uploadedByColumn: ColumnDef<Document> = {
 export const modifiedByColumn: ColumnDef<Document> = {
   header: () => <span class="sr-only sm:not-sr-only">Modified by</span>,
   id: 'modifiedBy',
+  accessorFn: (row) => row.modifiedBy?.name || row.modifiedBy?.email || '',
   enableSorting: true,
   cell: (data) => {
     const person = data.row.original.modifiedBy;
