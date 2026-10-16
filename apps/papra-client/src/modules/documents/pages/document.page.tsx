@@ -654,14 +654,28 @@ export const DocumentPage: Component = () => {
                                           icon: 'i-tabler-calendar-event',
                                         },
                                         {
+                                          label: 'Uploaded by',
+                                          value: getDocument().uploadedBy
+                                            ? `${getDocument().uploadedBy!.name} (${getDocument().uploadedBy!.email})`
+                                            : 'Unknown',
+                                          icon: 'i-tabler-user',
+                                        },
+                                        {
+                                          label: 'Last modified by',
+                                          value: getDocument().modifiedBy
+                                            ? `${getDocument().modifiedBy!.name} (${getDocument().modifiedBy!.email})`
+                                            : 'Unknown',
+                                          icon: 'i-tabler-user',
+                                        },
+                                        {
                                           label: t('documents.info.created-at'),
                                           value: formatRelativeTime(getDocument().createdAt),
                                           icon: 'i-tabler-calendar',
                                         },
                                         {
-                                          label: t('documents.info.updated-at'),
-                                          value: getDocument().updatedAt ? (
-                                            formatRelativeTime(getDocument().updatedAt!)
+                                          label: 'Last modified',
+                                          value: getDocument().modifiedAt ? (
+                                            formatRelativeTime(getDocument().modifiedAt!)
                                           ) : (
                                             <span class="text-muted-foreground">
                                               {t('documents.info.never')}

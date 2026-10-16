@@ -16,6 +16,9 @@ export const DEFAULT_DOCUMENT_ICON = 'i-tabler-file';
 export const DOCUMENT_SEARCH_SORT_FIELDS = [
   'createdAt',
   'updatedAt',
+  'uploadedBy',
+  'modifiedBy',
+  'modifiedAt',
   'name',
   'documentDate',
 ] as const;

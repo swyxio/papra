@@ -25,7 +25,9 @@ import { TextField, TextFieldRoot } from '@/modules/ui/components/textfield';
 import { DocumentMoveDialog } from '../components/document-move-dialog.component';
 import { DocumentsBatchTagDialog } from '../components/documents-batch-tag-dialog.component';
 import {
-  createdAtColumn,
+  uploadedByColumn,
+  modifiedByColumn,
+  modifiedAtColumn,
   documentDateColumn,
   DocumentsPaginatedList,
   standardActionsColumn,
@@ -99,6 +101,14 @@ export const DocumentsPage: Component = () => {
     setSortField(first.id as DocumentSearchSortField);
     setSortOrder(first.desc ? 'desc' : 'asc');
     return next;
+  };
+
+  const [personField, setPersonField] = createSignal('uploadedBy');
+  const [personValue, setPersonValue] = createSignal('');
+  const applyPersonFilter = () => {
+    const quoted = personValue().trim().replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+    setSearchQuery(`${getSearchQuery().trim()} ${personField()}:"${quoted}"`.trim());
+    setPagination((current) => ({ ...current, pageIndex: 0 }));
   };
 
   const [propertyId, setPropertyId] = createSignal('');
@@ -447,8 +457,78 @@ export const DocumentsPage: Component = () => {
 
           <p class="mt-2 text-xs text-muted-foreground">
             Search filenames, document text, notes and property values. Filters: tag:Contract ·
-            created:&gt;=2026-01-01 · has:date
+            created:&gt;=2026-01-01 · uploadedBy:"Vibhu" · modifiedBy:name@example.com · has:date
           </p>
+          <div class="mt-3 flex flex-wrap items-end gap-2">
+            <label class="space-y-1 text-sm">
+              <span class="block">Filter by person</span>
+              <select
+                class="rounded-md border bg-background p-2"
+                value={personField()}
+                onChange={(e) => setPersonField(e.currentTarget.value)}
+              >
+                <option value="uploadedBy">Uploaded by</option>
+                <option value="modifiedBy">Last modified by</option>
+              </select>
+            </label>
+            <label class="space-y-1 text-sm">
+              <span class="block">Name or email</span>
+              <input
+                class="rounded-md border bg-background p-2"
+                placeholder="e.g. Vibhu"
+                value={personValue()}
+                onInput={(e) => setPersonValue(e.currentTarget.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && personValue().trim()) applyPersonFilter();
+                }}
+              />
+            </label>
+            <Button variant="outline" disabled={!personValue().trim()} onClick={applyPersonFilter}>
+              Apply person filter
+            </Button>
+            <label class="space-y-1 text-sm">
+              <span class="block">Sort files</span>
+              <select
+                class="rounded-md border bg-background p-2"
+                value={`${getSortField()}:${getSortOrder()}`}
+                onChange={(e) => {
+                  const [field, order] = e.currentTarget.value.split(':');
+                  setSortField(field as DocumentSearchSortField);
+                  setSortOrder(order as DocumentSearchSortOrder);
+                  setPagination((current) => ({ ...current, pageIndex: 0 }));
+                }}
+              >
+                <For
+                  each={[
+                    ['createdAt', 'Upload date'],
+                    ['modifiedAt', 'Last modified'],
+                    ['name', 'File name'],
+                    ['uploadedBy', 'Uploader'],
+                    ['modifiedBy', 'Last modifier'],
+                    ['documentDate', 'Document date'],
+                    ['updatedAt', 'Last updated (including processing)'],
+                  ]}
+                >
+                  {([field, label]) => (
+                    <>
+                      <option value={`${field}:asc`}>
+                        {label} ·{' '}
+                        {['name', 'uploadedBy', 'modifiedBy'].includes(field)
+                          ? 'A–Z'
+                          : 'Oldest first'}
+                      </option>
+                      <option value={`${field}:desc`}>
+                        {label} ·{' '}
+                        {['name', 'uploadedBy', 'modifiedBy'].includes(field)
+                          ? 'Z–A'
+                          : 'Newest first'}
+                      </option>
+                    </>
+                  )}
+                </For>
+              </select>
+            </label>
+          </div>
           <Show when={propertiesQuery.data?.propertyDefinitions.length}>
             <div class="mt-3 flex flex-wrap items-end gap-2 rounded-lg border p-3">
               <label class="space-y-1 text-sm">
@@ -644,7 +724,9 @@ export const DocumentsPage: Component = () => {
               tagsColumn,
               propertiesColumn,
               documentDateColumn,
-              createdAtColumn,
+              uploadedByColumn,
+              modifiedByColumn,
+              modifiedAtColumn,
               standardActionsColumn,
             ]}
           />

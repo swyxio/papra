@@ -1,5 +1,6 @@
 import { HTTPException } from 'hono/http-exception';
 import type { Env, Identity } from './types';
+import { modifiedBySQL, modifiedAtSQL } from './document-attribution';
 
 export const id = (prefix: string) =>
   `${prefix}_${crypto.randomUUID().replaceAll('-', '').slice(0, 24)}`;
@@ -61,8 +62,30 @@ export async function formatDocument(env: Env, row: Record<string, any>) {
     'SELECT p.*, dp.value FROM custom_properties p JOIN document_custom_properties dp ON dp.property_id=p.id WHERE dp.document_id=?',
     row.id,
   );
+  const attribution = await first(
+    env,
+    `SELECT
+    uploader.id uploaded_id,uploader.name uploaded_name,uploader.email uploaded_email,
+    modifier.id modified_id,modifier.name modified_name,modifier.email modified_email,
+    ${modifiedAtSQL} modified_at
+    FROM documents d LEFT JOIN users uploader ON uploader.id=d.created_by
+    LEFT JOIN users modifier ON modifier.id=${modifiedBySQL} WHERE d.id=?`,
+    row.id,
+  );
+  const actor = (prefix: string) =>
+    attribution?.[`${prefix}_id`]
+      ? {
+          id: attribution[`${prefix}_id`],
+          name: attribution[`${prefix}_name`],
+          email: attribution[`${prefix}_email`],
+        }
+      : null;
   return {
     ...camel(row),
+    uploadedBy: actor('uploaded'),
+    modifiedBy: actor('modified'),
+    modifiedAt:
+      attribution?.modified_at == null ? null : new Date(attribution.modified_at).toISOString(),
     isDeleted: !!row.is_deleted,
     tags: tags.map(camel),
     customProperties: properties.map((p) => ({

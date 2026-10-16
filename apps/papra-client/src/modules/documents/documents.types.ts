@@ -12,6 +12,9 @@ export type Document = {
   name: string;
   mimeType: string;
   originalSize: number;
+  uploadedBy?: { id: string; name: string; email: string } | null;
+  modifiedBy?: { id: string; name: string; email: string } | null;
+  modifiedAt?: Date;
   createdAt: Date;
   updatedAt?: Date;
   documentDate?: Date;

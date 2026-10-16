@@ -1,6 +1,7 @@
 import { parseSearchQuery } from '@papra/search-parser';
 import type { Expression } from '@papra/search-parser';
 import { error } from './db';
+import { modifiedBySQL } from './document-attribution';
 
 export function keywordPredicate(query: string) {
   if (query.length > 4000) throw error(400, 'Search query is too long');
@@ -45,6 +46,16 @@ export function keywordPredicate(query: string) {
         }
         bindings.push(e.value, e.value);
         return `EXISTS(SELECT 1 FROM document_custom_properties dp JOIN custom_properties p ON p.id=dp.property_id JOIN json_each(dp.value) pv WHERE dp.document_id=d.id AND p.organization_id=d.organization_id AND (p.id=? OR lower(p.name)=lower(?)) AND (lower(CASE WHEN p.type='boolean' THEN CASE pv.value WHEN 1 THEN 'true' WHEN 0 THEN 'false' ELSE '' END ELSE CAST(pv.value AS TEXT) END)=lower(?) OR EXISTS(SELECT 1 FROM json_each(coalesce(p.options,'[]')) opt WHERE json_extract(opt.value,'$.id')=pv.value AND lower(json_extract(opt.value,'$.name'))=lower(?))))`;
+      }
+      if (['uploadedBy', 'modifiedBy'].includes(e.field)) {
+        if (e.operator !== '=') throw error(400, 'People filters only support equality');
+        const actor = e.field === 'uploadedBy' ? 'd.created_by' : modifiedBySQL;
+        const escaped = e.value
+          .replaceAll('\\', '\\\\')
+          .replaceAll('%', '\\%')
+          .replaceAll('_', '\\_');
+        bindings.push(e.value, e.value, `%${escaped}%`);
+        return `EXISTS(SELECT 1 FROM users u WHERE u.id=${actor} AND (u.id=? OR lower(u.email)=lower(?) OR u.name LIKE ? ESCAPE '\\'))`;
       }
       if (e.field === 'tag') {
         bindings.push(e.value, e.value);

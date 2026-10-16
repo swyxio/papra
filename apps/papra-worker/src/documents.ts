@@ -12,6 +12,7 @@ import { mediaResponse, requestVideoPreview, previewDownload } from './video';
 import type { MediaDocument } from './video';
 import { enqueueVersion } from './jobs';
 import { keywordPredicate } from './keyword';
+import { modifiedBySQL, modifiedAtSQL, actorNameSQL } from './document-attribution';
 import { fetchTranscript } from './transcripts';
 
 const base = '/api/organizations/:org/documents';
@@ -171,6 +172,9 @@ export function registerDocumentRoutes(app: App) {
             {
               createdAt: 'd.created_at',
               updatedAt: 'd.updated_at',
+              modifiedAt: modifiedAtSQL,
+              uploadedBy: actorNameSQL('d.created_by'),
+              modifiedBy: actorNameSQL(modifiedBySQL),
               name: 'd.name',
               documentDate: 'd.document_date',
               originalSize: 'v.size',
@@ -313,13 +317,17 @@ export function registerDocumentRoutes(app: App) {
       }
     }
     if (fields.length) {
-      await run(
-        c.env,
-        `UPDATE documents SET ${fields.join(',')},updated_at=? WHERE id=?`,
-        ...values,
-        Date.now(),
-        d.id,
-      );
+      const editedAt = Date.now();
+      await c.env.DB.batch([
+        c.env.DB.prepare(`UPDATE documents SET ${fields.join(',')},updated_at=? WHERE id=?`).bind(
+          ...values,
+          editedAt,
+          d.id,
+        ),
+        c.env.DB.prepare(
+          'INSERT INTO document_activity(id,document_id,user_id,event,created_at) VALUES(?,?,?,?,?)',
+        ).bind(id('act'), d.id, c.get('identity').userId, 'edited', editedAt),
+      ]);
       if (d.current_version_id) await enqueueVersion(c.env, d.current_version_id, 'index');
     }
     return c.json({ document: await formatDocument(c.env, (await getDocument(c.env, d.id))!) });
@@ -568,6 +576,7 @@ export function registerDocumentRoutes(app: App) {
             d.id,
           );
         else {
+          let tagsChanged = 0;
           for (const tag of b.addTagIds || []) {
             if (
               !(await first(
@@ -578,14 +587,27 @@ export function registerDocumentRoutes(app: App) {
               ))
             )
               throw error(400, 'Invalid tag');
-            await run(c.env, 'INSERT OR IGNORE INTO documents_tags VALUES(?,?)', d.id, tag);
+            tagsChanged += (
+              await run(c.env, 'INSERT OR IGNORE INTO documents_tags VALUES(?,?)', d.id, tag)
+            ).meta.changes;
           }
           for (const tag of b.removeTagIds || [])
+            tagsChanged += (
+              await run(
+                c.env,
+                'DELETE FROM documents_tags WHERE document_id=? AND tag_id=?',
+                d.id,
+                tag,
+              )
+            ).meta.changes;
+          if (tagsChanged)
             await run(
               c.env,
-              'DELETE FROM documents_tags WHERE document_id=? AND tag_id=?',
+              "INSERT INTO document_activity(id,document_id,user_id,event,created_at) VALUES(?,?,?,'edited',?)",
+              id('act'),
               d.id,
-              tag,
+              c.get('identity').userId,
+              Date.now(),
             );
         }
       }

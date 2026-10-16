@@ -335,26 +335,31 @@ export function registerSpaceRoutes(app: App) {
         ))
       )
         throw error(400, 'Item not found');
-      await run(
-        c.env,
-        property
-          ? 'INSERT INTO document_custom_properties(document_id,property_id,value) VALUES(?,?,?) ON CONFLICT(document_id,property_id) DO UPDATE SET value=excluded.value'
-          : 'INSERT OR IGNORE INTO documents_tags VALUES(?,?)',
-        d.id,
-        item,
-        ...(property ? [JSON.stringify(b.value)] : []),
-      );
+      const changedAt = Date.now();
+      await c.env.DB.batch([
+        c.env.DB.prepare(
+          property
+            ? 'INSERT INTO document_custom_properties(document_id,property_id,value) VALUES(?,?,?) ON CONFLICT(document_id,property_id) DO UPDATE SET value=excluded.value WHERE document_custom_properties.value IS NOT excluded.value'
+            : 'INSERT OR IGNORE INTO documents_tags VALUES(?,?)',
+        ).bind(d.id, item, ...(property ? [JSON.stringify(b.value)] : [])),
+        c.env.DB.prepare(
+          "INSERT INTO document_activity(id,document_id,user_id,event,created_at) SELECT ?,?,?,'edited',? WHERE changes()>0",
+        ).bind(id('act'), d.id, c.get('identity').userId, changedAt),
+      ]);
       return c.body(null, 204);
     });
     app.delete(`${path}/:item`, async (c) => {
       const d = await ensureDocumentAccess(c.env, c.get('identity'), c.req.param('doc')!, 'write');
       if (d.organization_id !== c.req.param('org')!) throw error(404, 'Document not found');
-      await run(
-        c.env,
-        `DELETE FROM ${property ? 'document_custom_properties' : 'documents_tags'} WHERE document_id=? AND ${property ? 'property_id' : 'tag_id'}=?`,
-        d.id,
-        c.req.param('item'),
-      );
+      const changedAt = Date.now();
+      await c.env.DB.batch([
+        c.env.DB.prepare(
+          `DELETE FROM ${property ? 'document_custom_properties' : 'documents_tags'} WHERE document_id=? AND ${property ? 'property_id' : 'tag_id'}=?`,
+        ).bind(d.id, c.req.param('item')),
+        c.env.DB.prepare(
+          "INSERT INTO document_activity(id,document_id,user_id,event,created_at) SELECT ?,?,?,'edited',? WHERE changes()>0",
+        ).bind(id('act'), d.id, c.get('identity').userId, changedAt),
+      ]);
       return c.body(null, 204);
     });
   }

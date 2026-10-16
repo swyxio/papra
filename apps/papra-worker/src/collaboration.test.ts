@@ -429,11 +429,18 @@ describe('D1 collaboration authorization and actual routes', () => {
       (await f.request(`${f.base}/documents/doc_secret/media`, 'GET', undefined, 'blocked')).status,
     ).toBe(404);
     expect(
-      (await f.request(`/api/organizations/${f.other}/documents/doc_public/media?quality=original`)).status,
+      (await f.request(`/api/organizations/${f.other}/documents/doc_public/media?quality=original`))
+        .status,
     ).toBe(404);
     expect(
-      (await f.request(`${f.base}/documents/doc_public/media?quality=original`, 'GET', undefined, 'outsider'))
-        .status,
+      (
+        await f.request(
+          `${f.base}/documents/doc_public/media?quality=original`,
+          'GET',
+          undefined,
+          'outsider',
+        )
+      ).status,
     ).toBe(403);
     await f.DB.prepare(
       'INSERT INTO versions (id,document_id,storage_key,original_name,size,created_by,created_at) VALUES(?,?,?,?,?,?,2)',
@@ -456,7 +463,9 @@ describe('D1 collaboration authorization and actual routes', () => {
     expect(new URL(replaced.url).pathname).toBe('/private/private/replacement');
     expect(replaced.versionId).toBe('version:replacement');
     await f.DB.prepare('UPDATE documents SET is_deleted=1 WHERE id=?').bind('doc_public').run();
-    expect((await f.request(`${f.base}/documents/doc_public/media?quality=original`)).status).toBe(404);
+    expect((await f.request(`${f.base}/documents/doc_public/media?quality=original`)).status).toBe(
+      404,
+    );
   });
 
   test('inline PDF URLs support large originals without file buffering; unsafe HTML stays attachment-only', async () => {
@@ -971,4 +980,79 @@ test('passage comments retain version anchors and inherit them in replies, with 
       )
     ).status,
   ).toBe(404);
+});
+
+test('Document attribution follows human edits, supports people search/sort and preserves ACLs', async () => {
+  const f = await fixture();
+  await f.DB.exec(
+    "UPDATE users SET name='Vibhu Writer' WHERE id='writer'; UPDATE documents SET created_by='writer' WHERE id='doc_secret'; INSERT INTO versions(id,document_id,storage_key,original_name,size,created_by,created_at) VALUES('human-replacement','doc_public','new-key','new.txt',5,'writer',10); INSERT INTO document_activity(id,document_id,user_id,event,created_at) VALUES('comment-later','doc_public','reader','comment-edited',30);",
+  );
+  const list = async (query = '', sort = 'modifiedAt', user = 'reader') => {
+    const response = await f.request(
+      `${f.base}/documents?searchQuery=${encodeURIComponent(query)}&sortField=${sort}&sortOrder=desc`,
+      'GET',
+      undefined,
+      user,
+    );
+    expect(response.status).toBe(200);
+    return ((await response.json()) as any).documents;
+  };
+  const found = await list('modifiedBy:Vibhu');
+  expect(found.map((d: any) => d.id)).toEqual(['doc_public']);
+  expect(found[0]).toMatchObject({
+    uploadedBy: { id: 'owner', email: 'owner@ai.engineer' },
+    modifiedBy: { id: 'writer', name: 'Vibhu Writer', email: 'writer@ai.engineer' },
+    modifiedAt: new Date(10).toISOString(),
+  });
+  expect(await list('uploadedBy:writer@ai.engineer', 'uploadedBy', 'blocked')).toEqual([]);
+  expect((await list('uploadedBy:writer@ai.engineer', 'uploadedBy')).map((d: any) => d.id)).toEqual(
+    ['doc_secret'],
+  );
+  expect((await list('modifiedBy:writer', 'modifiedBy'))[0].id).toBe('doc_public');
+  expect((await list())[0].id).toBe('doc_public');
+  const edited = await f.request(
+    `${f.base}/documents/doc_public`,
+    'PATCH',
+    { name: 'Renamed' },
+    'reader',
+  );
+  expect(edited.status).toBe(200);
+  const detail = ((await edited.json()) as any).document;
+  expect(detail.modifiedBy.id).toBe('reader');
+  expect(Date.parse(detail.modifiedAt)).toBeGreaterThan(30);
+  expect((await list('modifiedBy:reader')).map((d: any) => d.id)).toContain('doc_public');
+});
+
+test('Tag and custom property changes record the modifying person', async () => {
+  const f = await fixture();
+  const tag = (await (
+    await f.request(`${f.base}/tags`, 'POST', { name: 'Test tag' })
+  ).json()) as any;
+  expect(
+    (
+      await f.request(
+        `${f.base}/documents/doc_public/tags`,
+        'POST',
+        { tagId: tag.tag.id },
+        'reader',
+      )
+    ).status,
+  ).toBe(204);
+  let doc = ((await (await f.request(`${f.base}/documents/doc_public`)).json()) as any).document;
+  expect(doc.modifiedBy.id).toBe('reader');
+  const property = (await (
+    await f.request(`${f.base}/custom-properties`, 'POST', { name: 'Test property', type: 'text' })
+  ).json()) as any;
+  expect(
+    (
+      await f.request(
+        `${f.base}/documents/doc_public/custom-properties/${property.propertyDefinition.id}`,
+        'PUT',
+        { value: 'new' },
+        'writer',
+      )
+    ).status,
+  ).toBe(204);
+  doc = ((await (await f.request(`${f.base}/documents/doc_public`)).json()) as any).document;
+  expect(doc.modifiedBy.id).toBe('writer');
 });

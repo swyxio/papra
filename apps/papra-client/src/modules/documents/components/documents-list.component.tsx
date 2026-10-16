@@ -112,6 +112,50 @@ export const createdAtColumn: ColumnDef<Document> = {
   ),
 };
 
+export const uploadedByColumn: ColumnDef<Document> = {
+  header: () => <span class="sr-only sm:not-sr-only">Uploaded by</span>,
+  id: 'uploadedBy',
+  enableSorting: true,
+  cell: (data) => {
+    const person = data.row.original.uploadedBy;
+    return (
+      <span class="hidden sm:block text-sm" title={person?.email}>
+        {person?.name || person?.email || 'Unknown'}
+      </span>
+    );
+  },
+};
+
+export const modifiedByColumn: ColumnDef<Document> = {
+  header: () => <span class="sr-only sm:not-sr-only">Modified by</span>,
+  id: 'modifiedBy',
+  enableSorting: true,
+  cell: (data) => {
+    const person = data.row.original.modifiedBy;
+    return (
+      <span class="hidden sm:block text-sm" title={person?.email}>
+        {person?.name || person?.email || 'Unknown'}
+      </span>
+    );
+  },
+};
+
+export const modifiedAtColumn: ColumnDef<Document> = {
+  header: () => <span class="sr-only sm:not-sr-only">Last modified</span>,
+  accessorKey: 'modifiedAt',
+  enableSorting: true,
+  cell: (data) => (
+    <Show
+      when={data.row.original.modifiedAt}
+      fallback={<span class="hidden sm:block text-muted-foreground">Unknown</span>}
+    >
+      {(date) => (
+        <RelativeTime class="hidden sm:block text-muted-foreground text-sm" date={date()} />
+      )}
+    </Show>
+  ),
+};
+
 export const deletedAtColumn: ColumnDef<Document> = {
   header: () => {
     const { t } = useI18n();
@@ -218,6 +262,15 @@ export const DocumentsPaginatedList: Component<{
                     <span class="i-tabler-arrow-up-right size-3" />
                     Shortcut
                   </span>
+                </Show>
+              </div>
+              <div class="sm:hidden text-sm text-muted-foreground whitespace-normal">
+                Uploaded by{' '}
+                {data.row.original.uploadedBy?.name ||
+                  data.row.original.uploadedBy?.email ||
+                  'Unknown'}
+                <Show when={data.row.original.modifiedBy}>
+                  {(person) => <> · Modified by {person().name || person().email}</>}
                 </Show>
               </div>
             </div>

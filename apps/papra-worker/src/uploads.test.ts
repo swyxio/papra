@@ -449,6 +449,9 @@ test('reserved short ID exposes progress before bytes arrive, activates atomical
   });
   const shared = (await (await f.publicGet(token)).json()) as any;
   expect(shared.document.upload).toBeUndefined();
+  expect(shared.document.uploadedBy).toBeUndefined();
+  expect(shared.document.modifiedBy).toBeUndefined();
+  expect(JSON.stringify(shared)).not.toContain('@ai.engineer');
   await f.DB.prepare('UPDATE documents SET name=? WHERE id=?')
     .bind('Renamed.pdf', session.documentId)
     .run();
