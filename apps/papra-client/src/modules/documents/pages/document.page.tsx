@@ -187,6 +187,7 @@ const KeyValues: Component<{ data?: KeyValueItem[] }> = (props) => {
 
 const driveActivityLabels: Record<string, string> = {
   'moved': 'Moved this file',
+  'edited': 'Edited file details',
   'google-source-imported': 'Imported Google Docs source',
   'google-pdf-converted': 'Converted Google source to PDF',
   'commented': 'Added a comment',
