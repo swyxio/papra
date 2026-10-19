@@ -231,9 +231,9 @@ export function SigningRequestCard(props: {
       >
         {(mail) => (
           <p role="alert" class="px-4 py-2 text-destructive">
-            Signed-copy email failed for{' '}
-            {props.request.recipients.find((p) => p.id === mail.recipient_id)?.email || 'recipient'}
-            . {mail.error}
+            {mail.kind === 'signed'
+              ? `Could not notify the sender that ${props.request.recipients.find((p) => p.id === mail.recipient_id)?.name || 'a recipient'} signed.`
+              : `Signed-copy email failed for ${props.request.recipients.find((p) => p.id === mail.recipient_id)?.email || 'recipient'}. ${mail.error || ''}`}
           </p>
         )}
       </For>
@@ -275,6 +275,25 @@ export function SigningRequestCard(props: {
               }
             >
               Retry preparing PDF
+            </Button>
+          </Show>
+          <Show
+            when={
+              props.canManage &&
+              props.request.mail.some((mail) => mail.kind !== 'request' && mail.status === 'error')
+            }
+          >
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!!busy()}
+              onClick={() =>
+                void run('retry-mail', async () =>
+                  apiClient({ path: `${props.base}/${props.request.id}/retry`, method: 'POST' }),
+                )
+              }
+            >
+              Retry emails
             </Button>
           </Show>
           <Show

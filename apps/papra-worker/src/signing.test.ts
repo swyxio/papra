@@ -277,6 +277,84 @@ describe('native signing authorization and lifecycle', () => {
     expect((await f.DB.prepare('SELECT count(*) n FROM signing_requests').first())?.n).toBe(1);
     expect((await f.DB.prepare('SELECT count(*) n FROM signing_mail').first())?.n).toBe(1);
   });
+  test('each accepted signature queues one notification to the sender with an authenticated document link', async () => {
+    const f = await fixture();
+    const r = (
+      (await (
+        await f.request(f.base, {
+          ...f.payload,
+          recipients: [...f.payload.recipients, { name: 'Second', email: 'second@example.com' }],
+          fields: [field, { ...field, recipient: 1, y: 0.3 }],
+        })
+      ).json()) as any
+    ).request;
+    const token = new URL(r.recipients[0].url).pathname.split('/').pop();
+    const sign = { name: 'Test Signer', signature: 'Test Signer', consent: true };
+    expect(
+      (await f.request(`/api/signing/${token}/sign`, { ...sign, consent: false })).status,
+    ).toBe(400);
+    expect((await f.request(`/api/signing/${token}/sign`, sign)).status).toBe(200);
+    expect((await f.request(`/api/signing/${token}/sign`, sign)).status).toBe(200);
+    const fetchMail = vi.fn(async (_url: unknown, _options: any) => Response.json({ id: 'test' }));
+    vi.stubGlobal('fetch', fetchMail);
+    await processSigning(f.env, r.id);
+    await processSigning(f.env, r.id);
+    const messages = fetchMail.mock.calls.map((call) => JSON.parse(call[1].body));
+    const notifications = messages.filter((message) =>
+      message.subject.startsWith('Signature received:'),
+    );
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0].to).toEqual(['admin@ai.engineer']);
+    expect(notifications[0].text).toContain('Test Signer (test@example.com) signed TEST ONLY.pdf');
+    expect(notifications[0].text).toContain('https://drive.example/orgs/team/documents/document');
+    expect(notifications[0].text).not.toContain('/sign/');
+    expect(notifications[0].attachments).toBeUndefined();
+    expect(
+      (await f.DB.prepare("SELECT count(*) n FROM signing_mail WHERE kind='signed'").first())?.n,
+    ).toBe(1);
+  });
+  test('sender notification failure is retried without blocking PDF sealing', async () => {
+    const f = await fixture();
+    const cert = await certificate();
+    f.env.SIGNING_P12 = Buffer.from(cert.p12).toString('base64');
+    f.env.SIGNING_PASSPHRASE = 'test-only';
+    const r = ((await (await f.request(f.base, f.payload)).json()) as any).request;
+    const token = new URL(r.recipients[0].url).pathname.split('/').pop();
+    await f.request(`/api/signing/${token}/sign`, {
+      name: 'Test',
+      signature: 'Test',
+      consent: true,
+    });
+    let failNotification = true;
+    const fetchMail = vi.fn(async (_url: unknown, options: any) => {
+      if (JSON.parse(options.body).subject.startsWith('Signature received:') && failNotification) {
+        failNotification = false;
+        return new Response('{}', { status: 500 });
+      }
+      return Response.json({ id: 'test' });
+    });
+    vi.stubGlobal('fetch', fetchMail);
+    await expect(processSigning(f.env, r.id)).rejects.toThrow('signing_email_failed');
+    expect(
+      (await f.DB.prepare('SELECT status FROM signing_requests WHERE id=?').bind(r.id).first())
+        ?.status,
+    ).toBe('completed');
+    await processSigning(f.env, r.id);
+    const notifications = fetchMail.mock.calls.filter((call) =>
+      JSON.parse(call[1].body).subject.startsWith('Signature received:'),
+    );
+    expect(notifications).toHaveLength(2);
+    expect(notifications[0][1].headers['Idempotency-Key']).toBe(
+      notifications[1][1].headers['Idempotency-Key'],
+    );
+    expect(
+      (
+        await f.DB.prepare("SELECT status FROM signing_mail WHERE request_id=? AND kind='signed'")
+          .bind(r.id)
+          .first()
+      )?.status,
+    ).toBe('sent');
+  });
   test('recipient delivery records successful provider acceptance, preserves links and deduplicates resend', async () => {
     const f = await fixture();
     const initial = (await (await f.request(f.base, f.payload)).json()) as any;
@@ -566,7 +644,7 @@ describe('native signing authorization and lifecycle', () => {
         ?.status,
     ).toBe('pending');
     // A recipient who signed before delivery no longer receives an invitation.
-    expect(mailFetch).toHaveBeenCalledTimes(1);
+    expect(mailFetch).toHaveBeenCalledTimes(2);
     const secondToken = new URL(r.recipients[1].url).pathname.split('/').pop();
     await f.request(`/api/signing/${secondToken}/sign`, {
       name: 'Second Test Signer',
@@ -669,8 +747,8 @@ describe('native signing authorization and lifecycle', () => {
     );
     const before = stored.signed_key;
     await processSigning(f.env, r.id);
-    expect(mailFetch).toHaveBeenCalledTimes(4);
-    expect(acceptedMail.size).toBe(3);
+    expect(mailFetch).toHaveBeenCalledTimes(6);
+    expect(acceptedMail.size).toBe(5);
     expect(
       (await f.DB.prepare('SELECT signed_key FROM signing_requests WHERE id=?').bind(r.id).first())
         ?.signed_key,

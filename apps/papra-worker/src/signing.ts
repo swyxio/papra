@@ -624,18 +624,24 @@ export function registerSigningRoutes(app: App) {
         throw error(400, (e as Error).message);
       }
     }
-    await run(
-      c.env,
-      "UPDATE signing_recipients SET name=?,signature=?,values_json=?,signed_at=?,address=?,user_agent=? WHERE id=? AND signed_at IS NULL AND rejected_at IS NULL AND EXISTS(SELECT 1 FROM signing_requests WHERE id=? AND status='pending')",
-      name,
-      sig,
-      JSON.stringify(values),
-      Date.now(),
-      (c.req.header('CF-Connecting-IP') || 'unavailable').slice(0, 80),
-      (c.req.header('User-Agent') || '').slice(0, 512),
-      p.id,
-      r.id,
-    );
+    const now = Date.now();
+    await c.env.DB.batch([
+      c.env.DB.prepare(
+        "UPDATE signing_recipients SET name=?,signature=?,values_json=?,signed_at=?,address=?,user_agent=? WHERE id=? AND signed_at IS NULL AND rejected_at IS NULL AND EXISTS(SELECT 1 FROM signing_requests WHERE id=? AND status='pending')",
+      ).bind(
+        name,
+        sig,
+        JSON.stringify(values),
+        now,
+        (c.req.header('CF-Connecting-IP') || 'unavailable').slice(0, 80),
+        (c.req.header('User-Agent') || '').slice(0, 512),
+        p.id,
+        r.id,
+      ),
+      c.env.DB.prepare(
+        "INSERT OR IGNORE INTO signing_mail(id,request_id,recipient_id,kind,updated_at,queued_at,send_count) SELECT ?,?,?,'signed',?,?,0 WHERE changes()=1",
+      ).bind(id('sigmail'), r.id, p.id, now, now),
+    ]);
     const accepted = await first(
       c.env,
       'SELECT signed_at FROM signing_recipients WHERE id=?',
@@ -665,11 +671,11 @@ export function registerSigningRoutes(app: App) {
   });
 }
 
-async function deliverMail(env: Env, r: RequestRow) {
+async function deliverMail(env: Env, r: RequestRow, signedNotifications = false) {
   let attachment: Awaited<ReturnType<typeof signedPdfAttachment>> | undefined;
   for (const mail of await all(
     env,
-    "SELECT * FROM signing_mail WHERE request_id=? AND status='pending'",
+    `SELECT * FROM signing_mail WHERE request_id=? AND status='pending' AND kind ${signedNotifications ? "= 'signed'" : "!= 'signed'"}`,
     r.id,
   )) {
     const lease = crypto.randomUUID();
@@ -708,7 +714,10 @@ async function deliverMail(env: Env, r: RequestRow) {
         );
         continue;
       }
-      const url = `${env.APP_URL}/sign/${await recipientToken(env, p)}`;
+      const signedNotification = mail.kind === 'signed';
+      const url = signedNotification
+        ? `${env.APP_URL}/orgs/${encodeURIComponent(current.organization_id)}/documents/${encodeURIComponent(current.document_id)}`
+        : `${env.APP_URL}/sign/${await recipientToken(env, p)}`;
       const completed = mail.kind === 'completed';
       if (completed && attachment === undefined)
         attachment = await signedPdfAttachment(env, current);
@@ -721,12 +730,14 @@ async function deliverMail(env: Env, r: RequestRow) {
         },
         body: JSON.stringify({
           from: env.SIGNING_FROM,
-          to: [p.email],
-          reply_to: current.sender_email,
-          subject: `${completed ? 'Signed' : 'Signature requested'}: ${current.name}`,
-          text: completed
-            ? `${current.name} has been signed by every recipient.\n\n${attachment ? `The sealed PDF is attached as ${attachment.filename}.` : 'The sealed PDF exceeds the email attachment limit. Use the download link below.'}\n\nDownload the sealed PDF and view the signing record:\n${url}\n\nSwyxDrive`
-            : `${current.sender_name} (${current.sender_email}) requests your signature on ${current.name}.\n\nReview and sign:\n${url}\n\nThis link grants access to this signing request only. No account is needed.\n\nSwyxDrive`,
+          to: [signedNotification ? current.sender_email : p.email],
+          reply_to: signedNotification ? p.email : current.sender_email,
+          subject: `${signedNotification ? 'Signature received' : completed ? 'Signed' : 'Signature requested'}: ${current.name}`,
+          text: signedNotification
+            ? `${p.name} (${p.email}) signed ${current.name}.\n\nView the signing status in SwyxDrive:\n${url}\n\nSwyxDrive`
+            : completed
+              ? `${current.name} has been signed by every recipient.\n\n${attachment ? `The sealed PDF is attached as ${attachment.filename}.` : 'The sealed PDF exceeds the email attachment limit. Use the download link below.'}\n\nDownload the sealed PDF and view the signing record:\n${url}\n\nSwyxDrive`
+              : `${current.sender_name} (${current.sender_email}) requests your signature on ${current.name}.\n\nReview and sign:\n${url}\n\nThis link grants access to this signing request only. No account is needed.\n\nSwyxDrive`,
           ...(completed && attachment ? { attachments: [attachment] } : {}),
         }),
         signal: AbortSignal.timeout(15000),
@@ -780,8 +791,18 @@ export async function processSigning(env: Env, requestId: string) {
     }
     throw e;
   }
+  // A notification delivery failure must not prevent the signed PDF from being sealed.
+  let notificationError: unknown;
+  try {
+    await deliverMail(env, r, true);
+  } catch (e) {
+    notificationError = e;
+  }
   await deliverMail(env, r);
-  if (r.status === 'completed') return;
+  if (r.status === 'completed') {
+    if (notificationError) throw notificationError;
+    return;
+  }
   const lease = crypto.randomUUID();
   const claim = await run(
     env,
@@ -791,7 +812,10 @@ export async function processSigning(env: Env, requestId: string) {
     r.id,
     r.id,
   );
-  if (!claim.meta.changes) return;
+  if (!claim.meta.changes) {
+    if (notificationError) throw notificationError;
+    return;
+  }
   const outputKey = `signing/${r.id}/${lease}/signed.pdf`,
     auditKey = `signing/${r.id}/${lease}/audit.json`;
   try {
@@ -909,6 +933,7 @@ export async function processSigning(env: Env, requestId: string) {
     throw e;
   }
   await deliverMail(env, r);
+  if (notificationError) throw notificationError;
 }
 export async function repairSigning(env: Env) {
   const now = Date.now();
