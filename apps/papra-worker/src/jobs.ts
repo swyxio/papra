@@ -295,7 +295,20 @@ async function callNative<T>(
     )
       throw new JobError('native_capacity_pending');
     if (!response.ok) {
-      const value = await response.json<{ error?: string }>().catch(() => ({ error: undefined }));
+      const body = await response.text();
+      // The Containers SDK returns capacity exhaustion as a plaintext 500,
+      // rather than its usual 429/503. Do not spend the job's retry budget.
+      if (
+        response.status === 500 &&
+        body.includes('Maximum number of running container instances exceeded')
+      )
+        throw new JobError('native_capacity_pending');
+      let value: { error?: string } = {};
+      try {
+        value = JSON.parse(body) as { error?: string };
+      } catch {
+        // Container proxy failures can be plain text.
+      }
       throw new JobError(
         typeof value.error === 'string' && /^[a-z_]{1,80}$/.test(value.error)
           ? value.error
