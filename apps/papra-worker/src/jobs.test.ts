@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, test, vi } from 'vitest';
 import type { Env } from './types';
-import { consumeJobs, enqueueVersion, reserveDailyAI } from './jobs';
+import { consumeJobs, enqueueVersion, recoverBlockedBackupHashes, reserveDailyAI } from './jobs';
 
 vi.mock('@cloudflare/containers', () => ({ getContainer: vi.fn() }));
 
@@ -161,6 +161,52 @@ test('purging versions cannot create or requeue work', async () => {
   await expect(enqueueVersion(env, 'v')).rejects.toThrow('version_missing');
   expect(send).not.toHaveBeenCalled();
   expect((await DB.prepare('SELECT count(*) n FROM jobs').first<{ n: number }>())!.n).toBe(0);
+});
+test('only repairs backup verification blocked by a recovered original hash and completed copy', async () => {
+  const { env, DB } = await fixture();
+  await DB.batch([
+    DB.prepare(
+      "INSERT INTO jobs(id,version_id,kind,status,error,attempts,generation,created_at,updated_at) VALUES('h','v','hash','failed','native_http_500',3,0,1,1)",
+    ),
+    DB.prepare(
+      "INSERT INTO jobs(id,version_id,kind,status,created_at,updated_at) VALUES('b','v','backup','done',1,1)",
+    ),
+    DB.prepare(
+      "INSERT INTO jobs(id,version_id,kind,status,error,attempts,generation,created_at,updated_at) VALUES('bh','v','backup-hash','failed','original_hash_unavailable',3,2,1,1)",
+    ),
+  ]);
+  await recoverBlockedBackupHashes(env, 1_000_000);
+  expect(
+    await DB.prepare("SELECT status,generation FROM jobs WHERE id='bh'").first(),
+  ).toMatchObject({ status: 'failed', generation: 2 });
+  await DB.prepare("UPDATE jobs SET status='done' WHERE id='h'").run();
+  await DB.prepare("UPDATE versions SET sha256='abc' WHERE id='v'").run();
+  await DB.prepare("UPDATE jobs SET status='failed' WHERE id='b'").run();
+  await recoverBlockedBackupHashes(env, 1_000_000);
+  expect((await DB.prepare("SELECT status FROM jobs WHERE id='bh'").first())?.status).toBe(
+    'failed',
+  );
+  await DB.prepare("UPDATE jobs SET status='done' WHERE id='b'").run();
+  await recoverBlockedBackupHashes(env, 1_000_000);
+  await recoverBlockedBackupHashes(env, 1_000_000);
+  expect(
+    await DB.prepare(
+      "SELECT status,generation,attempts,error,updated_at FROM jobs WHERE id='bh'",
+    ).first(),
+  ).toMatchObject({
+    status: 'pending',
+    generation: 3,
+    attempts: 0,
+    error: null,
+    updated_at: 699999,
+  });
+  await DB.prepare(
+    "UPDATE jobs SET status='failed',error='backup_checksum_mismatch' WHERE id='bh'",
+  ).run();
+  await recoverBlockedBackupHashes(env, 1_000_000);
+  expect((await DB.prepare("SELECT error FROM jobs WHERE id='bh'").first())?.error).toBe(
+    'backup_checksum_mismatch',
+  );
 });
 async function backupFixture() {
   const f = await fixture(),
