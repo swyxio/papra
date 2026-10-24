@@ -304,11 +304,16 @@ test('cancellation during receipt write removes late receipt and original, witho
 });
 
 test.each([
-  { status: 503, kind: 'hash' },
-  { status: 404, kind: 'video:probe' },
+  { status: 503, kind: 'hash', body: 'There is no Container instance available' },
+  { status: 404, kind: 'video:probe', body: 'There is no Container instance available' },
+  {
+    status: 500,
+    kind: 'hash',
+    body: 'Failed to start container: Maximum number of running container instances exceeded. Try again later, or try configuring a higher value for max_instances',
+  },
 ])(
   'native availability waits preserve attempt budget ($status/$kind)',
-  async ({ status, kind }) => {
+  async ({ status, kind, body }) => {
     const { env, DB } = await fixture();
     Object.assign(env, {
       R2_ACCESS_KEY_ID: 'test',
@@ -318,9 +323,7 @@ test.each([
     });
     const { getContainer } = await import('@cloudflare/containers');
     const destroy = vi.fn(async () => {});
-    const fetch = vi.fn(
-      async () => new Response('There is no Container instance available', { status }),
-    );
+    const fetch = vi.fn(async () => new Response(body, { status }));
     vi.mocked(getContainer).mockReturnValue({ fetch, destroy } as never);
     await DB.prepare(
       "INSERT INTO jobs(id,version_id,kind,status,attempts,generation,created_at,updated_at) VALUES('native-job','v',?,'pending',2,4,1,1)",
@@ -349,6 +352,31 @@ test.each([
     });
   },
 );
+
+test('an unrelated native 500 still exhausts its bounded retry budget', async () => {
+  const { env, DB } = await fixture();
+  Object.assign(env, {
+    R2_ACCESS_KEY_ID: 'test',
+    R2_SECRET_ACCESS_KEY: 'test',
+    R2_ENDPOINT: 'https://example.r2.cloudflarestorage.com',
+    R2_BUCKET: 'papra-drive',
+  });
+  const { getContainer } = await import('@cloudflare/containers');
+  vi.mocked(getContainer).mockReturnValue({
+    fetch: vi.fn(async () => new Response('unrelated', { status: 500 })),
+    destroy: vi.fn(async () => {}),
+  } as never);
+  await DB.prepare("UPDATE versions SET size=? WHERE id='v'")
+    .bind(1024 ** 2 + 1)
+    .run();
+  await DB.prepare(
+    "INSERT INTO jobs(id,version_id,kind,status,attempts,generation,created_at,updated_at) VALUES('native-job','v','hash','pending',2,0,1,1)",
+  ).run();
+  await consumeJobs(batch({ jobId: 'native-job', generation: 0 }), env);
+  expect(
+    await DB.prepare("SELECT status,attempts,error FROM jobs WHERE id='native-job'").first(),
+  ).toEqual({ status: 'failed', attempts: 3, error: 'native_http_500' });
+});
 
 test('a streamed native failure preserves its terminal status after HTTP headers', async () => {
   const { env, DB } = await fixture();
