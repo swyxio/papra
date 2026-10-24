@@ -1165,6 +1165,21 @@ export async function consumeJobs(batch: MessageBatch, env: Env) {
     }
   }
 }
+// A backup verification can fail while the primary hash is failed. If the
+// primary is later repaired, make that specific dependency failure runnable
+// again. Other failures (especially checksum mismatches) need investigation.
+export async function recoverBlockedBackupHashes(env: Env, now = Date.now()) {
+  await run(
+    env,
+    `UPDATE jobs SET status='pending',generation=generation+1,attempts=0,error=NULL,lease_token=NULL,updated_at=?
+     WHERE kind='backup-hash' AND status='failed' AND error='original_hash_unavailable'
+       AND EXISTS (SELECT 1 FROM versions v JOIN documents d ON d.id=v.document_id
+         JOIN jobs h ON h.version_id=v.id AND h.kind='hash' AND h.status='done'
+         JOIN jobs b ON b.version_id=v.id AND b.kind='backup' AND b.status='done'
+         WHERE v.id=jobs.version_id AND v.sha256 IS NOT NULL AND d.is_deleted<>2)`,
+    now - 5 * 60_000 - 1,
+  );
+}
 export async function housekeeping(env: Env) {
   await recoverVideoCompute(env);
   const now = Date.now();
@@ -1175,6 +1190,7 @@ export async function housekeeping(env: Env) {
       "UPDATE jobs SET status=CASE WHEN attempts>=3 THEN 'failed' ELSE 'pending' END,lease_token=NULL,error='expired_processing_lease',updated_at=? WHERE status='processing' AND updated_at<?",
     ).bind(now, now - LEASE_MS),
   ]);
+  await recoverBlockedBackupHashes(env, now);
   await dispatchJobs(
     env,
     await all<Job>(
