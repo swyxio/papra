@@ -891,6 +891,8 @@ const backupS3 = (env: Env) =>
   });
 const backupCheckpointKey = (versionId: string, generation: number) =>
   `versions/${versionId}/backup-multipart-g${generation}.json`;
+const backupOrphanPrefix = (versionId: string, generation: number) =>
+  `versions/${versionId}/backup-multipart-g${generation}-orphan-`;
 async function abortBackupMultipart(env: Env, versionId: string, uploadId: string) {
   const url = new URL(
     `${env.R2_ENDPOINT.replace(/\/$/, '')}/papra-drive-backups/originals/${encodeURIComponent(versionId)}/original`,
@@ -919,6 +921,24 @@ async function abortBackupCheckpoint(env: Env, versionId: string, key: string, r
   await abortBackupMultipart(env, versionId, value.uploadId);
   // Keep the checkpoint if abort is ambiguous or fails, so cleanup can retry.
   if (remove) await env.BACKUPS.delete(key);
+}
+async function abortBackupOrphans(env: Env, versionId: string, generation: number) {
+  let cursor: string | undefined;
+  const keys: string[] = [];
+  do {
+    const page = await env.BACKUPS.list({
+      prefix: backupOrphanPrefix(versionId, generation),
+      cursor,
+      limit: 500,
+    });
+    // Do not delete while paginating: R2 cursors must continue over the same keyspace.
+    for (const object of page.objects) {
+      await abortBackupCheckpoint(env, versionId, object.key, false);
+      keys.push(object.key);
+    }
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+  for (const key of keys) await env.BACKUPS.delete(key);
 }
 export async function abortBackupMultipartsForPurge(env: Env, versionId: string) {
   const prefix = `versions/${versionId}/backup-multipart-g`;
@@ -976,6 +996,7 @@ async function backupOriginal(env: Env, j: Job, v: Version) {
   const existing = await env.BACKUPS.head(key);
   if (existing) {
     if (existing.size !== v.size) throw new JobError('backup_size_mismatch', true);
+    if (v.size > WORKER_OBJECT_BYTES) await abortBackupOrphans(env, v.id, j.generation);
     await ensureJobs(env, v.id, ['backup-hash']);
     return;
   }
@@ -1033,6 +1054,15 @@ async function backupOriginal(env: Env, j: Job, v: Version) {
       source: v.storage_key,
       parts: [],
     };
+    const orphanKey = `${backupOrphanPrefix(v.id, j.generation)}${crypto.randomUUID()}.json`;
+    try {
+      await env.BACKUPS.put(orphanKey, JSON.stringify({ uploadId: checkpoint.uploadId }));
+    } catch (error) {
+      // The guard write may itself have reached R2. Abort this newly created
+      // upload; any persisted guard remains available for later cleanup.
+      await abortBackupMultipart(env, v.id, checkpoint.uploadId).catch(() => {});
+      throw error;
+    }
     // An unsuccessful put or ownership read may have happened after R2 stored
     // the checkpoint. Do not abort an upload that a retry may need to resume.
     if (!(await saveCheckpoint(checkpoint))) {
@@ -1040,6 +1070,7 @@ async function backupOriginal(env: Env, j: Job, v: Version) {
         await abortBackupCheckpoint(env, v.id, checkpointKey).catch(() => {});
       return;
     }
+    await env.BACKUPS.delete(orphanKey);
   }
   const { uploadId, parts } = checkpoint;
   try {
@@ -1110,6 +1141,7 @@ async function backupOriginal(env: Env, j: Job, v: Version) {
       return;
     }
     await ensureJobs(env, v.id, ['backup-hash']);
+    await abortBackupOrphans(env, v.id, j.generation);
     await env.BACKUPS.delete(checkpointKey);
   } catch (error) {
     if (await purging(env, v.id)) {
@@ -1300,6 +1332,7 @@ export async function consumeJobs(batch: MessageBatch, env: Env) {
 }
 async function cleanupFailedBackup(env: Env, j: Pick<Job, 'id' | 'version_id' | 'generation'>) {
   await abortBackupCheckpoint(env, j.version_id, backupCheckpointKey(j.version_id, j.generation));
+  await abortBackupOrphans(env, j.version_id, j.generation);
   await run(
     env,
     "UPDATE jobs SET error=substr(error,24) WHERE id=? AND generation=? AND status='failed' AND substr(error,1,23)='backup_cleanup_pending:'",

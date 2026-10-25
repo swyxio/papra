@@ -244,6 +244,10 @@ async function backupFixture() {
         ? { etag: etags.get(key), json: async () => JSON.parse(objects.get(key)!) }
         : null,
     ),
+    list = vi.fn(async ({ prefix }: { prefix: string }) => ({
+      objects: [...objects.keys()].filter((key) => key.startsWith(prefix)).map((key) => ({ key })),
+      truncated: false,
+    })),
     head = vi
       .fn()
       .mockResolvedValueOnce(null)
@@ -256,7 +260,7 @@ async function backupFixture() {
     R2_BUCKET: 'papra-drive',
     R2_ACCESS_KEY_ID: 'synthetic',
     R2_SECRET_ACCESS_KEY: 'synthetic',
-    BACKUPS: { head, get, put, delete: deleteObject },
+    BACKUPS: { head, get, list, put, delete: deleteObject },
   });
   await f.DB.prepare(
     "INSERT INTO jobs(id,version_id,kind,status,created_at,updated_at) VALUES('backup-job','v','backup','pending',1,1)",
@@ -331,9 +335,9 @@ test('failed abort during cancellation retains its checkpoint for purge to retry
 test('cancellation immediately after checkpoint persistence retains it if abort fails', async () => {
   const f = await backupFixture();
   const originalPut = f.put.getMockImplementation()!;
-  f.put.mockImplementationOnce(async (key, value, options) => {
+  f.put.mockImplementation(async (key, value, options) => {
     const result = await originalPut(key, value, options);
-    await f.cancel();
+    if (key === 'versions/v/backup-multipart-g0.json') await f.cancel();
     return result;
   });
   vi.stubGlobal(
@@ -360,9 +364,14 @@ test('ambiguous checkpoint write preserves the upload and retries from the check
     };
   });
   const originalPut = f.put.getMockImplementation()!;
-  f.put.mockImplementationOnce(async (key, value, options) => {
-    await originalPut(key, value, options);
-    throw new Error('response lost after write');
+  let failed = false;
+  f.put.mockImplementation(async (key, value, options) => {
+    const result = await originalPut(key, value, options);
+    if (!failed && key === 'versions/v/backup-multipart-g0.json') {
+      failed = true;
+      throw new Error('response lost after write');
+    }
+    return result;
   });
   await consumeJobs(batch(f.body), f.env);
   expect(f.objects.has('versions/v/backup-multipart-g0.json')).toBe(true);
@@ -375,6 +384,36 @@ test('ambiguous checkpoint write preserves the upload and retries from the check
   expect(
     (await f.DB.prepare("SELECT status FROM jobs WHERE id='backup-job'").first())?.status,
   ).toBe('done');
+});
+
+test('a checkpoint write failure leaves its new upload tracked for later cleanup', async () => {
+  const f = await backupFixture();
+  f.head.mockResolvedValue(null);
+  const originalPut = f.put.getMockImplementation()!;
+  f.put.mockImplementation(async (key, value, options) => {
+    if (key === 'versions/v/backup-multipart-g0.json') throw new Error('checkpoint unavailable');
+    return originalPut(key, value, options);
+  });
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(null, { status: 503 })),
+  );
+  await consumeJobs(batch(f.body), f.env);
+  await consumeJobs(batch(f.body), f.env);
+  await consumeJobs(batch(f.body), f.env);
+  const guards = [...f.objects.keys()].filter((key) => key.includes('-orphan-'));
+  expect(guards).toHaveLength(3);
+  expect((await f.DB.prepare("SELECT error FROM jobs WHERE id='backup-job'").first())?.error).toBe(
+    'backup_cleanup_pending:provider_processing_failed',
+  );
+  await cleanupFailedBackups(f.env);
+  expect(guards.every((key) => f.objects.has(key))).toBe(true);
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(null, { status: 204 })),
+  );
+  await cleanupFailedBackups(f.env);
+  expect(guards.every((key) => !f.objects.has(key))).toBe(true);
 });
 
 test('terminal backup failure retries cleanup and preserves the original failure', async () => {
