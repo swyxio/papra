@@ -5,7 +5,13 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, test, vi } from 'vitest';
 import type { Env } from './types';
-import { consumeJobs, enqueueVersion, recoverBlockedBackupHashes, reserveDailyAI } from './jobs';
+import {
+  abortBackupMultipartsForPurge,
+  consumeJobs,
+  enqueueVersion,
+  recoverBlockedBackupHashes,
+  reserveDailyAI,
+} from './jobs';
 
 vi.mock('@cloudflare/containers', () => ({ getContainer: vi.fn() }));
 
@@ -210,8 +216,16 @@ test('only repairs backup verification blocked by a recovered original hash and 
 });
 async function backupFixture() {
   const f = await fixture(),
-    deleteObject = vi.fn(async () => {}),
-    put = vi.fn(async () => {}),
+    objects = new Map<string, string>(),
+    deleteObject = vi.fn(async (key: string) => {
+      objects.delete(key);
+    }),
+    put = vi.fn(async (key: string, value: string) => {
+      objects.set(key, value);
+    }),
+    get = vi.fn(async (key: string) =>
+      objects.has(key) ? { json: async () => JSON.parse(objects.get(key)!) } : null,
+    ),
     head = vi
       .fn()
       .mockResolvedValueOnce(null)
@@ -224,7 +238,7 @@ async function backupFixture() {
     R2_BUCKET: 'papra-drive',
     R2_ACCESS_KEY_ID: 'synthetic',
     R2_SECRET_ACCESS_KEY: 'synthetic',
-    BACKUPS: { head, put, delete: deleteObject },
+    BACKUPS: { head, get, put, delete: deleteObject },
   });
   await f.DB.prepare(
     "INSERT INTO jobs(id,version_id,kind,status,created_at,updated_at) VALUES('backup-job','v','backup','pending',1,1)",
@@ -254,6 +268,7 @@ async function backupFixture() {
     ...f,
     deleteObject,
     put,
+    objects,
     head,
     complete,
     abort,
@@ -273,7 +288,11 @@ test('cancellation before multipart completion aborts and never recreates the ba
   await consumeJobs(batch(f.body), f.env);
   expect(f.abort).toHaveBeenCalledOnce();
   expect(f.complete).not.toHaveBeenCalled();
-  expect(f.put).not.toHaveBeenCalled();
+  expect(f.put).not.toHaveBeenCalledWith(
+    'versions/v/original-backup.json',
+    expect.anything(),
+    expect.anything(),
+  );
 });
 test('cancellation during multipart completion removes the late original copy', async () => {
   const f = await backupFixture();
@@ -290,17 +309,113 @@ test('cancellation during multipart completion removes the late original copy', 
   });
   await consumeJobs(batch(f.body), f.env);
   expect(f.deleteObject).toHaveBeenCalledWith('originals/v/original');
-  expect(f.put).not.toHaveBeenCalled();
+  expect(f.put).not.toHaveBeenCalledWith(
+    'versions/v/original-backup.json',
+    expect.anything(),
+    expect.anything(),
+  );
 });
 test('cancellation during receipt write removes late receipt and original, without successor jobs', async () => {
   const f = await backupFixture();
-  f.put.mockImplementation(async () => {
-    await f.cancel();
+  f.put.mockImplementation(async (key, value) => {
+    f.objects.set(key, value);
+    if (key === 'versions/v/original-backup.json') await f.cancel();
   });
   await consumeJobs(batch(f.body), f.env);
   expect(f.deleteObject).toHaveBeenCalledWith('versions/v/original-backup.json');
   expect(f.deleteObject).toHaveBeenCalledWith('originals/v/original');
   expect((await f.DB.prepare('SELECT count(*) n FROM jobs').first<{ n: number }>())!.n).toBe(1);
+});
+
+test('a large backup continues from its durable multipart checkpoint', async () => {
+  const f = await backupFixture();
+  const size = 4 * 600 * 1024 ** 2 + 1;
+  await f.DB.prepare("UPDATE versions SET size=? WHERE id='v'").bind(size).run();
+  f.head.mockResolvedValue(null);
+  f.complete.mockImplementation(async () => {
+    f.head.mockResolvedValue({ size });
+    return {
+      location: '',
+      bucket: 'papra-drive-backups',
+      key: 'originals/v/original',
+      etag: 'test',
+      eTag: 'test',
+      ETag: 'test',
+    };
+  });
+  const request = vi.fn(
+    async () => new Response('<CopyPartResult><ETag>test</ETag></CopyPartResult>'),
+  );
+  vi.stubGlobal('fetch', request);
+  await consumeJobs(batch(f.body), f.env);
+  expect(request).toHaveBeenCalledTimes(4);
+  expect(f.complete).not.toHaveBeenCalled();
+  expect(JSON.parse(f.objects.get('versions/v/backup-multipart-g0.json')!).parts).toHaveLength(4);
+  expect(
+    await f.DB.prepare("SELECT status,attempts FROM jobs WHERE id='backup-job'").first(),
+  ).toEqual({ status: 'pending', attempts: 0 });
+  await consumeJobs(batch(f.body), f.env);
+  expect(request).toHaveBeenCalledTimes(5);
+  expect(f.complete).toHaveBeenCalledOnce();
+  expect(
+    (await f.DB.prepare("SELECT status FROM jobs WHERE id='backup-job'").first())?.status,
+  ).toBe('done');
+});
+
+test('a failed part retries from the last committed checkpoint', async () => {
+  const f = await backupFixture();
+  const size = 5 * 600 * 1024 ** 2 + 1;
+  await f.DB.prepare("UPDATE versions SET size=? WHERE id='v'").bind(size).run();
+  f.head.mockResolvedValue(null);
+  f.complete.mockImplementation(async () => {
+    f.head.mockResolvedValue({ size });
+    return {
+      location: '',
+      bucket: 'papra-drive-backups',
+      key: 'originals/v/original',
+      etag: 'test',
+      eTag: 'test',
+      ETag: 'test',
+    };
+  });
+  const request = vi.fn(
+    async () => new Response('<CopyPartResult><ETag>test</ETag></CopyPartResult>'),
+  );
+  vi.stubGlobal('fetch', request);
+  await consumeJobs(batch(f.body), f.env);
+  request.mockRejectedValueOnce(new Error('interrupted'));
+  await consumeJobs(batch(f.body), f.env);
+  expect(JSON.parse(f.objects.get('versions/v/backup-multipart-g0.json')!).parts).toHaveLength(4);
+  expect(f.abort).not.toHaveBeenCalled();
+  request.mockImplementation(
+    async () => new Response('<CopyPartResult><ETag>test</ETag></CopyPartResult>'),
+  );
+  await consumeJobs(batch(f.body), f.env);
+  expect(f.complete).toHaveBeenCalledOnce();
+  expect(
+    (await f.DB.prepare("SELECT status FROM jobs WHERE id='backup-job'").first())?.status,
+  ).toBe('done');
+});
+
+test('purging aborts checkpointed multipart uploads and holds on provider failure', async () => {
+  const f = await backupFixture();
+  f.objects.set(
+    'versions/v/backup-multipart-g0.json',
+    JSON.stringify({ uploadId: 'synthetic-upload' }),
+  );
+  (f.env.BACKUPS as unknown as { list: unknown }).list = vi.fn(async () => ({
+    objects: [{ key: 'versions/v/backup-multipart-g0.json' }],
+    truncated: false,
+  }));
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(null, { status: 503 })),
+  );
+  await expect(abortBackupMultipartsForPurge(f.env, 'v')).rejects.toThrow('backup_abort_failed');
+  const fetch = vi.fn(async (_request: Request) => new Response(null, { status: 404 }));
+  vi.stubGlobal('fetch', fetch);
+  await expect(abortBackupMultipartsForPurge(f.env, 'v')).resolves.toBeUndefined();
+  expect(fetch.mock.calls[0][0].method).toBe('DELETE');
 });
 
 test.each([
