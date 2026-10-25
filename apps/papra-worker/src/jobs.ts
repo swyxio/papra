@@ -1302,7 +1302,7 @@ async function cleanupFailedBackup(env: Env, j: Pick<Job, 'id' | 'version_id' | 
   await abortBackupCheckpoint(env, j.version_id, backupCheckpointKey(j.version_id, j.generation));
   await run(
     env,
-    "UPDATE jobs SET error=substr(error,24) WHERE id=? AND generation=? AND status='failed' AND error LIKE 'backup_cleanup_pending:%'",
+    "UPDATE jobs SET error=substr(error,24) WHERE id=? AND generation=? AND status='failed' AND substr(error,1,23)='backup_cleanup_pending:'",
     j.id,
     j.generation,
   );
@@ -1310,7 +1310,7 @@ async function cleanupFailedBackup(env: Env, j: Pick<Job, 'id' | 'version_id' | 
 export async function cleanupFailedBackups(env: Env) {
   const jobs = await all<Job>(
     env,
-    "SELECT id,version_id,generation FROM jobs WHERE kind='backup' AND status='failed' AND error LIKE 'backup_cleanup_pending:%' ORDER BY updated_at LIMIT 10",
+    "SELECT id,version_id,generation FROM jobs WHERE kind='backup' AND status='failed' AND substr(error,1,23)='backup_cleanup_pending:' ORDER BY updated_at LIMIT 10",
   );
   for (const job of jobs) {
     try {
@@ -1319,7 +1319,7 @@ export async function cleanupFailedBackups(env: Env) {
       // Rotate failed cleanup attempts so one unavailable upload cannot starve others.
       await run(
         env,
-        "UPDATE jobs SET updated_at=? WHERE id=? AND generation=? AND status='failed' AND error LIKE 'backup_cleanup_pending:%'",
+        "UPDATE jobs SET updated_at=? WHERE id=? AND generation=? AND status='failed' AND substr(error,1,23)='backup_cleanup_pending:'",
         Date.now(),
         job.id,
         job.generation,
@@ -1349,7 +1349,7 @@ export async function housekeeping(env: Env) {
     env.DB.prepare('DELETE FROM auth_sessions WHERE expires_at<?').bind(now),
     env.DB.prepare('DELETE FROM auth_oauth_states WHERE expires_at<?').bind(now),
     env.DB.prepare(
-      "UPDATE jobs SET status=CASE WHEN attempts>=3 THEN 'failed' ELSE 'pending' END,lease_token=NULL,error='expired_processing_lease',updated_at=? WHERE status='processing' AND updated_at<?",
+      "UPDATE jobs SET status=CASE WHEN attempts>=3 THEN 'failed' ELSE 'pending' END,lease_token=NULL,error=CASE WHEN attempts>=3 AND kind='backup' THEN 'backup_cleanup_pending:expired_processing_lease' ELSE 'expired_processing_lease' END,updated_at=? WHERE status='processing' AND updated_at<?",
     ).bind(now, now - LEASE_MS),
   ]);
   await recoverBlockedBackupHashes(env, now);

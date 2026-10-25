@@ -10,6 +10,7 @@ import {
   cleanupFailedBackups,
   consumeJobs,
   enqueueVersion,
+  housekeeping,
   recoverBlockedBackupHashes,
   reserveDailyAI,
 } from './jobs';
@@ -407,6 +408,49 @@ test('terminal backup failure retries cleanup and preserves the original failure
       error: 'backup_copy_part_failed',
     },
   );
+});
+
+test('expired final backup lease retains retryable cleanup without changing other jobs', async () => {
+  const f = await backupFixture();
+  f.objects.set(
+    'versions/v/backup-multipart-g0.json',
+    JSON.stringify({ uploadId: 'synthetic-upload' }),
+  );
+  await f.DB.batch([
+    f.DB.prepare(
+      "UPDATE jobs SET status='processing',attempts=3,lease_token='expired',updated_at=1 WHERE id='backup-job'",
+    ),
+    f.DB.prepare(
+      "INSERT INTO jobs(id,version_id,kind,status,attempts,lease_token,created_at,updated_at) VALUES('hash-job','v','hash','processing',3,'expired',1,1)",
+    ),
+    f.DB.prepare("UPDATE versions SET processing_status='ready' WHERE id='v'"),
+  ]);
+  Object.assign(f.env, { BACKUP_WORKFLOW: { create: vi.fn(async () => ({})) } });
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(null, { status: 503 })),
+  );
+  await housekeeping(f.env);
+  expect(await f.DB.prepare("SELECT status,error FROM jobs WHERE id='backup-job'").first()).toEqual(
+    {
+      status: 'failed',
+      error: 'backup_cleanup_pending:expired_processing_lease',
+    },
+  );
+  expect(await f.DB.prepare("SELECT status,error FROM jobs WHERE id='hash-job'").first()).toEqual({
+    status: 'failed',
+    error: 'expired_processing_lease',
+  });
+  expect(f.objects.has('versions/v/backup-multipart-g0.json')).toBe(true);
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(null, { status: 204 })),
+  );
+  await cleanupFailedBackups(f.env);
+  expect((await f.DB.prepare("SELECT error FROM jobs WHERE id='backup-job'").first())?.error).toBe(
+    'expired_processing_lease',
+  );
+  expect(f.objects.has('versions/v/backup-multipart-g0.json')).toBe(false);
 });
 test('cancellation during multipart completion removes the late original copy', async () => {
   const f = await backupFixture();
