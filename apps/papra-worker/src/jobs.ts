@@ -991,6 +991,20 @@ async function backupOriginal(env: Env, j: Job, v: Version) {
     parts: { partNumber: number; etag: string }[];
   };
   const checkpointObject = await env.BACKUPS.get(checkpointKey);
+  let checkpointEtag = checkpointObject?.etag;
+  const saveCheckpoint = async (value: Checkpoint) => {
+    if (!(await owned(env, j))) return false;
+    const saved = await env.BACKUPS.put(checkpointKey, JSON.stringify(value), {
+      onlyIf: checkpointEtag ? { etagMatches: checkpointEtag } : { etagDoesNotMatch: '*' },
+    });
+    if (!saved) throw new JobError('backup_checkpoint_conflict');
+    checkpointEtag = saved.etag;
+    if (!(await owned(env, j))) {
+      if (await purging(env, j.version_id)) await env.BACKUPS.delete(checkpointKey);
+      return false;
+    }
+    return true;
+  };
   let checkpoint: Checkpoint;
   if (checkpointObject) {
     checkpoint = await checkpointObject.json<Checkpoint>();
@@ -1012,9 +1026,14 @@ async function backupOriginal(env: Env, j: Job, v: Version) {
       source: v.storage_key,
       parts: [],
     };
-    if (!(await fencedPut(env, j, env.BACKUPS, checkpointKey, JSON.stringify(checkpoint)))) {
+    try {
+      if (!(await saveCheckpoint(checkpoint))) {
+        await backup.abortMultipartUpload(key, checkpoint.uploadId).catch(() => {});
+        return;
+      }
+    } catch (error) {
       await backup.abortMultipartUpload(key, checkpoint.uploadId).catch(() => {});
-      return;
+      throw error;
     }
   }
   const { uploadId, parts } = checkpoint;
@@ -1047,8 +1066,7 @@ async function backupOriginal(env: Env, j: Job, v: Version) {
         throw new JobError('backup_copy_part_failed');
       parts.push({ partNumber, etag });
     }
-    if (!(await fencedPut(env, j, env.BACKUPS, checkpointKey, JSON.stringify(checkpoint))))
-      throw new JobError('processing_lease_lost');
+    if (!(await saveCheckpoint(checkpoint))) throw new JobError('processing_lease_lost');
     if (parts.length < Math.ceil(v.size / partSize)) return 'continue' as const;
     if (!(await owned(env, j))) throw new JobError('processing_lease_lost');
     await backup.completeMultipartUpload(key, uploadId, parts);

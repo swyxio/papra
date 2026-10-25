@@ -217,14 +217,30 @@ test('only repairs backup verification blocked by a recovered original hash and 
 async function backupFixture() {
   const f = await fixture(),
     objects = new Map<string, string>(),
+    etags = new Map<string, string>(),
     deleteObject = vi.fn(async (key: string) => {
       objects.delete(key);
+      etags.delete(key);
     }),
-    put = vi.fn(async (key: string, value: string) => {
-      objects.set(key, value);
-    }),
+    put = vi.fn(
+      async (
+        key: string,
+        value: string,
+        options?: { onlyIf?: { etagMatches?: string; etagDoesNotMatch?: string } },
+      ) => {
+        if (options?.onlyIf?.etagMatches && options.onlyIf.etagMatches !== etags.get(key))
+          return null;
+        if (options?.onlyIf?.etagDoesNotMatch === '*' && objects.has(key)) return null;
+        objects.set(key, value);
+        const etag = `etag-${Math.random()}`;
+        etags.set(key, etag);
+        return { etag };
+      },
+    ),
     get = vi.fn(async (key: string) =>
-      objects.has(key) ? { json: async () => JSON.parse(objects.get(key)!) } : null,
+      objects.has(key)
+        ? { etag: etags.get(key), json: async () => JSON.parse(objects.get(key)!) }
+        : null,
     ),
     head = vi
       .fn()
@@ -320,6 +336,7 @@ test('cancellation during receipt write removes late receipt and original, witho
   f.put.mockImplementation(async (key, value) => {
     f.objects.set(key, value);
     if (key === 'versions/v/original-backup.json') await f.cancel();
+    return { etag: 'test' };
   });
   await consumeJobs(batch(f.body), f.env);
   expect(f.deleteObject).toHaveBeenCalledWith('versions/v/original-backup.json');
@@ -395,6 +412,40 @@ test('a failed part retries from the last committed checkpoint', async () => {
   expect(
     (await f.DB.prepare("SELECT status FROM jobs WHERE id='backup-job'").first())?.status,
   ).toBe('done');
+});
+
+test('a checkpoint conflict cannot complete the multipart copy', async () => {
+  const f = await backupFixture();
+  const originalPut = f.put.getMockImplementation()!;
+  f.put.mockImplementation(async (key, value, options) => {
+    if (options?.onlyIf?.etagMatches) return null;
+    return originalPut(key, value, options);
+  });
+  await consumeJobs(batch(f.body), f.env);
+  expect(f.complete).not.toHaveBeenCalled();
+  expect(await f.DB.prepare("SELECT status,error FROM jobs WHERE id='backup-job'").first()).toEqual(
+    { status: 'pending', error: 'backup_checkpoint_conflict' },
+  );
+});
+
+test('R2 checkpoint preconditions reject creation over an existing object and stale updates', async () => {
+  const mf = new Miniflare({
+    modules: true,
+    script: 'export default {fetch(){return new Response("ok")}}',
+    compatibilityDate: '2026-07-21',
+    r2Buckets: ['TEST'],
+  });
+  instances.push(mf);
+  const bucket = await mf.getR2Bucket('TEST');
+  const first = await bucket.put('checkpoint', 'one', { onlyIf: { etagDoesNotMatch: '*' } });
+  expect(first).not.toBeNull();
+  expect(await bucket.put('checkpoint', 'two', { onlyIf: { etagDoesNotMatch: '*' } })).toBeNull();
+  expect(
+    await bucket.put('checkpoint', 'two', { onlyIf: { etagMatches: first!.etag } }),
+  ).not.toBeNull();
+  expect(
+    await bucket.put('checkpoint', 'stale', { onlyIf: { etagMatches: first!.etag } }),
+  ).toBeNull();
 });
 
 test('purging aborts checkpointed multipart uploads and holds on provider failure', async () => {
