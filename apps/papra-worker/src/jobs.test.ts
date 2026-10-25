@@ -412,7 +412,10 @@ test('purging aborts checkpointed multipart uploads and holds on provider failur
     vi.fn(async () => new Response(null, { status: 503 })),
   );
   await expect(abortBackupMultipartsForPurge(f.env, 'v')).rejects.toThrow('backup_abort_failed');
-  const fetch = vi.fn(async (_request: Request) => new Response(null, { status: 404 }));
+  const fetch = vi.fn(
+    async (_request: Request) =>
+      new Response('<Error><Code>NoSuchUpload</Code></Error>', { status: 404 }),
+  );
   vi.stubGlobal('fetch', fetch);
   await expect(abortBackupMultipartsForPurge(f.env, 'v')).resolves.toBeUndefined();
   expect(fetch.mock.calls[0][0].method).toBe('DELETE');

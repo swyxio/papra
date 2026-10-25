@@ -912,7 +912,11 @@ export async function abortBackupMultipartsForPurge(env: Env, versionId: string)
       });
       const signed = await signer.sign(url, { method: 'DELETE' });
       const response = await fetch(signed, { signal: AbortSignal.timeout(30_000) });
-      if (!response.ok && response.status !== 404) throw new Error('backup_abort_failed');
+      if (
+        !response.ok &&
+        !(response.status === 404 && (await response.text()).includes('<Code>NoSuchUpload</Code>'))
+      )
+        throw new Error('backup_abort_failed');
     }
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor);
