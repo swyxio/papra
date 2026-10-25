@@ -10,7 +10,7 @@ import {
 import { signedDownload, signedMedia, s3 } from './storage';
 import { mediaResponse, requestVideoPreview, previewDownload } from './video';
 import type { MediaDocument } from './video';
-import { enqueueVersion } from './jobs';
+import { abortBackupMultipartsForPurge, enqueueVersion } from './jobs';
 import { keywordPredicate } from './keyword';
 import { modifiedBySQL, modifiedAtSQL, actorNameSQL } from './document-attribution';
 import { fetchTranscript } from './transcripts';
@@ -130,6 +130,7 @@ async function purge(env: Env, d: Record<string, any>) {
   for (const j of running) await getContainer(env.PROCESSOR, `${j.id}-${j.generation}`).destroy();
   const versions = await all(env, 'SELECT * FROM versions WHERE document_id=?', d.id);
   for (const v of versions) {
+    await abortBackupMultipartsForPurge(env, v.id);
     await env.FILES.delete(v.storage_key);
     await env.BACKUPS.delete(v.storage_key);
     await deletePrefix(env.FILES, `derived/${v.id}/`);
