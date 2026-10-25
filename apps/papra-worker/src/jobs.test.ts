@@ -7,6 +7,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import type { Env } from './types';
 import {
   abortBackupMultipartsForPurge,
+  cleanupFailedBackups,
   consumeJobs,
   enqueueVersion,
   recoverBlockedBackupHashes,
@@ -302,12 +303,109 @@ test('cancellation before multipart completion aborts and never recreates the ba
     }),
   );
   await consumeJobs(batch(f.body), f.env);
-  expect(f.abort).toHaveBeenCalledOnce();
+  expect(f.objects.has('versions/v/backup-multipart-g0.json')).toBe(false);
   expect(f.complete).not.toHaveBeenCalled();
   expect(f.put).not.toHaveBeenCalledWith(
     'versions/v/original-backup.json',
     expect.anything(),
     expect.anything(),
+  );
+});
+test('failed abort during cancellation retains its checkpoint for purge to retry', async () => {
+  const f = await backupFixture();
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (request: Request | string) => {
+      if (request instanceof Request && request.method === 'DELETE')
+        return new Response(null, { status: 503 });
+      await f.cancel();
+      return new Response('<CopyPartResult><ETag>test</ETag></CopyPartResult>');
+    }),
+  );
+  await consumeJobs(batch(f.body), f.env);
+  expect(f.objects.has('versions/v/backup-multipart-g0.json')).toBe(true);
+  expect(f.complete).not.toHaveBeenCalled();
+});
+
+test('cancellation immediately after checkpoint persistence retains it if abort fails', async () => {
+  const f = await backupFixture();
+  const originalPut = f.put.getMockImplementation()!;
+  f.put.mockImplementationOnce(async (key, value, options) => {
+    const result = await originalPut(key, value, options);
+    await f.cancel();
+    return result;
+  });
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(null, { status: 503 })),
+  );
+  await consumeJobs(batch(f.body), f.env);
+  expect(f.objects.has('versions/v/backup-multipart-g0.json')).toBe(true);
+  expect(f.complete).not.toHaveBeenCalled();
+});
+
+test('ambiguous checkpoint write preserves the upload and retries from the checkpoint', async () => {
+  const f = await backupFixture();
+  f.head.mockResolvedValue(null);
+  f.complete.mockImplementation(async () => {
+    f.head.mockResolvedValue({ size: 2 * 1024 ** 2 });
+    return {
+      location: '',
+      bucket: 'papra-drive-backups',
+      key: 'originals/v/original',
+      etag: 'test',
+      eTag: 'test',
+      ETag: 'test',
+    };
+  });
+  const originalPut = f.put.getMockImplementation()!;
+  f.put.mockImplementationOnce(async (key, value, options) => {
+    await originalPut(key, value, options);
+    throw new Error('response lost after write');
+  });
+  await consumeJobs(batch(f.body), f.env);
+  expect(f.objects.has('versions/v/backup-multipart-g0.json')).toBe(true);
+  expect(f.abort).not.toHaveBeenCalled();
+  expect(
+    (await f.DB.prepare("SELECT status FROM jobs WHERE id='backup-job'").first())?.status,
+  ).toBe('pending');
+  await consumeJobs(batch(f.body), f.env);
+  expect(f.complete).toHaveBeenCalledOnce();
+  expect(
+    (await f.DB.prepare("SELECT status FROM jobs WHERE id='backup-job'").first())?.status,
+  ).toBe('done');
+});
+
+test('terminal backup failure retries cleanup and preserves the original failure', async () => {
+  const f = await backupFixture();
+  f.head.mockResolvedValue(null);
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(null, { status: 503 })),
+  );
+  await consumeJobs(batch(f.body), f.env);
+  await consumeJobs(batch(f.body), f.env);
+  await consumeJobs(batch(f.body), f.env);
+  expect(await f.DB.prepare("SELECT status,error FROM jobs WHERE id='backup-job'").first()).toEqual(
+    {
+      status: 'failed',
+      error: 'backup_cleanup_pending:backup_copy_part_failed',
+    },
+  );
+  expect(f.objects.has('versions/v/backup-multipart-g0.json')).toBe(true);
+  await cleanupFailedBackups(f.env);
+  expect(f.objects.has('versions/v/backup-multipart-g0.json')).toBe(true);
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(null, { status: 204 })),
+  );
+  await cleanupFailedBackups(f.env);
+  expect(f.objects.has('versions/v/backup-multipart-g0.json')).toBe(false);
+  expect(await f.DB.prepare("SELECT status,error FROM jobs WHERE id='backup-job'").first()).toEqual(
+    {
+      status: 'failed',
+      error: 'backup_copy_part_failed',
+    },
   );
 });
 test('cancellation during multipart completion removes the late original copy', async () => {

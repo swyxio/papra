@@ -889,34 +889,44 @@ const backupS3 = (env: Env) =>
     region: 'auto',
     endpoint: `${env.R2_ENDPOINT.replace(/\/$/, '')}/papra-drive-backups`,
   });
+const backupCheckpointKey = (versionId: string, generation: number) =>
+  `versions/${versionId}/backup-multipart-g${generation}.json`;
+async function abortBackupMultipart(env: Env, versionId: string, uploadId: string) {
+  const url = new URL(
+    `${env.R2_ENDPOINT.replace(/\/$/, '')}/papra-drive-backups/originals/${encodeURIComponent(versionId)}/original`,
+  );
+  url.searchParams.set('uploadId', uploadId);
+  const signer = new AwsClient({
+    accessKeyId: env.R2_ACCESS_KEY_ID,
+    secretAccessKey: env.R2_SECRET_ACCESS_KEY,
+    service: 's3',
+    region: 'auto',
+  });
+  const signed = await signer.sign(url, { method: 'DELETE' });
+  const response = await fetch(signed, { signal: AbortSignal.timeout(30_000) });
+  if (
+    !response.ok &&
+    !(response.status === 404 && (await response.text()).includes('<Code>NoSuchUpload</Code>'))
+  )
+    throw new Error('backup_abort_failed');
+}
+async function abortBackupCheckpoint(env: Env, versionId: string, key: string, remove = true) {
+  const checkpoint = await env.BACKUPS.get(key);
+  if (!checkpoint) return;
+  const value = await checkpoint.json<{ uploadId?: string }>();
+  if (typeof value.uploadId !== 'string' || !value.uploadId)
+    throw new Error('backup_checkpoint_invalid');
+  await abortBackupMultipart(env, versionId, value.uploadId);
+  // Keep the checkpoint if abort is ambiguous or fails, so cleanup can retry.
+  if (remove) await env.BACKUPS.delete(key);
+}
 export async function abortBackupMultipartsForPurge(env: Env, versionId: string) {
   const prefix = `versions/${versionId}/backup-multipart-g`;
   let cursor: string | undefined;
   do {
     const page = await env.BACKUPS.list({ prefix, cursor, limit: 500 });
     for (const object of page.objects) {
-      const checkpoint = await env.BACKUPS.get(object.key);
-      if (!checkpoint) continue;
-      const value = await checkpoint.json<{ uploadId?: string }>();
-      if (typeof value.uploadId !== 'string' || !value.uploadId)
-        throw new Error('backup_checkpoint_invalid');
-      const url = new URL(
-        `${env.R2_ENDPOINT.replace(/\/$/, '')}/papra-drive-backups/originals/${encodeURIComponent(versionId)}/original`,
-      );
-      url.searchParams.set('uploadId', value.uploadId);
-      const signer = new AwsClient({
-        accessKeyId: env.R2_ACCESS_KEY_ID,
-        secretAccessKey: env.R2_SECRET_ACCESS_KEY,
-        service: 's3',
-        region: 'auto',
-      });
-      const signed = await signer.sign(url, { method: 'DELETE' });
-      const response = await fetch(signed, { signal: AbortSignal.timeout(30_000) });
-      if (
-        !response.ok &&
-        !(response.status === 404 && (await response.text()).includes('<Code>NoSuchUpload</Code>'))
-      )
-        throw new Error('backup_abort_failed');
+      await abortBackupCheckpoint(env, versionId, object.key, false);
     }
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor);
@@ -982,7 +992,7 @@ async function backupOriginal(env: Env, j: Job, v: Version) {
   }
   // Persist each bounded batch across queue invocations. A single consumer has
   // a 15-minute wall-time limit even though R2 multipart uploads can resume.
-  const checkpointKey = `versions/${v.id}/backup-multipart-g${j.generation}.json`;
+  const checkpointKey = backupCheckpointKey(v.id, j.generation);
   const partSize = 600 * 1024 ** 2;
   type Checkpoint = {
     uploadId: string;
@@ -999,10 +1009,7 @@ async function backupOriginal(env: Env, j: Job, v: Version) {
     });
     if (!saved) throw new JobError('backup_checkpoint_conflict');
     checkpointEtag = saved.etag;
-    if (!(await owned(env, j))) {
-      if (await purging(env, j.version_id)) await env.BACKUPS.delete(checkpointKey);
-      return false;
-    }
+    if (!(await owned(env, j))) return false;
     return true;
   };
   let checkpoint: Checkpoint;
@@ -1026,14 +1033,12 @@ async function backupOriginal(env: Env, j: Job, v: Version) {
       source: v.storage_key,
       parts: [],
     };
-    try {
-      if (!(await saveCheckpoint(checkpoint))) {
-        await backup.abortMultipartUpload(key, checkpoint.uploadId).catch(() => {});
-        return;
-      }
-    } catch (error) {
-      await backup.abortMultipartUpload(key, checkpoint.uploadId).catch(() => {});
-      throw error;
+    // An unsuccessful put or ownership read may have happened after R2 stored
+    // the checkpoint. Do not abort an upload that a retry may need to resume.
+    if (!(await saveCheckpoint(checkpoint))) {
+      if (await purging(env, v.id))
+        await abortBackupCheckpoint(env, v.id, checkpointKey).catch(() => {});
+      return;
     }
   }
   const { uploadId, parts } = checkpoint;
@@ -1108,8 +1113,7 @@ async function backupOriginal(env: Env, j: Job, v: Version) {
     await env.BACKUPS.delete(checkpointKey);
   } catch (error) {
     if (await purging(env, v.id)) {
-      await backup.abortMultipartUpload(key, uploadId).catch(() => {});
-      await env.BACKUPS.delete(checkpointKey);
+      await abortBackupCheckpoint(env, v.id, checkpointKey).catch(() => {});
     }
     throw error;
   }
@@ -1259,12 +1263,13 @@ export async function consumeJobs(batch: MessageBatch, env: Env) {
           error instanceof JobError &&
           ['original_hash_pending', 'native_capacity_pending'].includes(error.code),
         terminal = !waiting && ((error instanceof JobError && error.permanent) || j.attempts >= 3),
-        code = error instanceof JobError ? error.code : 'provider_processing_failed';
-      await run(
+        code = error instanceof JobError ? error.code : 'provider_processing_failed',
+        storedCode = terminal && j.kind === 'backup' ? `backup_cleanup_pending:${code}` : code;
+      const transition = await run(
         env,
         'UPDATE jobs SET status=?,lease_token=NULL,error=?,updated_at=? WHERE id=? AND generation=? AND lease_token=?',
         terminal ? 'failed' : 'pending',
-        code,
+        storedCode,
         Date.now(),
         j.id,
         j.generation,
@@ -1278,6 +1283,8 @@ export async function consumeJobs(batch: MessageBatch, env: Env) {
           j.generation,
         );
       if (terminal) {
+        if (transition.meta.changes && j.kind === 'backup')
+          await cleanupFailedBackup(env, j).catch(() => {});
         if (j.kind !== 'index') await settled(env, j.version_id);
         message.ack();
       } else
@@ -1288,6 +1295,35 @@ export async function consumeJobs(batch: MessageBatch, env: Env) {
               : 900
             : Math.min(900, 30 * 2 ** j.attempts),
         });
+    }
+  }
+}
+async function cleanupFailedBackup(env: Env, j: Pick<Job, 'id' | 'version_id' | 'generation'>) {
+  await abortBackupCheckpoint(env, j.version_id, backupCheckpointKey(j.version_id, j.generation));
+  await run(
+    env,
+    "UPDATE jobs SET error=substr(error,24) WHERE id=? AND generation=? AND status='failed' AND error LIKE 'backup_cleanup_pending:%'",
+    j.id,
+    j.generation,
+  );
+}
+export async function cleanupFailedBackups(env: Env) {
+  const jobs = await all<Job>(
+    env,
+    "SELECT id,version_id,generation FROM jobs WHERE kind='backup' AND status='failed' AND error LIKE 'backup_cleanup_pending:%' ORDER BY updated_at LIMIT 10",
+  );
+  for (const job of jobs) {
+    try {
+      await cleanupFailedBackup(env, job);
+    } catch {
+      // Rotate failed cleanup attempts so one unavailable upload cannot starve others.
+      await run(
+        env,
+        "UPDATE jobs SET updated_at=? WHERE id=? AND generation=? AND status='failed' AND error LIKE 'backup_cleanup_pending:%'",
+        Date.now(),
+        job.id,
+        job.generation,
+      );
     }
   }
 }
@@ -1317,6 +1353,7 @@ export async function housekeeping(env: Env) {
     ).bind(now, now - LEASE_MS),
   ]);
   await recoverBlockedBackupHashes(env, now);
+  await cleanupFailedBackups(env);
   await dispatchJobs(
     env,
     await all<Job>(
