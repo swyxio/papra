@@ -226,7 +226,12 @@ export async function provisionUser(
     ...TEAMS.filter((team) => email === OWNER_EMAIL || team.domain === email.split('@')[1]).map(
       (team) => ({
         ...team,
-        role: email === OWNER_EMAIL || email === `swyx@${team.domain}` ? 'owner' : 'member',
+        role:
+          email === OWNER_EMAIL || email === `swyx@${team.domain}`
+            ? 'owner'
+            : team.domain === 'latent.space' && email === 'adlin@latent.space'
+              ? 'admin'
+              : 'member',
       }),
     ),
   ];
@@ -263,7 +268,7 @@ export async function provisionUser(
     );
     statements.push(
       env.DB.prepare(
-        "INSERT INTO organization_members (id,organization_id,user_id,role,created_at,updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(organization_id,user_id) DO UPDATE SET role=excluded.role,updated_at=excluded.updated_at WHERE excluded.role='owner' AND organization_members.role!='owner'",
+        "INSERT INTO organization_members (id,organization_id,user_id,role,created_at,updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(organization_id,user_id) DO UPDATE SET role=excluded.role,updated_at=excluded.updated_at WHERE (excluded.role='owner' AND organization_members.role!='owner') OR (excluded.role='admin' AND organization_members.role='member')",
       ).bind(await id('org_mem', `${space.id}:${userId}`), space.id, userId, space.role, now, now),
     );
   }

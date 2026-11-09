@@ -14,7 +14,7 @@ Drive is a maintained AGPL Papra fork pinned to stable `@papra/app@26.6.2` (`cf0
 
 ## Access and document behavior
 
-Only verified Google accounts with exact domains `ai.engineer`, `latent.space`, `smol.ai`, plus exact owner `shawnthe1@gmail.com`, are admitted. Each account owns a private personal space. Ordinary domain members join their matching team as members; existing elevated roles survive login. The owner joins all three teams. Personal ownership is checked independently of membership rows.
+Only verified Google accounts with exact domains `ai.engineer`, `latent.space`, `smol.ai`, plus exact owner `shawnthe1@gmail.com`, are admitted. Each account owns a private personal space. Ordinary domain members join their matching team as members; existing elevated roles survive login. The verified account `adlin@latent.space` receives the admin role only in the Latent Space team on Google sign-in, including promotion of an existing ordinary membership; this does not grant ownership or access to other teams. The owner joins all three teams. Personal ownership is checked independently of membership rows.
 
 Each document has one home folder. Restricted ancestors require explicit reader/writer grants at every restricted level. Shortcuts do not grant access to the original. Team admins/personal owners manage external shares; public requests recheck the share creator's current authority, password unlock, expiry, enabled state and current original. Previously signed public R2 URLs expire within 60 seconds.
 
