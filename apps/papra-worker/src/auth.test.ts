@@ -219,6 +219,93 @@ describe('Worker Google admission', () => {
     ).toEqual([{ organization_id: getDriveTeamOrganizationId('latent.space') }]);
     await expect(provisionUser(env, { ...profile, email: 'outside@gmail.com' })).rejects.toThrow();
   });
+  test('Adlin receives admin only in Latent Space while other accounts and owners retain their roles', async () => {
+    const { env, DB } = await fixture();
+    const latentSpace = getDriveTeamOrganizationId('latent.space');
+    const aiEngineer = getDriveTeamOrganizationId('ai.engineer');
+    const colleagues = [
+      'colleague@latent.space',
+      'adlin+test@latent.space',
+      'adlin@ai.engineer',
+      'adlin@smol.ai',
+      'shawnthe1@gmail.com',
+      'swyx@latent.space',
+    ];
+    for (const email of colleagues)
+      await provisionUser(env, { sub: email, email, name: email, image: null });
+    const roles = () =>
+      DB.prepare('SELECT user_id,organization_id,role FROM organization_members ORDER BY id').all();
+    const before = (await roles()).results;
+    // An independent grant to another team must remain an ordinary membership.
+    await DB.prepare('INSERT INTO organization_email_grants VALUES (?,?,1)')
+      .bind(aiEngineer, 'adlin@latent.space')
+      .run();
+    const profile = { sub: 'adlin', email: ' Adlin@LATENT.SPACE ', name: 'Adlin', image: null };
+    const userId = await provisionUser(env, profile);
+    await provisionUser(env, profile);
+    const memberships = await DB.prepare(
+      'SELECT organization_id,role FROM organization_members WHERE user_id=? ORDER BY organization_id',
+    )
+      .bind(userId)
+      .all();
+    expect(memberships.results).toHaveLength(3);
+    expect(memberships.results).toEqual(
+      expect.arrayContaining([
+        { organization_id: latentSpace, role: 'admin' },
+        { organization_id: aiEngineer, role: 'member' },
+        { organization_id: await getDrivePersonalOrganizationId(userId), role: 'owner' },
+      ]),
+    );
+    expect((await roles()).results.filter((row) => row.user_id !== userId)).toEqual(before);
+    // Role provisioning must never downgrade an existing owner.
+    await DB.prepare(
+      "UPDATE organization_members SET role='owner' WHERE user_id=? AND organization_id=?",
+    )
+      .bind(userId, latentSpace)
+      .run();
+    await provisionUser(env, profile);
+    expect(
+      await DB.prepare(
+        'SELECT role FROM organization_members WHERE user_id=? AND organization_id=?',
+      )
+        .bind(userId, latentSpace)
+        .first(),
+    ).toEqual({ role: 'owner' });
+  });
+  test('verified Adlin Google login promotes an existing member without granting instance ownership', async () => {
+    const { app, env, DB } = await fixture();
+    const email = 'adlin@latent.space';
+    const userId = await provisionUser(env, {
+      sub: 'google-sub',
+      email,
+      name: 'Adlin',
+      image: null,
+    });
+    await DB.prepare(
+      "UPDATE organization_members SET role='member' WHERE user_id=? AND organization_id=?",
+    )
+      .bind(userId, getDriveTeamOrganizationId('latent.space'))
+      .run();
+    const login = await begin(app, env);
+    googleResponses(login.url.searchParams.get('nonce')!, { email }, { email });
+    const response = await app.request(
+      `${env.APP_URL}/api/auth/callback/google?state=${login.url.searchParams.get('state')}&code=code`,
+      { headers: { cookie: login.cookie } },
+      env,
+    );
+    const identity = await getIdentity(
+      new Request(env.APP_URL, { headers: { cookie: cookieFrom(response, 'session') } }),
+      env,
+    );
+    expect(identity?.email).toBe(email);
+    expect(identity?.isOwner).toBe(false);
+    expect(identity?.organizations).toHaveLength(2);
+    expect(identity?.organizations).toEqual(
+      expect.arrayContaining([
+        { id: getDriveTeamOrganizationId('latent.space'), name: 'Latent Space', role: 'admin' },
+      ]),
+    );
+  });
   test('explicit guest grants require verified email, enroll only the granted team and survive repeat sign-in', async () => {
     const { env, DB } = await fixture();
     const org = getDriveTeamOrganizationId('latent.space');
