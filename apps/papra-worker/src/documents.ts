@@ -8,6 +8,7 @@ import {
   canWriteFolder,
 } from './collaboration';
 import { signedDownload, signedMedia, s3 } from './storage';
+import { downloadBytes } from './download';
 import { mediaResponse, requestVideoPreview, previewDownload } from './video';
 import type { MediaDocument } from './video';
 import { abortBackupMultipartsForPurge, enqueueVersion } from './jobs';
@@ -17,22 +18,6 @@ import { fetchTranscript } from './transcripts';
 
 const base = '/api/organizations/:org/documents';
 const smallFileLimit = 32 * 1024 ** 2;
-async function downloadBytes(env: Env, key: string, mime: string, name?: string) {
-  const object = await env.FILES.get(key);
-  if (!object) throw error(404, 'File not found');
-  return new Response(object.body, {
-    headers: {
-      'Content-Type': mime,
-      'Content-Length': String(object.size),
-      'Cache-Control': 'private, no-store',
-      'X-Content-Type-Options': 'nosniff',
-      'Content-Disposition': name
-        ? `attachment; filename*=UTF-8''${encodeURIComponent(name)}`
-        : 'attachment',
-      'Content-Security-Policy': "sandbox; default-src 'none'",
-    },
-  });
-}
 async function document(
   env: Env,
   user: Identity,
@@ -396,8 +381,12 @@ export function registerDocumentRoutes(app: App) {
     if (d.is_deleted) throw error(404, 'Document is in trash');
     if (!d.current_version_id) throw error(409, 'Convert this Google document to PDF first');
     if (d.original_size <= smallFileLimit)
-      return downloadBytes(c.env, d.original_storage_key, d.mime_type, d.original_name);
-    return c.redirect(await signedDownload(c.env, d.original_storage_key, d.original_name), 302);
+      return downloadBytes(c.env, c.req.raw, d.original_storage_key, d.mime_type, d.original_name);
+    c.header('Cache-Control', 'private, no-store');
+    return c.redirect(
+      `${c.req.path.slice(0, -'/download'.length)}/versions/${encodeURIComponent(d.current_version_id)}/download`,
+      302,
+    );
   });
   app.get(`${base}/:doc/file`, async (c) => {
     if (c.req.query('direct') === 'inline') {
@@ -416,7 +405,7 @@ export function registerDocumentRoutes(app: App) {
     if (d.is_deleted) throw error(404, 'Document is in trash');
     if (!d.current_version_id) throw error(409, 'Convert this Google document to PDF first');
     if (d.original_size > smallFileLimit) throw error(413, 'Use a direct download for large files');
-    return downloadBytes(c.env, d.original_storage_key, d.mime_type);
+    return downloadBytes(c.env, c.req.raw, d.original_storage_key, d.mime_type);
   });
   app.get(`${base}/:doc/preview`, async (c) => {
     const d = await document(c.env, c.get('identity'), c.req.param('org'), c.req.param('doc'));
@@ -481,16 +470,21 @@ export function registerDocumentRoutes(app: App) {
   });
   app.get(`${base}/:doc/versions/:version/download`, async (c) => {
     const d = await document(c.env, c.get('identity'), c.req.param('org'), c.req.param('doc'));
+    if (d.is_deleted) throw error(404, 'Document is in trash');
     const v = await first(
       c.env,
-      'SELECT * FROM versions WHERE id=? AND document_id=?',
+      'SELECT storage_key,mime_type,original_name,size FROM versions WHERE id=? AND document_id=?',
       c.req.param('version'),
       d.id,
     );
     if (!v) throw error(404, 'Version not found');
-    if (v.size <= smallFileLimit)
-      return downloadBytes(c.env, v.storage_key, v.mime_type, v.original_name);
-    return c.redirect(await signedDownload(c.env, v.storage_key, v.original_name), 302);
+    return downloadBytes(
+      c.env,
+      c.req.raw,
+      v.storage_key,
+      v.size > smallFileLimit ? 'application/octet-stream' : v.mime_type,
+      v.original_name,
+    );
   });
   app.post(`${base}/:doc/versions/:version/restore`, async (c) => {
     const d = await document(
