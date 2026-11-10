@@ -20,6 +20,7 @@ test('raw HTML retains sandboxed download bytes and reports preview and integrit
     script: 'export default {fetch(){return new Response("ok")}}',
     compatibilityDate: '2026-07-21',
     d1Databases: ['DB'],
+    r2Buckets: ['FILES'],
   });
   instances.push(mf);
   const DB = await mf.getD1Database('DB');
@@ -43,10 +44,11 @@ test('raw HTML retains sandboxed download bytes and reports preview and integrit
     ),
   ]);
   const body = '<script>fetch("/api/users/me")</script>';
-  const get = vi.fn(async () => ({ body, size: body.length }));
+  const FILES = await mf.getR2Bucket('FILES');
+  await FILES.put('originals/v', body);
   const env = {
     DB,
-    FILES: { get },
+    FILES,
     R2_ENDPOINT: 'https://storage.example.com',
     R2_BUCKET: 'test',
     R2_ACCESS_KEY_ID: 'test-key',
@@ -78,7 +80,7 @@ test('raw HTML retains sandboxed download bytes and reports preview and integrit
   expect(download.headers.get('Content-Disposition')).toBe(
     "attachment; filename*=UTF-8''untrusted.html",
   );
-  expect(download.headers.get('Cache-Control')).toBe('private, no-store');
+  expect(download.headers.get('Cache-Control')).toBe('private, no-store, no-transform');
   expect(download.headers.get('Content-Security-Policy')).toBe("sandbox; default-src 'none'");
   expect(await download.text()).toBe(body);
   const versionDownload = await app.request(
@@ -107,13 +109,51 @@ test('raw HTML retains sandboxed download bytes and reports preview and integrit
   await DB.prepare("UPDATE versions SET size=? WHERE id='v'")
     .bind(32 * 1024 ** 2 + 1)
     .run();
-  get.mockClear();
-  for (const path of ['download', 'versions/v/download']) {
-    const large = await app.request(`/api/organizations/o/documents/d/${path}`, {}, env);
-    expect(large.status).toBe(302);
-    expect(large.headers.get('Location')).toMatch(/^https:\/\/storage\.example\.com\/test\//);
+  const current = '/api/organizations/o/documents/d/download';
+  const pinned = '/api/organizations/o/documents/d/versions/v/download';
+  const large = await app.request(current, {}, env);
+  expect(large.status).toBe(302);
+  expect(large.headers.get('Location')).toBe(pinned);
+  const head = await app.request(pinned, { method: 'HEAD' }, env);
+  expect(head.status).toBe(200);
+  expect(head.headers.get('Accept-Ranges')).toBe('bytes');
+  expect(head.headers.get('Content-Length')).toBe(String(body.length));
+  expect(await head.text()).toBe('');
+  const etag = head.headers.get('etag')!;
+  expect(etag).toMatch(/^".+"$/);
+  const ranged = async (range: string, ifRange?: string) =>
+    app.request(
+      pinned,
+      {
+        headers: { Range: range, ...(ifRange && { 'If-Range': ifRange }) },
+      },
+      env,
+    );
+  for (const [range, start, end] of [
+    ['bytes=10-', 10, body.length - 1],
+    ['bytes=-4', body.length - 4, body.length - 1],
+    ['bytes=0-0', 0, 0],
+    ['bytes=1-9999999999999', 1, body.length - 1],
+  ] as const) {
+    const part = await ranged(range, etag);
+    expect(part.status).toBe(206);
+    expect(part.headers.get('Content-Range')).toBe(`bytes ${start}-${end}/${body.length}`);
+    expect(part.headers.get('Content-Length')).toBe(String(end - start + 1));
+    expect(part.headers.get('ETag')).toBe(etag);
+    expect(await part.text()).toBe(body.slice(start, end + 1));
   }
-  expect(get).not.toHaveBeenCalled();
+  const pastEnd = await ranged(`bytes=${body.length}-`);
+  expect(pastEnd.status).toBe(416);
+  expect(pastEnd.headers.get('Content-Range')).toBe(`bytes */${body.length}`);
+  expect(await pastEnd.text()).toBe('');
+  const stale = await ranged('bytes=10-', '"old"');
+  expect(stale.status).toBe(200);
+  expect(await stale.text()).toBe(body);
+  // An existing download must still point to the same bytes after the current version changes.
+  await DB.prepare("UPDATE documents SET current_version_id=NULL WHERE id='d'").run();
+  expect((await app.request(current, {}, env)).status).toBe(409);
+  expect(await (await ranged('bytes=10-', etag)).text()).toBe(body.slice(10));
+  await DB.prepare("UPDATE documents SET current_version_id='v' WHERE id='d'").run();
   await DB.prepare("UPDATE versions SET size=? WHERE id='v'").bind(body.length).run();
   const preview = async () => app.request('/api/organizations/o/documents/d/preview', {}, env);
   expect(await (await preview()).json()).toMatchObject({
@@ -145,9 +185,15 @@ test('raw HTML retains sandboxed download bytes and reports preview and integrit
     reason: null,
   });
   await DB.prepare("UPDATE documents SET is_deleted=1 WHERE id='d'").run();
+  expect((await ranged('bytes=10-', etag)).status).toBe(404);
   expect((await app.request('/api/organizations/o/documents/d/download', {}, env)).status).toBe(
     404,
   );
+  await DB.prepare("UPDATE documents SET is_deleted=0 WHERE id='d'").run();
+  await DB.prepare(
+    "DELETE FROM organization_members WHERE organization_id='o' AND user_id='u'",
+  ).run();
+  expect((await ranged('bytes=10-', etag)).status).toBe(403);
 });
 
 test('failed purge cancels processing before storage deletion and resumes without the retention delay', async () => {
@@ -247,7 +293,7 @@ test('default delete preserves bytes and versions for restoration; permanent del
     FILES: {
       delete: filesDelete,
       list: async () => ({ objects: [], truncated: false }),
-      get: async () => ({ body: 'test', size: 4 }),
+      get: async () => ({ body: 'test', size: 4, uploaded: new Date(0), httpEtag: '"test"' }),
     },
     BACKUPS: { delete: backupsDelete, list: async () => ({ objects: [], truncated: false }) },
     INDEX: { deleteByIds: vi.fn() },
