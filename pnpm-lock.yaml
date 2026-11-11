@@ -658,9 +658,15 @@ importers:
       '@libpdf/core':
         specifier: 0.4.2
         version: 0.4.2
+      '@noble/hashes':
+        specifier: 2.0.1
+        version: 2.0.1
       '@papra/search-parser':
         specifier: workspace:*
         version: link:../../packages/search-parser
+      '@papra/std':
+        specifier: workspace:*
+        version: link:../../packages/std
       aws4fetch:
         specifier: 1.0.20
         version: 1.0.20
@@ -683,9 +689,6 @@ importers:
       '@cloudflare/workers-types':
         specifier: 5.20260916.1
         version: 5.20260916.1
-      '@noble/hashes':
-        specifier: 2.0.1
-        version: 2.0.1
       '@types/node':
         specifier: 'catalog:'
         version: 26.0.1

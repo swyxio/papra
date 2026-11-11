@@ -1,3 +1,4 @@
+import { storedFileMime } from './file-type';
 import type { App, Env, Identity } from './types';
 import { all, first, id, error, formatDocument, getDocument } from './db';
 import {
@@ -83,6 +84,7 @@ async function prepareCompletion(env: Env, user: Identity, u: Record<string, any
     object = await env.FILES.head(u.storage_key);
   }
   if (!object || object.size !== u.size) throw error(409, 'Stored object size does not match');
+  const mimeType = await storedFileMime(env.FILES, u.storage_key, u.file_name, u.size, u.mime_type);
   const now = Date.now(),
     stmts = [];
   if (!u.replacement)
@@ -94,7 +96,7 @@ async function prepareCompletion(env: Env, user: Identity, u: Record<string, any
         u.organization_id,
         user.userId,
         u.file_name,
-        u.mime_type,
+        mimeType,
         u.folder_id,
         now,
         now,
@@ -108,7 +110,7 @@ async function prepareCompletion(env: Env, user: Identity, u: Record<string, any
       u.document_id,
       u.storage_key,
       u.file_name,
-      u.mime_type,
+      mimeType,
       u.size,
       user.userId,
       now,
@@ -118,7 +120,7 @@ async function prepareCompletion(env: Env, user: Identity, u: Record<string, any
   stmts.push(
     env.DB.prepare(
       "UPDATE documents SET current_version_id=?,mime_type=?,content='',updated_at=? WHERE id=? AND EXISTS(SELECT 1 FROM uploads WHERE id=? AND status='uploading')",
-    ).bind(u.version_id, u.mime_type, now, u.document_id, u.id),
+    ).bind(u.version_id, mimeType, now, u.document_id, u.id),
   );
   stmts.push(
     env.DB.prepare(

@@ -1,3 +1,6 @@
+import { FeedbackPage, PendingPage } from './modules/feedback/report.component';
+import { ReceiptPage } from './modules/feedback/receipt.page';
+import { ReviewPage } from './modules/feedback/review.page';
 import { NewDocumentPage } from './modules/drive-signing/new-document.page';
 import { PublicReviewPage } from './modules/drive-signing/review.pages';
 import { DocumentEditorPage } from './modules/drive-signing/editor.pages';
@@ -44,6 +47,14 @@ export const routes: RouteDefinition[] = [
     path: '/',
     component: CurrentUserProvider,
     children: [
+      {
+        path: '/feedback/review',
+        component: () => (
+          <AppLayout>
+            <ReviewPage />
+          </AppLayout>
+        ),
+      },
       {
         path: '/',
         component: () => {
@@ -219,6 +230,30 @@ export const routes: RouteDefinition[] = [
   {
     path: [authPagesPaths.login, authPagesPaths.register],
     component: () => <PublicOnlyPage children={<LoginPage />} />,
+  },
+  {
+    path: '/feedback',
+    component: () => (
+      <PublicLayout>
+        <FeedbackPage />
+      </PublicLayout>
+    ),
+  },
+  {
+    path: '/feedback/receipt/:id',
+    component: () => (
+      <PublicLayout>
+        <ReceiptPage />
+      </PublicLayout>
+    ),
+  },
+  {
+    path: '/feedback/pending/:id',
+    component: () => (
+      <PublicLayout>
+        <PendingPage />
+      </PublicLayout>
+    ),
   },
   {
     path: '/about',

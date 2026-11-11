@@ -14,7 +14,9 @@
   "dependencies": {
     "@cloudflare/containers": "0.3.7",
     "@libpdf/core": "0.4.2",
+    "@noble/hashes": "2.0.1",
     "@papra/search-parser": "workspace:*",
+    "@papra/std": "workspace:*",
     "aws4fetch": "1.0.20",
     "docx": "9.7.1",
     "hono": "^4.12.18",
@@ -24,7 +26,6 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260916.1",
-    "@noble/hashes": "2.0.1",
     "@types/node": "catalog:",
     "esbuild": "0.28.1",
     "miniflare": "4.20260721.0",

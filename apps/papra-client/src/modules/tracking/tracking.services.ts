@@ -34,17 +34,22 @@ function createTrackingServices(): TrackingServices {
     return dummyTrackingServices;
   }
 
-  const posthog = new PostHog(apiKey, { host });
+  let posthog: PostHog | undefined;
+  const tracker = () => {
+    if (/^\/(?:feedback(?:\/|$)|s\/|sign\/|review\/)/.test(window.location.pathname))
+      return undefined;
+    return (posthog ??= new PostHog(apiKey, { host }));
+  };
 
   return {
     capture: ({ event, properties }) => {
-      posthog.capture(event, properties);
+      tracker()?.capture(event, properties);
     },
     reset: () => {
-      posthog.reset();
+      posthog?.reset();
     },
     identify: ({ userId, email }) => {
-      posthog.identify(userId, { email });
+      tracker()?.identify(userId, { email });
     },
   };
 }

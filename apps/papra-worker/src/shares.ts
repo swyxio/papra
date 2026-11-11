@@ -1,4 +1,8 @@
-import type { App, Env, Identity } from './types';
+import type { App, AppEnv, Env, Identity } from './types';
+import type { Context } from 'hono';
+import { getCookie, setCookie } from 'hono/cookie';
+import { trackSelectedDownload } from './feedback-observations';
+import { downloadBytes } from './download';
 import { jwtVerify, SignJWT } from 'jose';
 import { HTTPException } from 'hono/http-exception';
 import { approvedIdentityEmail, OWNER_EMAIL } from './auth';
@@ -8,8 +12,8 @@ import { shareUrl, newShareId, validShareId } from './share-urls';
 import { pendingUploadShare } from './upload-shares';
 import { fetchTranscript } from './transcripts';
 import { fetchTranscriptionStatus } from './processing';
-import { s3, signedDownload, signedMedia } from './storage';
-import { mediaResponse, requestVideoPreview, previewDownload } from './video';
+import { s3, signedMedia } from './storage';
+import { mediaResponse, requestVideoPreview, previewDownload, downloadPreviewBytes } from './video';
 import type { MediaDocument } from './video';
 
 type ShareRow = {
@@ -268,6 +272,41 @@ async function authorizedPublicShare(env: Env, token: string, authorization: str
   return row;
 }
 
+const downloadCookie = 'drive_share_unlock';
+function shareVersionsPath(token: string) {
+  return `/api/share-links/${encodeURIComponent(token)}/document/versions/`;
+}
+function setDownloadCookie(c: Context<AppEnv>, row: ShareRow, jwt: string) {
+  setCookie(c, downloadCookie, jwt, {
+    path: shareVersionsPath(row.token),
+    httpOnly: true,
+    secure: new URL(c.env.APP_URL).protocol === 'https:',
+    sameSite: 'Strict',
+    maxAge: ACCESS_SECONDS,
+  });
+}
+function selectVersionUrl(c: Context<AppEnv>, row: ShareRow, version: string) {
+  // A native browser download cannot supply a custom Authorization header. Copy only the
+  // already-verified grant, with its original expiry and password revision, to a path-scoped cookie.
+  const authorization = c.req.header('Authorization');
+  if (row.password_hash && authorization?.startsWith('Bearer '))
+    setDownloadCookie(c, row, authorization.slice(7));
+  return new URL(shareVersionsPath(row.token) + encodeURIComponent(version), c.env.APP_URL);
+}
+async function sharedDownloadDocument(c: Context<AppEnv>, token: string, version: string) {
+  const jwt = getCookie(c, downloadCookie);
+  const authorization = c.req.header('Authorization') ?? (jwt ? `Bearer ${jwt}` : undefined);
+  const row = await authorizedPublicShare(c.env, token, authorization);
+  // A shared link grants the current file only. A replacement requires a fresh download.
+  const doc = await c.env.DB.prepare(
+    'SELECT d.id,d.name,v.storage_key,v.original_name FROM documents d JOIN versions v ON v.document_id=d.id AND v.id=d.current_version_id WHERE d.id=? AND d.is_deleted=0 AND v.id=?',
+  )
+    .bind(row.document_id, version)
+    .first<{ id: string; name: string; storage_key: string; original_name: string }>();
+  if (!doc) return fail(410, 'Shared version unavailable');
+  return doc;
+}
+
 export function registerShareRoutes(app: App) {
   app.use('/api/share-links/*', async (context, next) => {
     context.header('Cache-Control', 'private, no-store');
@@ -460,7 +499,9 @@ export function registerShareRoutes(app: App) {
       !(await verifySharePassword(body.password, row.password_hash))
     )
       return fail(401, 'Invalid password');
-    return context.json({ accessToken: await unlock(context.env, row) });
+    const accessToken = await unlock(context.env, row);
+    setDownloadCookie(context, row, accessToken);
+    return context.json({ accessToken });
   });
   app.get('/api/share-links/:token/document', async (context) => {
     const pending = await pendingUploadShare(context.env, context.req.param('token'));
@@ -521,14 +562,37 @@ export function registerShareRoutes(app: App) {
         status: doc.processing_status,
       });
     }
-    const url = await signedDownload(
-      context.env,
-      doc.original_storage_key,
+    if (!doc.current_version_id) return fail(404, 'Original unavailable');
+    const versionUrl = selectVersionUrl(context, row, doc.current_version_id);
+    versionUrl.pathname += '/download';
+    if (context.req.query('direct') === 'download') {
+      await trackSelectedDownload(context, versionUrl);
+      return context.json({ url: versionUrl.href });
+    }
+    return context.redirect(versionUrl.href, 302);
+  });
+  const versionBase = '/api/share-links/:token/document/versions/:version';
+  app.get(`${versionBase}/download`, async (c) => {
+    const doc = await sharedDownloadDocument(c, c.req.param('token'), c.req.param('version'));
+    return downloadBytes(
+      c.env,
+      c.req.raw,
+      doc.storage_key,
+      'application/octet-stream',
       doc.original_name,
-      OBJECT_URL_SECONDS,
     );
-    if (context.req.query('direct') === 'download') return context.json({ url });
-    return context.redirect(url, 302);
+  });
+  app.get(`${versionBase}/previews/:profile/:digest/download`, async (c) => {
+    const doc = await sharedDownloadDocument(c, c.req.param('token'), c.req.param('version'));
+    return downloadPreviewBytes(
+      c.env,
+      c.req.raw,
+      doc.id,
+      c.req.param('version'),
+      c.req.param('profile'),
+      c.req.param('digest'),
+      doc.name,
+    );
   });
   const mediaBase = '/api/share-links/:token/document/media';
   app.get(mediaBase, async (c) => {
@@ -566,6 +630,13 @@ export function registerShareRoutes(app: App) {
     const doc = await getDocument(c.env, row.document_id);
     if (!doc || doc.is_deleted) return fail(410, 'Share link unavailable');
     c.header('Cache-Control', 'private, no-store');
-    return c.json(await previewDownload(c.env, doc as MediaDocument, c.req.query('quality')));
+    return c.json(
+      await previewDownload(
+        c.env,
+        doc as MediaDocument,
+        c.req.query('quality'),
+        selectVersionUrl(c, row, doc.current_version_id),
+      ),
+    );
   });
 }

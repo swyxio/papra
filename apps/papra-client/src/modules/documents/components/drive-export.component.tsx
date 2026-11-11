@@ -1,8 +1,10 @@
 import { ZipWriter, TextReader } from '@zip.js/zip.js';
 import { createSignal } from 'solid-js';
 import { getHttpErrorMessage } from '@/modules/shared/http/http-errors';
-import { apiClient } from '@/modules/shared/http/api-client';
+import { versionDownloadHref } from '@/modules/drive-capabilities/drive-capabilities.services';
 import { Button } from '@/modules/ui/components/button';
+import { apiClient } from '@/modules/shared/http/api-client';
+import type { Document } from '../documents.types';
 import { fetchOrganizationDocuments } from '../documents.services';
 import { fetchExportStream } from './drive-export.services';
 
@@ -44,17 +46,25 @@ export function DriveExport(props: { organizationId: string }) {
         if (!page.documents.length) break;
         for (const document of page.documents) {
           setStatus(`Exporting ${done + 1} of ${total}: ${document.name}`);
-          const entry = await apiClient<{ document: Record<string, unknown>; url: string }>({
-            method: 'GET',
-            path: `/api/organizations/${props.organizationId}/documents/${document.id}/export`,
+          const { document: entry } = await apiClient<{ document: Document }>({
+            path: `/api/organizations/${props.organizationId}/documents/${document.id}`,
           });
+          if (!entry.currentVersionId)
+            throw new Error(`Convert ${entry.name} to PDF before exporting.`);
           // Export filenames must exclude filesystem control characters.
           // eslint-disable-next-line no-control-regex
-          let name = document.name.replace(/[\\/\x00-\x1f]/g, '_') || document.id;
+          let name = entry.name.replace(/[\\/\x00-\x1f]/g, '_') || document.id;
           if (names.has(name)) name = `${document.id}-${name}`;
           names.add(name);
-          await writer.add(`files/${name}`, await fetchExportStream(entry.url), { level: 0 });
-          manifest.push(entry.document);
+          const url = versionDownloadHref(
+            props.organizationId,
+            document.id,
+            entry.currentVersionId,
+          );
+          await writer.add(`files/${name}`, fetchExportStream(url, entry.originalSize), {
+            level: 0,
+          });
+          manifest.push(entry);
           done++;
         }
         pageIndex++;

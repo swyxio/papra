@@ -1,5 +1,7 @@
 import { Miniflare } from 'miniflare';
 import { S3mini } from 's3mini';
+import { createHash } from 'node:crypto';
+import * as checksums from './checksum';
 import { getContainer } from '@cloudflare/containers';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -24,12 +26,13 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   for (const instance of instances.splice(0)) await instance.dispose();
 });
-async function fixture() {
+async function fixture(r2Buckets: string[] = []) {
   const mf = new Miniflare({
     modules: true,
     script: 'export default {fetch(){return new Response("ok")}}',
     compatibilityDate: '2026-07-21',
     d1Databases: ['DB'],
+    r2Buckets,
   });
   instances.push(mf);
   const DB = await mf.getD1Database('DB');
@@ -84,7 +87,7 @@ async function fixture() {
     INDEX: { upsert, deleteByIds: vi.fn() },
     AI: { run: embed },
   } as unknown as Env;
-  return { DB, env, upsert, send, embed };
+  return { DB, env, upsert, send, embed, mf };
 }
 function batch(body: unknown) {
   return { messages: [{ body, ack: vi.fn(), retry: vi.fn() }] } as unknown as MessageBatch;
@@ -655,11 +658,11 @@ test('purging aborts checkpointed multipart uploads and holds on provider failur
 });
 
 test.each([
-  { status: 503, kind: 'hash', body: 'There is no Container instance available' },
+  { status: 503, kind: 'process', body: 'There is no Container instance available' },
   { status: 404, kind: 'video:probe', body: 'There is no Container instance available' },
   {
     status: 500,
-    kind: 'hash',
+    kind: 'process',
     body: 'Failed to start container: Maximum number of running container instances exceeded. Try again later, or try configuring a higher value for max_instances',
   },
 ])(
@@ -721,7 +724,7 @@ test('an unrelated native 500 still exhausts its bounded retry budget', async ()
     .bind(1024 ** 2 + 1)
     .run();
   await DB.prepare(
-    "INSERT INTO jobs(id,version_id,kind,status,attempts,generation,created_at,updated_at) VALUES('native-job','v','hash','pending',2,0,1,1)",
+    "INSERT INTO jobs(id,version_id,kind,status,attempts,generation,created_at,updated_at) VALUES('native-job','v','process','pending',2,0,1,1)",
   ).run();
   await consumeJobs(batch({ jobId: 'native-job', generation: 0 }), env);
   expect(
@@ -1149,4 +1152,196 @@ test('text extraction schedules search while backups are pending and transfer fa
   expect(await DB.prepare("SELECT generation FROM jobs WHERE kind='index'").first()).toEqual({
     generation: 0,
   });
+});
+
+async function checksumFixture() {
+  const { DB, env, mf } = await fixture(['FILES', 'BACKUPS']);
+  env.FILES = (await mf.getR2Bucket('FILES')) as unknown as R2Bucket;
+  env.BACKUPS = (await mf.getR2Bucket('BACKUPS')) as unknown as R2Bucket;
+  env.R2_BUCKET = 'originals-fixture';
+  const bytes = Uint8Array.from(
+    { length: 1024 ** 2 + 17 },
+    (_, i) => (i * 13 + Math.floor(i / 1024)) & 255,
+  );
+  const digest = createHash('sha256').update(bytes).digest('hex');
+  await Promise.all([
+    env.FILES.put('originals/v', bytes),
+    env.BACKUPS.put('originals/v/original', bytes),
+    DB.batch([
+      DB.prepare("UPDATE versions SET size=? WHERE id='v'").bind(bytes.length),
+      DB.prepare(
+        "INSERT INTO jobs(id,version_id,kind,status,created_at,updated_at) VALUES ('original','v','hash','pending',1,1),('verify','v','backup-hash','pending',1,1)",
+      ),
+    ]),
+  ]);
+  const step = checksums.hashObjectStep;
+  vi.spyOn(checksums, 'hashObjectStep').mockImplementation(async (db, bucket, source) =>
+    step(db, bucket, source, 1024 ** 2),
+  );
+  const consume = async (jobId: string, generation = 0) =>
+    consumeJobs(batch({ jobId, generation }), env);
+  const progress = async (id: string) =>
+    DB.prepare('SELECT * FROM checksum_checkpoints WHERE job_id=?').bind(id).first();
+  const status = async (id: string) =>
+    DB.prepare('SELECT status,error,attempts FROM jobs WHERE id=?').bind(id).first();
+  return { env, DB, bytes, digest, consume, progress, status, step };
+}
+
+test('original and backup resume independently from a durable SHA-256 checkpoint and produce canonical receipts', async () => {
+  vi.mocked(getContainer).mockClear();
+  const f = await checksumFixture();
+  for (const job of ['original', 'verify']) {
+    await f.consume(job);
+    expect(await f.progress(job)).toMatchObject({
+      byte_offset: 1024 ** 2,
+      source_bucket: job === 'original' ? 'originals-fixture' : 'papra-drive-backups',
+      hash_state: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    expect(await f.status(job)).toEqual({ status: 'pending', error: null, attempts: 0 });
+    await f.consume(job);
+    expect(await f.status(job)).toEqual({ status: 'done', error: null, attempts: 1 });
+    expect(await f.progress(job)).toBeNull();
+  }
+  expect(await f.DB.prepare("SELECT sha256 FROM versions WHERE id='v'").first('sha256')).toBe(
+    f.digest,
+  );
+  expect(await (await f.env.BACKUPS.get('versions/v/original-hash.json'))!.json()).toMatchObject({
+    sha256: f.digest,
+    byteSize: f.bytes.length,
+  });
+  expect(await (await f.env.BACKUPS.get('versions/v/original-backup.json'))!.json()).toMatchObject({
+    sha256: f.digest,
+    size: f.bytes.length,
+    independentBackupHashVerified: true,
+  });
+  expect(getContainer).not.toHaveBeenCalled();
+});
+
+test('a changed immutable source is refused, and a new generation hashes the new object from the start', async () => {
+  const f = await checksumFixture();
+  await f.consume('original');
+  f.bytes[5] ^= 255;
+  await f.env.FILES.put('originals/v', f.bytes);
+  await f.consume('original');
+  expect(await f.status('original')).toMatchObject({
+    status: 'failed',
+    error: 'checksum_source_changed',
+  });
+  expect(await f.DB.prepare("SELECT sha256 FROM versions WHERE id='v'").first('sha256')).toBeNull();
+  await f.DB.prepare(
+    "UPDATE jobs SET generation=1,status='pending',attempts=0 WHERE id='original'",
+  ).run();
+  await f.consume('original', 1);
+  expect(await f.progress('original')).toMatchObject({ generation: 1, byte_offset: 1024 ** 2 });
+  await f.consume('original', 1);
+  await f.consume('verify');
+  await f.consume('verify');
+  expect(await f.status('verify')).toMatchObject({
+    status: 'failed',
+    error: 'backup_checksum_mismatch',
+  });
+  expect(await f.env.BACKUPS.head('versions/v/original-backup.json')).toBeNull();
+});
+
+test('a resumed range starts at the saved offset and lost leases cannot advance it', async () => {
+  const f = await checksumFixture();
+  await f.consume('original');
+  const get = vi.fn(async (key: string, opts: R2GetOptions & { onlyIf: R2Conditional }) =>
+    f.env.FILES.get(key, opts),
+  );
+  const bucket = { get, head: async (key: string) => f.env.FILES.head(key) } as unknown as R2Bucket;
+  const source = {
+    jobId: 'original',
+    versionId: 'v',
+    generation: 0,
+    lease: 'old-lease',
+    bucketName: 'originals-fixture',
+    key: 'originals/v',
+    size: f.bytes.length,
+  };
+  await f.DB.prepare(
+    "UPDATE jobs SET status='processing',lease_token='new-lease' WHERE id='original'",
+  ).run();
+  await expect(f.step(f.env.DB, bucket, source)).rejects.toMatchObject({
+    code: 'processing_lease_lost',
+  });
+  expect(get).toHaveBeenCalledWith('originals/v', {
+    range: { offset: 1024 ** 2, length: 17 },
+    onlyIf: { etagMatches: expect.any(String) },
+  });
+  expect(await f.progress('original')).toMatchObject({ byte_offset: 1024 ** 2 });
+  await expect(f.step(f.env.DB, bucket, { ...source, lease: 'new-lease' })).resolves.toBe(f.digest);
+  get.mockClear();
+  // A lost final receipt write can retry without reading either the prefix or the tail again.
+  await expect(f.step(f.env.DB, bucket, { ...source, lease: 'new-lease' })).resolves.toBe(f.digest);
+  expect(get).not.toHaveBeenCalled();
+});
+
+test('an interrupted or misaddressed range cannot advance a checksum; purge releases its checkpoint', async () => {
+  const f = await checksumFixture();
+  await f.consume('original');
+  await f.DB.prepare(
+    "UPDATE jobs SET status='processing',lease_token='lease' WHERE id='original'",
+  ).run();
+  const head = await f.env.FILES.head('originals/v');
+  const source = {
+    jobId: 'original',
+    versionId: 'v',
+    generation: 0,
+    lease: 'lease',
+    bucketName: 'originals-fixture',
+    key: 'originals/v',
+    size: f.bytes.length,
+  };
+  const range = { offset: 1024 ** 2, length: 17 };
+  const bucket = {
+    head: async () => head,
+    get: async () => ({
+      version: head!.version,
+      etag: head!.etag,
+      size: head!.size,
+      range,
+      body: new Response(new Uint8Array(16)).body,
+    }),
+  } as unknown as R2Bucket;
+  await expect(f.step(f.env.DB, bucket, source)).rejects.toMatchObject({
+    code: 'checksum_incomplete_range',
+  });
+  range.offset = 0;
+  await expect(f.step(f.env.DB, bucket, source)).rejects.toMatchObject({
+    code: 'checksum_range_mismatch',
+  });
+  await f.DB.prepare("UPDATE documents SET is_deleted=2 WHERE id='d'").run();
+  await expect(f.step(f.env.DB, f.env.FILES, source)).rejects.toMatchObject({
+    code: 'processing_lease_lost',
+  });
+  expect(await f.progress('original')).toMatchObject({ byte_offset: 1024 ** 2 });
+  await f.DB.prepare("DELETE FROM versions WHERE id='v'").run();
+  expect(await f.progress('original')).toBeNull();
+});
+
+test('a queued legacy video probe recognizes its sidecar before reserving native compute', async () => {
+  const { DB, mf, env } = await fixture(['FILES']);
+  env.FILES = (await mf.getR2Bucket('FILES')) as unknown as R2Bucket;
+  const bytes = new ArrayBuffer(64);
+  const header = new DataView(bytes);
+  header.setUint32(0, 0x00051607);
+  header.setUint32(4, 0x00020000);
+  header.setUint16(24, 1);
+  await env.FILES.put('originals/v', bytes);
+  await DB.batch([
+    DB.prepare(
+      "UPDATE versions SET mime_type='video/mp4',original_name='._camera.mp4',size=64 WHERE id='v'",
+    ),
+    DB.prepare("UPDATE documents SET mime_type='video/mp4' WHERE id='d'"),
+    DB.prepare(
+      "INSERT INTO jobs(id,version_id,kind,status,created_at,updated_at) VALUES('probe','v','video:probe','pending',1,1)",
+    ),
+  ]);
+  await consumeJobs(batch({ jobId: 'probe', generation: 0 }), env);
+  expect(await DB.prepare("SELECT status FROM jobs WHERE id='probe'").first('status')).toBe('done');
+  expect(await DB.prepare("SELECT mime_type FROM documents WHERE id='d'").first('mime_type')).toBe(
+    'application/applefile',
+  );
+  expect(await DB.prepare('SELECT count(*) AS n FROM video_compute_attempts').first('n')).toBe(0);
 });

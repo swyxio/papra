@@ -108,3 +108,5 @@ Build logs and retries are in Cloudflare → papra-drive → Deployments.
 The managed build token stays in Cloudflare; no personal OAuth refresh token or
 application secret belongs in GitHub. Database schema changes still require an
 explicit reviewed migration; this pipeline never reinitializes the live database.
+
+Private feedback intake, reviewer decisions, the D1 migration, and Devin setup are documented in [Private feedback](FEEDBACK.md).

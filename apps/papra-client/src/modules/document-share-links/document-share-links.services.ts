@@ -192,17 +192,23 @@ export async function fetchSharedDocumentDirect({
   token,
   accessToken,
   mode,
+  onObserved,
 }: {
   token: string;
   accessToken?: string;
   mode: 'download' | 'preview' | 'media';
+  onObserved?: (response: Response) => void;
 }) {
   return httpClient<{ url: string | null; status?: string }>({
     method: 'GET',
     baseUrl: buildTimeConfig.baseApiUrl,
     url: `/api/share-links/${token}/document/file`,
     query: { direct: mode },
-    headers: getAuthorizationHeaders({ accessToken }),
+    ...(onObserved ? { retry: 0, onResponse: ({ response }) => onObserved(response) } : {}),
+    headers: {
+      ...getAuthorizationHeaders({ accessToken }),
+      ...(onObserved ? { 'X-Feedback-Track': '1' } : {}),
+    },
   });
 }
 

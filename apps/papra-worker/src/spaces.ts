@@ -1,3 +1,4 @@
+import { canReviewFeedback } from './auth';
 import type { App } from './types';
 import { all, first, run, id, error, camel, admin } from './db';
 import {
@@ -16,7 +17,7 @@ export function registerSpaceRoutes(app: App) {
         emailVerified: true,
         maxOrganizationCount: 4,
         twoFactorEnabled: false,
-        permissions: [],
+        permissions: canReviewFeedback(c.get('identity')) ? ['feedback:review'] : [],
       },
     });
   });
@@ -35,7 +36,7 @@ export function registerSpaceRoutes(app: App) {
       user: {
         ...camel((await first(c.env, 'SELECT * FROM users WHERE id=?', c.get('identity').userId))!),
         emailVerified: true,
-        permissions: [],
+        permissions: canReviewFeedback(c.get('identity')) ? ['feedback:review'] : [],
       },
     });
   });

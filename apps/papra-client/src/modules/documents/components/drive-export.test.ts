@@ -1,11 +1,4 @@
-import {
-  BlobReader,
-  HttpReader,
-  TextReader,
-  TextWriter,
-  ZipReader,
-  ZipWriter,
-} from '@zip.js/zip.js';
+import { BlobReader, TextReader, TextWriter, ZipReader, ZipWriter } from '@zip.js/zip.js';
 import { expect, test, vi } from 'vitest';
 import { fetchExportStream } from './drive-export.services';
 
@@ -40,58 +33,78 @@ test('the real ZIP writer releases the file stream before a successful file-syst
   await reader.close();
 });
 
-test('export streams a normal GET when download CORS does not expose range capability headers', async () => {
-  const content = 'TEST ONLY: exported file contents';
-  const request = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
-    expect(init?.method).not.toBe('HEAD');
-    const response = new Response(content, {
-      status: 200,
-      headers: { 'Content-Type': 'application/pdf' },
+test('an interrupted second file resumes inside the ZIP without repeating earlier bytes', async () => {
+  const src = new TextEncoder().encode('second entry');
+  const request = vi
+    .fn<typeof fetch>()
+    .mockImplementationOnce(async () => {
+      let sent = false;
+      return new Response(
+        new ReadableStream({
+          pull(controller) {
+            if (sent) controller.error(new Error('connection dropped'));
+            else controller.enqueue(src.subarray(0, 4));
+            sent = true;
+          },
+        }),
+        { headers: { 'ETag': '"v2"', 'Content-Length': String(src.length) } },
+      );
+    })
+    .mockImplementationOnce(async (_url, opts) => {
+      expect(opts?.headers).toEqual({ 'Range': 'bytes=4-', 'If-Range': '"v2"' });
+      return new Response(src.subarray(4), {
+        status: 206,
+        headers: {
+          'ETag': '"v2"',
+          'Content-Length': String(src.length - 4),
+          'Content-Range': `bytes 4-${src.length - 1}/${src.length}`,
+        },
+      });
     });
-    vi.spyOn(response, 'arrayBuffer').mockRejectedValue(
-      new Error('Export must stream, not buffer the file'),
-    );
-    return response;
-  });
-  // The old HttpReader requires Accept-Ranges, which signed object CORS need not expose.
-  await expect(
-    new HttpReader('https://r2.example/file', {
-      preventHeadRequest: true,
-      useRangeHeader: true,
-      fetch: request,
-    }).init!(),
-  ).rejects.toThrow('HTTP Range not supported');
-  request.mockClear();
   const chunks: Uint8Array[] = [];
-  const destination = new WritableStream<Uint8Array>({
-    write(chunk) {
-      chunks.push(chunk.slice());
-    },
-  });
-  const zip = new ZipWriter(destination, { zip64: true });
-  await zip.add('files/test.pdf', await fetchExportStream('https://r2.example/file', request), {
-    level: 0,
-  });
-  await zip.close();
-  expect(request).toHaveBeenCalledOnce();
-  expect(request).toHaveBeenCalledWith('https://r2.example/file', { credentials: 'omit' });
-  const reader = new ZipReader(
-    new BlobReader(new Blob(chunks.map((chunk) => new Uint8Array(chunk)))),
+  const zip = new ZipWriter(
+    new WritableStream<Uint8Array>({
+      write(chunk) {
+        chunks.push(chunk.slice());
+      },
+    }),
   );
-  const [entry] = await reader.getEntries();
-  if (!('getData' in entry) || !entry.getData)
-    throw new Error('Export entry must be a readable file');
-  expect(await entry.getData(new TextWriter())).toBe(content);
+  await zip.add('first', new TextReader('first entry'), { level: 0 });
+  await zip.add('second', fetchExportStream('/version/v2', src.length, request), { level: 0 });
+  await zip.close();
+  const reader = new ZipReader(new BlobReader(new Blob(chunks.map((c) => new Uint8Array(c)))));
+  const entries = await reader.getEntries();
+  const contents = [];
+  for (const entry of entries) {
+    if (!('getData' in entry) || !entry.getData) throw new Error('Missing export entry');
+    contents.push(await entry.getData(new TextWriter()));
+  }
+  expect(contents).toEqual(['first entry', 'second entry']);
+  expect(request).toHaveBeenCalledTimes(2);
   await reader.close();
 });
-test('export refuses expired or missing download responses instead of saving an error page', async () => {
-  await expect(
-    fetchExportStream(
-      'https://r2.example/file',
-      async () => new Response('Access denied', { status: 403 }),
-    ),
-  ).rejects.toThrow('HTTP 403');
-  await expect(
-    fetchExportStream('https://r2.example/file', async () => new Response(null, { status: 204 })),
-  ).rejects.toThrow('HTTP 204');
-});
+
+test.each([403, 200, 206])(
+  'does not append an unauthorized or mismatched resume response (%i)',
+  async (status) => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response('a', { headers: { 'ETag': '"expected"', 'Content-Length': '2' } }),
+      )
+      .mockResolvedValueOnce(
+        new Response('b', {
+          status,
+          headers: {
+            'ETag': '"different"',
+            'Content-Length': '1',
+            'Content-Range': 'bytes 1-1/2',
+          },
+        }),
+      );
+    await expect(new Response(fetchExportStream('/version/v', 2, request)).text()).rejects.toThrow(
+      'Could not verify',
+    );
+    expect(request).toHaveBeenCalledTimes(2);
+  },
+);

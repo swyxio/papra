@@ -8,8 +8,9 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from '@playwright/test';
 import { Hono } from 'hono';
 import { Miniflare } from 'miniflare';
-import { expect, test, vi } from 'vitest';
+import { test, vi } from 'vitest';
 import { registerDocumentRoutes } from '../src/documents';
+import { registerShareRoutes, hashSharePassword } from '../src/shares';
 
 // The download routes never invoke a processing container.
 vi.mock('@cloudflare/containers', () => ({
@@ -22,16 +23,21 @@ const size = 33 * 1024 ** 2;
 const prefixSize = 8 * 1024 ** 2;
 const holdMs = 305_000;
 const expectedHash = '06a614dd314e5b17f76032e6d65fac45cb9a22dc1a178afa002357c29e754c61';
-const startPath = '/api/organizations/o/documents/d/download';
-const versionPath = '/api/organizations/o/documents/d/versions/v/download';
+const shareToken = 'synthetic_share_test_1';
+const shareBase = '/api/share-links/' + shareToken;
+const previewQuality = '720-full-v2';
+const sharedPreviewPath =
+  shareBase + '/document/versions/v/previews/' + previewQuality + '/' + expectedHash + '/download';
 
-async function createApp(mf) {
+async function createApp(mf, shared) {
   const DB = await mf.getD1Database('DB');
   const FILES = await mf.getR2Bucket('FILES');
+  const name = shared ? 'preview-fixture.mp4' : 'resume.bin';
+  const mime = shared ? 'video/mp4' : 'application/octet-stream';
   await DB.exec(await readFile(new URL('../schema.sql', import.meta.url), 'utf8'));
   await DB.batch([
     DB.prepare(
-      "INSERT INTO users(id,google_sub,email,name,created_at,updated_at) VALUES('u','sub','u@fixture.invalid','Fixture',1,1)",
+      "INSERT INTO users(id,google_sub,email,email_verified,name,created_at,updated_at) VALUES('u','sub','fixture@latent.space',1,'Fixture',1,1)",
     ),
     DB.prepare(
       "INSERT INTO organizations(id,name,created_at,updated_at) VALUES('o','Fixture',1,1)",
@@ -43,20 +49,30 @@ async function createApp(mf) {
       "INSERT INTO folders(id,organization_id,name,is_home,created_by,created_at,updated_at) VALUES('fld_home_o','o','Home',1,'u',1,1)",
     ),
     DB.prepare(
-      "INSERT INTO documents(id,organization_id,created_by,name,mime_type,current_version_id,home_folder_id,created_at,updated_at) VALUES('d','o','u','resume.bin','application/octet-stream','v','fld_home_o',1,1)",
-    ),
+      "INSERT INTO documents(id,organization_id,created_by,name,mime_type,current_version_id,home_folder_id,created_at,updated_at) VALUES('d','o','u',?,?,'v','fld_home_o',1,1)",
+    ).bind(name, mime),
     DB.prepare(
-      "INSERT INTO versions(id,document_id,storage_key,original_name,size,mime_type,created_by,created_at) VALUES('v','d','originals/v','resume.bin',?,'application/octet-stream','u',1)",
-    ).bind(size),
+      "INSERT INTO versions(id,document_id,storage_key,original_name,size,mime_type,created_by,created_at) VALUES('v','d','originals/v',?,?,?,'u',1)",
+    ).bind(name, size, mime),
   ]);
+  if (shared) {
+    await DB.batch([
+      DB.prepare(
+        "INSERT INTO share_links(id,token,created_by,organization_id,document_id,password_hash,is_enabled,created_at,updated_at) VALUES(?,?,'u','o','d',?,1,1,1)",
+      ).bind(shareToken, shareToken, await hashSharePassword('synthetic password')),
+      DB.prepare(
+        "INSERT INTO video_previews(version_id,quality,storage_key,size,sha256,created_at) VALUES('v',?,'derived/v/preview',?,?,1)",
+      ).bind(previewQuality, size, expectedHash),
+    ]);
+  }
   await FILES.put(
-    'originals/v',
+    shared ? 'derived/v/preview' : 'originals/v',
     createHash('shake256', { outputLength: size })
       .update('SwyxDrive Chrome resume fixture v1')
       .digest(),
   );
   const app = new Hono();
-  app.use('*', async (c, next) => {
+  app.use('/api/organizations/*', async (c, next) => {
     if (c.req.header('cookie') !== 'probe=session') return c.text('Fixture sign-in required', 401);
     c.set('identity', {
       userId: 'u',
@@ -69,7 +85,16 @@ async function createApp(mf) {
     return next();
   });
   registerDocumentRoutes(app);
-  return { app, env: { DB, FILES } };
+  registerShareRoutes(app);
+  return {
+    app,
+    env: {
+      DB,
+      FILES,
+      AUTH_SECRET: 'only-for-the-local-synthetic-fixture',
+      SHARE_PASSWORD_LIMITER: { limit: async () => ({ success: true }) },
+    },
+  };
 }
 
 // An isolated Chrome extension controls the native download manager using its public API.
@@ -99,7 +124,7 @@ async function launchBrowser(directory) {
   });
 }
 
-test('Chrome finishes an interrupted SwyxDrive original after its old five-minute link lifetime', async () => {
+async function verifyResume({ label, shared, startPath, versionPath }, { expect }) {
   const directory = await mkdtemp(join(tmpdir(), 'swyxdrive-resume-'));
   const mf = new Miniflare({
     modules: true,
@@ -109,6 +134,7 @@ test('Chrome finishes an interrupted SwyxDrive original after its old five-minut
     r2Buckets: ['FILES'],
   });
   const metrics = {
+    label,
     attempts: 1,
     verifiedCompletions: 0,
     resumeLatencyMs: null,
@@ -121,14 +147,22 @@ test('Chrome finishes an interrupted SwyxDrive original after its old five-minut
   const ranges = [];
   let transportError;
   try {
-    const { app, env } = await createApp(mf);
+    const { app, env } = await createApp(mf, shared);
     server = createServer(async (req, res) => {
       try {
         if (req.url === '/') {
           res.writeHead(200, { 'Content-Type': 'text/html' });
           return res.end('<a href="' + startPath + '" download>Download fixture</a>');
         }
-        const response = await app.request(new URL(req.url, origin), { headers: req.headers }, env);
+        const response = await app.request(
+          new URL(req.url, origin),
+          {
+            method: req.method,
+            headers: req.headers,
+            body: req.method === 'POST' ? await new Response(req).text() : undefined,
+          },
+          env,
+        );
         res.writeHead(response.status, Object.fromEntries(response.headers));
         if (response.status === 200 && !firstResponse && req.url === versionPath) {
           firstResponse = res;
@@ -158,7 +192,8 @@ test('Chrome finishes an interrupted SwyxDrive original after its old five-minut
             await new Promise((resolve, reject) =>
               res.write(chunk, (err) => (err ? reject(err) : resolve())),
             );
-            if (response.status === 200 || response.status === 206) served += chunk.length;
+            if (req.url === versionPath && (response.status === 200 || response.status === 206))
+              served += chunk.length;
           }
         }
         res.end();
@@ -170,8 +205,10 @@ test('Chrome finishes an interrupted SwyxDrive original after its old five-minut
     server.listen(0, '127.0.0.1');
     await once(server, 'listening');
     origin = 'http://127.0.0.1:' + server.address().port;
+    env.APP_URL = origin;
     context = await launchBrowser(directory);
-    await context.addCookies([{ url: origin, name: 'probe', value: 'session', sameSite: 'Lax' }]);
+    if (!shared)
+      await context.addCookies([{ url: origin, name: 'probe', value: 'session', sameSite: 'Lax' }]);
     const worker = context.serviceWorkers()[0] || (await context.waitForEvent('serviceworker'));
     const page = await context.newPage();
     const devtools = await context.newCDPSession(page);
@@ -180,6 +217,27 @@ test('Chrome finishes an interrupted SwyxDrive original after its old five-minut
       downloadPath: directory,
     });
     await page.goto(origin);
+    if (shared) {
+      // The UI prepares a native link using the unlock token. Chrome's subsequent
+      // navigation and resume cannot add Authorization headers themselves.
+      await page.evaluate(
+        async ({ shareBase, quality }) => {
+          const verification = await fetch(shareBase + '/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password: 'synthetic password' }),
+          });
+          const { accessToken } = await verification.json();
+          const selection = await fetch(shareBase + '/document/media/download?quality=' + quality, {
+            headers: { Authorization: 'Bearer ' + accessToken },
+          });
+          if (!selection.ok)
+            throw new Error('Shared preview preparation failed: ' + selection.status);
+          document.querySelector('a').href = (await selection.json()).url;
+        },
+        { shareBase, quality: previewQuality },
+      );
+    }
     await page.getByText('Download fixture').click();
     const current = async () =>
       worker.evaluate(async () => {
@@ -229,7 +287,9 @@ test('Chrome finishes an interrupted SwyxDrive original after its old five-minut
     if (process.env.GITHUB_STEP_SUMMARY) {
       await appendFile(
         process.env.GITHUB_STEP_SUMMARY,
-        '### Chrome download resume (local Worker)\n\n' +
+        '### Chrome download resume (' +
+          label +
+          ', local Worker)\n\n' +
           'Verified completions / attempts: **' +
           metrics.verifiedCompletions +
           '/' +
@@ -249,4 +309,19 @@ test('Chrome finishes an interrupted SwyxDrive original after its old five-minut
     await mf.dispose();
     await rm(directory, { recursive: true, force: true });
   }
-});
+}
+
+test.concurrent.for([
+  {
+    label: 'member original',
+    shared: false,
+    startPath: '/api/organizations/o/documents/d/download',
+    versionPath: '/api/organizations/o/documents/d/versions/v/download',
+  },
+  {
+    label: 'password-protected shared preview',
+    shared: true,
+    startPath: '#',
+    versionPath: sharedPreviewPath,
+  },
+])('Chrome resumes $label after five minutes', verifyResume);
