@@ -30,6 +30,16 @@ test('atomic snapshot remains consistent through live edits, retries, and restor
       "INSERT INTO users(id,google_sub,email,name,created_at,updated_at) VALUES('u','sub','u@smol.ai','Original name',1,1)",
     ),
     DB.prepare("INSERT INTO organizations(id,name,created_at,updated_at) VALUES('o','Org',1,1)"),
+    DB.prepare(
+      "INSERT INTO feedback_bugs(id,fingerprint,operation,status,updated_at) VALUES('b','test','web-help','needs-review',1)",
+    ),
+    DB.prepare(
+      "INSERT INTO feedback_reports(id,submission_id,receipt_hash,payload_hash,bug_id,operation,description,diagnostics,created_at) VALUES('r','s','hash','payload','b','web-help','Sample report','{}',1)",
+    ),
+    DB.prepare(
+      "INSERT INTO feedback_messages(report_id,id,role,body,created_at) VALUES('r','m','reviewer','Follow-up',1)",
+    ),
+    DB.prepare("INSERT INTO feedback_transfer_failures VALUES('attempt','{}',1)"),
   ]);
   await DB.batch(
     Array.from({ length: 1041 }, (_, i) =>
@@ -98,4 +108,14 @@ test('atomic snapshot remains consistent through live edits, retries, and restor
     expect(
       (await restored.prepare(`SELECT count(*) n FROM ${table}`).first<{ n: number }>())!.n,
     ).toBe(capture.tables.find((x) => x.table === table)!.rows);
+  expect(
+    await restored
+      .prepare(
+        "SELECT body FROM feedback_messages JOIN feedback_reports ON report_id=feedback_reports.id WHERE receipt_hash='hash'",
+      )
+      .first('body'),
+  ).toBe('Follow-up');
+  expect(
+    await restored.prepare('SELECT count(*) FROM feedback_transfer_failures').first('count(*)'),
+  ).toBe(0);
 }, 60000);

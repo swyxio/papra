@@ -1,3 +1,4 @@
+import { useLocation } from '@solidjs/router';
 import type { ParentComponent } from 'solid-js';
 import type { Config, RuntimePublicConfig } from './config';
 import { useQuery } from '@tanstack/solid-query';
@@ -28,8 +29,12 @@ export function useConfig() {
 
 export const ConfigProvider: ParentComponent = (props) => {
   const { t } = useI18n();
+  const location = useLocation();
+  // The public form can save an offline submission using the compiled configuration.
+  const publicFeedback = () => /^\/feedback(?:$|\/(?:pending|receipt)\/)/.test(location.pathname);
   const query = useQuery(() => ({
     queryKey: ['config'],
+    enabled: !publicFeedback(),
     queryFn: fetchPublicConfig,
     refetchOnWindowFocus: false,
   }));
@@ -52,6 +57,11 @@ export const ConfigProvider: ParentComponent = (props) => {
 
   return (
     <Switch>
+      <Match when={publicFeedback()}>
+        <ConfigContext.Provider value={{ config: buildTimeConfig }}>
+          {props.children}
+        </ConfigContext.Provider>
+      </Match>
       <Match when={query.error}>
         <EmptyState
           title={t('config.server-unreachable.title')}

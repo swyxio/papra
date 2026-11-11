@@ -1,3 +1,6 @@
+import { registerPublicFeedback, registerReviewerFeedback } from './feedback';
+import { expireTransferFailures, registerFeedbackObservations } from './feedback-observations';
+import { processFeedbackWork } from './feedback-workflow';
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { bodyLimit } from 'hono/body-limit';
@@ -84,6 +87,8 @@ app.get('/api/config', (c) =>
   }),
 );
 registerAuthRoutes(app);
+registerFeedbackObservations(app);
+registerPublicFeedback(app);
 app.use('/api/*', async (c, next) => {
   if (
     c.req.path.startsWith('/api/share-links/') ||
@@ -113,6 +118,7 @@ app.use('/api/*', async (c, next) => {
   c.set('identity', identity);
   await next();
 });
+registerReviewerFeedback(app);
 registerSpaceRoutes(app);
 registerEmailTestRoutes(app);
 registerDocumentRoutes(app);
@@ -160,6 +166,8 @@ export default {
     if (ordinary.length) await consumeJobs({ ...batch, messages: ordinary }, env);
   },
   scheduled: async (_event: ScheduledController, env: Env, ctx: ExecutionContext) => {
+    ctx.waitUntil(processFeedbackWork(env));
+    ctx.waitUntil(expireTransferFailures(env));
     ctx.waitUntil(Promise.all([housekeeping(env), purgeExpiredTrash(env), repairSigning(env)]));
   },
 };

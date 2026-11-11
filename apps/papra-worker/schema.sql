@@ -65,3 +65,12 @@ CREATE TABLE video_preview_progress(job_id TEXT PRIMARY KEY REFERENCES jobs(id) 
 
 CREATE TABLE IF NOT EXISTS organization_email_grants ( organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE, email TEXT NOT NULL CHECK(email = lower(trim(email))), created_at INTEGER NOT NULL, PRIMARY KEY(email, organization_id) );
 CREATE TRIGGER IF NOT EXISTS revoke_organization_email_grant AFTER DELETE ON organization_email_grants BEGIN DELETE FROM organization_members WHERE organization_id=OLD.organization_id AND role='member' AND user_id IN (SELECT id FROM users WHERE email=OLD.email); END;
+CREATE TABLE IF NOT EXISTS feedback_bugs(id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL UNIQUE, operation TEXT NOT NULL, status TEXT NOT NULL, generation INTEGER NOT NULL DEFAULT 1, trusted_stage TEXT, trusted_status INTEGER, trusted_signature TEXT, server_build TEXT, updated_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS feedback_reports(id TEXT PRIMARY KEY, submission_id TEXT NOT NULL UNIQUE, receipt_hash TEXT NOT NULL, payload_hash TEXT NOT NULL, bug_id TEXT NOT NULL REFERENCES feedback_bugs(id), operation TEXT NOT NULL, description TEXT NOT NULL, contact TEXT, attachment TEXT, diagnostics TEXT NOT NULL, server_diagnostics TEXT, human_only INTEGER NOT NULL DEFAULT 0, needs_info INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS feedback_reports_by_bug ON feedback_reports(bug_id, created_at);
+CREATE TABLE IF NOT EXISTS feedback_messages(report_id TEXT NOT NULL REFERENCES feedback_reports(id), id TEXT NOT NULL, role TEXT NOT NULL, body TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY(report_id,id));
+CREATE TABLE IF NOT EXISTS feedback_runs(bug_id TEXT NOT NULL REFERENCES feedback_bugs(id), generation INTEGER NOT NULL, state TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, started_at INTEGER, session_id TEXT UNIQUE, pr_number INTEGER, approved_head_sha TEXT, release_version TEXT, PRIMARY KEY(bug_id,generation));
+CREATE INDEX IF NOT EXISTS feedback_runs_by_state ON feedback_runs(state,updated_at);
+CREATE TABLE IF NOT EXISTS feedback_events(bug_id TEXT NOT NULL REFERENCES feedback_bugs(id),generation INTEGER NOT NULL,status TEXT NOT NULL,created_at INTEGER NOT NULL,PRIMARY KEY(bug_id,generation,status));
+CREATE TABLE IF NOT EXISTS feedback_transfer_failures(operation_id TEXT PRIMARY KEY, observation TEXT NOT NULL, observed_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS feedback_transfer_expiry ON feedback_transfer_failures(observed_at);

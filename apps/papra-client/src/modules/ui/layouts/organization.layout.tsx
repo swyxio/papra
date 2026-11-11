@@ -1,3 +1,4 @@
+import { HelpMenu } from '@/modules/feedback/help-menu.component';
 import type { Component, ParentComponent } from 'solid-js';
 
 import type { Organization } from '@/modules/organizations/organizations.types';
@@ -298,6 +299,7 @@ export const AppLayout: ParentComponent<{ accountReady?: boolean }> = (props) =>
           </div>
 
           <div class="flex items-center gap-2">
+            <HelpMenu showReview={accountReady()} />
             <Show when={accountReady() && params.organizationId}>
               <OrganizationLayoutImportButton />
             </Show>

@@ -25,6 +25,8 @@ import { fetchOrganizationSubscription } from '@/modules/subscriptions/subscript
 import { getHttpErrorMessage, isHttpErrorWithStatusCode } from '@/modules/shared/http/http-errors';
 import { getUploadErrorFallback } from '../upload-errors';
 import { isUploadActiveElsewhere } from '../upload-activity.services';
+import { ReportProblem } from '@/modules/feedback/report.component';
+import { errorObservation, errorProof } from '@/modules/feedback/feedback.services';
 import { Button } from '@/modules/ui/components/button';
 import { invalidateOrganizationDocumentsQuery } from '../documents.composables';
 import { uploadDocument } from '../documents.services';
@@ -81,6 +83,7 @@ type TaskError = {
 };
 
 type Task = {
+  retryCount?: number;
   fileName?: string;
   folderImport?: boolean;
   group?: { id: string; name: string; destination?: string };
@@ -141,7 +144,13 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
     setTasks((tasks) =>
       tasks.map((task) =>
         task.file === args.file
-          ? { ...task, ...args, ...(args.status === 'pending' ? { progress: undefined } : {}) }
+          ? {
+              ...task,
+              ...args,
+              ...(args.status === 'pending'
+                ? { progress: undefined, retryCount: (task.retryCount ?? 0) + 1 }
+                : {}),
+            }
           : task,
       ),
     );
@@ -596,6 +605,16 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
               <Button size="sm" variant="outline" onClick={() => void retryTasks([task()])}>
                 Retry upload
               </Button>
+              <ReportProblem
+                label="Report an upload problem"
+                observation={errorProof((task() as TaskError).error)}
+                operation="upload"
+                diagnostics={{
+                  stage: 'upload',
+                  retries: task().retryCount ?? 0,
+                  ...errorObservation((task() as TaskError).error),
+                }}
+              />
               <Button
                 size="sm"
                 variant="ghost"
