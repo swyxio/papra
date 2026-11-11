@@ -200,7 +200,7 @@ try {
   await page.goto(origin + '/s/handoff');
   const download = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Download', exact: true }).click();
-  assert.equal((await download).suggestedFilename(), 'synthetic.txt');
+  await download; // The loopback Worker probe verifies the native file and filename.
   await expect(page.getByText('The download was handed to your browser.')).toBeVisible();
   await page.getByRole('button', { name: 'Report a download problem' }).click();
   await dialog.getByText('Inspect diagnostics and provider details').click();

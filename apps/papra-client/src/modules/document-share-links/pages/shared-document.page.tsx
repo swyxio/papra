@@ -149,7 +149,8 @@ const SharedDocumentCard: Component<{
           }),
       });
       if (!result.url) throw new Error('Shared download URL unavailable');
-      downloadFile({ url: result.url, fileName: props.document.name });
+      // Preserve the share page on HTTP failures. The Worker supplies the original filename.
+      downloadFile({ url: result.url, fileName: '' });
       setAttempt((current) => current && { ...current, handedOff: true });
     },
     onError: (error) => {

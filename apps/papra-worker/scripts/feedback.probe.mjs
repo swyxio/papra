@@ -77,10 +77,16 @@ test('native download failure through private receipt, human review and verified
     await f.db
       .prepare("UPDATE documents SET mime_type='application/octet-stream' WHERE id='doc'")
       .run();
+    await page.goto(f.env.APP_URL + '/s/synthetic_share_token_1');
+    const successful = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Download', exact: true }).click();
+    const file = await successful;
+    expect(await file.failure()).toBeNull();
+    expect(file.suggestedFilename()).toBe('silence.wav');
+    expect(await readFile(await file.path())).toEqual(f.bytes);
     vi.spyOn(download, 'downloadBytes').mockImplementation(async () => {
       throw new DownloadLabelError();
     });
-    await page.goto(f.env.APP_URL + '/s/synthetic_share_token_1');
     await page.getByRole('button', { name: 'Download', exact: true }).click();
     await page.getByRole('button', { name: 'Report a download problem' }).click();
     await expect
