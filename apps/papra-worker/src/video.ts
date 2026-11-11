@@ -7,7 +7,8 @@ import type {
 } from '../native/protocol';
 import { needsVideoPreview, thumbnailPositions } from '../native/video-policy.mjs';
 import { all, first, run, id, error } from './db';
-import { s3, signedMedia, signedDownload } from './storage';
+import { s3, signedMedia } from './storage';
+import { downloadBytes } from './download';
 
 export const AUTO_PREVIEW_SECONDS = 15 * 60;
 export const VIDEO_MONTHLY_MICROUSD = 10_000_000;
@@ -308,23 +309,44 @@ export async function mediaResponse(env: Env, doc: MediaDocument, requested?: st
     },
   };
 }
-export async function previewDownload(env: Env, doc: MediaDocument, requested?: string) {
+export async function previewDownload(
+  env: Env,
+  doc: MediaDocument,
+  requested: string | undefined,
+  versionUrl: URL,
+) {
   const profile = resolveQuality(requested, await videoMetadata(env, doc.current_version_id));
   if (profile === 'original') throw error(400, 'Choose a generated preview to download');
-  const variant = await first<Variant>(
+  const variant = await first<{ sha256: string }>(
     env,
-    'SELECT storage_key,size FROM video_previews WHERE version_id=? AND quality=?',
+    'SELECT sha256 FROM video_previews WHERE version_id=? AND quality=?',
     doc.current_version_id,
     profile,
   );
   if (!variant) throw error(409, 'This preview is not ready yet');
-  return {
-    url: await signedDownload(
-      env,
-      variant.storage_key,
-      `${doc.name.replace(/\.[^.]+$/, '')} - ${profile.startsWith('1080') ? '1080' : '720'}p ${profile.includes('teaser') ? '1-minute preview' : 'full preview'}.mp4`,
-    ),
-  };
+  versionUrl.pathname += `/previews/${encodeURIComponent(profile)}/${encodeURIComponent(variant.sha256)}/download`;
+  return { url: versionUrl.href };
+}
+export async function downloadPreviewBytes(
+  env: Env,
+  request: Request,
+  docId: string,
+  version: string,
+  profile: string,
+  digest: string,
+  name: string,
+) {
+  const variant = await first<{ storage_key: string }>(
+    env,
+    'SELECT p.storage_key FROM video_previews p JOIN versions v ON v.id=p.version_id WHERE v.document_id=? AND v.id=? AND p.quality=? AND p.sha256=?',
+    docId,
+    version,
+    profile,
+    digest,
+  );
+  if (!variant) throw error(404, 'Preview no longer available');
+  const filename = `${name.replace(/\.[^.]+$/, '')} - ${profile.startsWith('1080') ? '1080' : '720'}p ${profile.includes('teaser') ? '1-minute preview' : 'full preview'}.mp4`;
+  return downloadBytes(env, request, variant.storage_key, 'application/octet-stream', filename);
 }
 export async function reserveVideoCompute(env: Env, j: VideoJob) {
   const period = month();
@@ -396,6 +418,7 @@ export async function runVideoJob(
   v: VideoVersion,
   callNative: <T>(env: Env, j: VideoJob, path: string, payload: unknown) => Promise<T>,
 ) {
+  if (v.mime_type === 'application/applefile') return;
   const profile = j.kind.slice('video:'.length);
   const thumbnailOnly = profile === 'thumbnails-v2';
   if (

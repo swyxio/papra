@@ -543,3 +543,41 @@ test('member upload links stay scoped to original uploader across replacement ve
   ).json()) as any;
   expect(replacement.session.shareUrl).toBeUndefined();
 });
+
+test('classifies AppleDouble sidecars by bytes and keeps ordinary media with a dot-underscore name', async () => {
+  const f = await fixture();
+  const header = new DataView(new ArrayBuffer(26));
+  header.setUint32(0, 0x00051607);
+  header.setUint32(4, 0x00020000);
+  header.setUint16(24, 1);
+  const range = vi.fn(async () => new Response(header.buffer));
+  Object.assign(f.env.FILES, { get: range });
+  for (const [name, entries, expected, fingerprint] of [
+    ['._capture.mov', 1, 'application/applefile', 'a'],
+    ['._actual.mov', 8, 'video/quicktime', 'b'],
+    ['normal.mov', 1, 'video/quicktime', 'c'],
+  ] as const) {
+    header.setUint16(24, entries);
+    const start = await f.call('', 'POST', {
+      fileName: name,
+      size: 64,
+      mimeType: 'video/quicktime',
+      fingerprint: fingerprint.repeat(64),
+    });
+    const { session } = (await start.json()) as any;
+    const obj = await f.DB.prepare('SELECT storage_key FROM uploads WHERE id=?')
+      .bind(session.id)
+      .first<any>();
+    f.objects.set(obj.storage_key, { size: 64 });
+    expect((await f.call(`/${session.id}/complete`, 'POST', {})).status).toBe(200);
+    expect(
+      await f.DB.prepare(
+        'SELECT d.mime_type AS doc,v.mime_type AS ver FROM documents d JOIN versions v ON d.current_version_id=v.id WHERE d.id=?',
+      )
+        .bind(session.documentId)
+        .first(),
+    ).toEqual({ doc: expected, ver: expected });
+  }
+  expect(range).toHaveBeenCalledTimes(2);
+  expect(range).toHaveBeenCalledWith(expect.any(String), { range: { offset: 0, length: 26 } });
+});

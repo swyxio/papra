@@ -9,7 +9,7 @@ import {
 } from './collaboration';
 import { signedDownload, signedMedia, s3 } from './storage';
 import { downloadBytes } from './download';
-import { mediaResponse, requestVideoPreview, previewDownload } from './video';
+import { mediaResponse, requestVideoPreview, previewDownload, downloadPreviewBytes } from './video';
 import type { MediaDocument } from './video';
 import { abortBackupMultipartsForPurge, enqueueVersion } from './jobs';
 import { keywordPredicate } from './keyword';
@@ -256,7 +256,27 @@ export function registerDocumentRoutes(app: App) {
       c.req.param('doc'),
     );
     c.header('Cache-Control', 'private, no-store');
-    return c.json(await previewDownload(c.env, doc as MediaDocument, c.req.query('quality')));
+    const versionUrl = new URL(
+      `../versions/${encodeURIComponent(doc.current_version_id)}`,
+      c.req.url,
+    );
+    // The selection endpoint ends in /media/download.
+    return c.json(
+      await previewDownload(c.env, doc as MediaDocument, c.req.query('quality'), versionUrl),
+    );
+  });
+  app.get(`${base}/:doc/versions/:version/previews/:profile/:digest/download`, async (c) => {
+    const doc = await document(c.env, c.get('identity'), c.req.param('org'), c.req.param('doc'));
+    if (doc.is_deleted) throw error(404, 'Document is in trash');
+    return downloadPreviewBytes(
+      c.env,
+      c.req.raw,
+      doc.id,
+      c.req.param('version'),
+      c.req.param('profile'),
+      c.req.param('digest'),
+      doc.name,
+    );
   });
   app.get(`${base}/:doc/transcript`, async (c) => {
     const doc = await currentFileDocument(

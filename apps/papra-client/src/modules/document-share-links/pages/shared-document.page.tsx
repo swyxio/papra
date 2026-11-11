@@ -108,6 +108,7 @@ const SharedDocumentCard: Component<{
   token: string;
   accessToken: string | undefined;
   document: PublicSharedDocument;
+  onPasswordRequired: () => void;
 }> = (props) => {
   const { t } = useI18n();
 
@@ -136,8 +137,10 @@ const SharedDocumentCard: Component<{
         link.click();
       }
     },
-    onError: () =>
-      createToast({ type: 'error', message: t('document-share-links.public.download-error') }),
+    onError: (error) => {
+      if (isHttpErrorWithStatusCode({ error, statusCode: 401 })) props.onPasswordRequired();
+      else createToast({ type: 'error', message: t('document-share-links.public.download-error') });
+    },
   }));
 
   const previewQuery = useQuery(() => ({
@@ -246,9 +249,19 @@ const SharedDocumentCard: Component<{
                   retry,
                 })
               }
-              download={async (quality) =>
-                downloadSharedMedia({ token: props.token, accessToken: props.accessToken, quality })
-              }
+              download={async (quality) => {
+                try {
+                  return await downloadSharedMedia({
+                    token: props.token,
+                    accessToken: props.accessToken,
+                    quality,
+                  });
+                } catch (error) {
+                  if (isHttpErrorWithStatusCode({ error, statusCode: 401 }))
+                    props.onPasswordRequired();
+                  throw error;
+                }
+              }}
               onSeekAvailable={(callback) => setSeek(() => callback)}
               onTeaserChange={setTeaser}
             />
@@ -382,6 +395,7 @@ export const SharedDocumentPage: Component = () => {
             token={params.token}
             accessToken={getAccessToken()}
             document={documentQuery.data!.document}
+            onPasswordRequired={() => void documentQuery.refetch()}
           />
         </Match>
 

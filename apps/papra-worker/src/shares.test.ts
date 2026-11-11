@@ -6,6 +6,7 @@ import { Miniflare } from 'miniflare';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { hashSharePassword, registerShareRoutes, verifySharePassword } from './shares';
 import { pageMetadata, rewritePageMetadata } from './page-metadata';
+import { registerDocumentRoutes } from './documents';
 
 // Share authorization uses real D1. Containers are unrelated to these routes and only exist in workerd.
 vi.mock('@cloudflare/containers', () => ({ Container: class {}, getContainer: vi.fn() }));
@@ -28,6 +29,7 @@ async function fixture() {
     script: 'export default {fetch(){return new Response("OK")}}',
     compatibilityDate: '2026-07-21',
     d1Databases: ['DB'],
+    r2Buckets: ['FILES'],
   });
   instances.push(instance);
   const DB = await instance.getD1Database('DB');
@@ -114,6 +116,7 @@ async function fixture() {
     };
   const env = {
     DB,
+    FILES: await instance.getR2Bucket('FILES'),
     APP_URL: 'https://drive.example',
     AUTH_SECRET: 'share-test-secret-at-least-thirty-two-characters',
     R2_ACCESS_KEY_ID: 'test-access-key',
@@ -131,12 +134,14 @@ async function fixture() {
     await next();
   });
   registerShareRoutes(app);
+  registerDocumentRoutes(app);
   const request = async (
     path: string,
     method = 'GET',
     body?: unknown,
     user = 'owner',
     accessToken?: string,
+    headers: Record<string, string> = {},
   ) =>
     app.request(
       env.APP_URL + path,
@@ -147,6 +152,7 @@ async function fixture() {
           'x-user': user,
           ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
           'CF-Connecting-IP': '192.0.2.1',
+          ...headers,
         },
         body: body === undefined ? undefined : JSON.stringify(body),
       },
@@ -485,21 +491,127 @@ describe('Worker share link permission and revocation', () => {
     await DB.prepare("UPDATE documents SET is_deleted=1 WHERE id='open'").run();
     expect((await request(`/api/share-links/${share.token}/document`)).status).toBe(410);
   });
-  test('download and preview bypass the Worker with private R2 signatures no longer than 60 seconds', async () => {
-    const { request, create } = await fixture();
+  test('original download pins the shared version and thumbnail preview stays short-lived', async () => {
+    const { request, create, DB, env } = await fixture();
     const share = await create();
-    const download = await request(`/api/share-links/${share.token}/document/file?direct=download`);
+    const base = `/api/share-links/${share.token}/document/file`;
+    const download = await request(base + '?direct=download');
     expect(download.status).toBe(200);
     const url = new URL(((await download.json()) as { url: string }).url);
-    expect(Number(url.searchParams.get('X-Amz-Expires'))).toBeLessThanOrEqual(60);
-    expect(url.pathname).toContain('original/open');
-    const preview = await request(`/api/share-links/${share.token}/document/file?direct=preview`);
+    expect(url.origin).toBe(env.APP_URL);
+    expect(url.pathname).toBe(`/api/share-links/${share.token}/document/versions/v-open/download`);
+    expect(url.search).toBe('');
+    expect((await request(base)).headers.get('location')).toBe(url.href);
+    const preview = await request(base + '?direct=preview');
     const previewUrl = new URL(((await preview.json()) as { url: string }).url);
     expect(Number(previewUrl.searchParams.get('X-Amz-Expires'))).toBeLessThanOrEqual(60);
     expect(previewUrl.pathname).toContain('previews/open.jpg');
-    const fallback = await request(`/api/share-links/${share.token}/document/file`);
-    expect(fallback.status).toBe(302);
-    expect(fallback.headers.get('location')).toContain('original/open');
+    await env.FILES.put('original/open', 'original bytes');
+    const read = () =>
+      request(url.pathname, 'GET', undefined, 'outsider', undefined, { range: 'bytes=9-' });
+    const ranged = await read();
+    expect(ranged.status).toBe(206);
+    expect(await ranged.text()).toBe('bytes');
+    expect((await request(url.pathname.replace('v-open', 'v-private'))).status).toBe(410);
+    await DB.prepare("UPDATE documents SET current_version_id=NULL WHERE id='open'").run();
+    expect((await read()).status).toBe(410);
+  });
+
+  test('protected native ranges recheck the unlock expiry, password revision, share scope and revocation', async () => {
+    const { request, create, env } = await fixture();
+    const share = await create('open', 'correct');
+    const verify = await request(`/api/share-links/${share.token}/verify`, 'POST', {
+      password: 'correct',
+    });
+    const setCookie = verify.headers.get('set-cookie')!;
+    expect(setCookie).toContain('HttpOnly');
+    expect(setCookie).toContain('Secure');
+    expect(setCookie).toContain('SameSite=Strict');
+    expect(setCookie).toContain(`Path=/api/share-links/${share.token}/document/versions/`);
+    const cookie = setCookie.split(';')[0]!;
+    const { accessToken } = (await verify.json()) as { accessToken: string };
+    const base = `/api/share-links/${share.token}/document`;
+    const intent = await request(
+      base + '/file?direct=download',
+      'GET',
+      undefined,
+      'outsider',
+      accessToken,
+    );
+    const url = new URL(((await intent.json()) as { url: string }).url);
+    expect(url.search).toBe('');
+    expect(url.href).not.toContain(accessToken);
+    const read = (path = url.pathname, grant = cookie) =>
+      request(path, 'GET', undefined, 'outsider', undefined, { cookie: grant, Range: 'bytes=0-0' });
+    await env.FILES.put('original/open', 'bytes');
+    const native = await read();
+    expect(native.status).toBe(206);
+    expect(await native.text()).toBe('b');
+    expect((await request(url.pathname + '?accessToken=' + accessToken)).status).toBe(401);
+    const second = await create('open', 'other');
+    expect((await read(url.pathname.replace(share.token, second.token))).status).toBe(401);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(Date.now() + 610_000);
+      expect((await read()).status).toBe(401);
+      const renewed = await request(`/api/share-links/${share.token}/verify`, 'POST', {
+        password: 'correct',
+      });
+      const resumed = await read(url.pathname, renewed.headers.get('set-cookie')!.split(';')[0]);
+      expect(resumed.status).toBe(206);
+      expect(await resumed.text()).toBe('b');
+    } finally {
+      vi.useRealTimers();
+    }
+    const manage = `/api/organizations/team/share-links/${share.id}`;
+    await request(manage, 'PATCH', { password: 'new' });
+    expect((await read()).status).toBe(401);
+    await request(manage, 'PATCH', { expiresAt: new Date(Date.now() - 1000).toISOString() });
+    expect((await read()).status).toBe(410);
+    await request(manage, 'PATCH', { expiresAt: null });
+    await request(manage, 'PATCH', { isEnabled: false });
+    expect((await read()).status).toBe(410);
+  });
+
+  test('member and share preview downloads pin the generated bytes and check access on each range', async () => {
+    const { DB, env, create, request } = await fixture();
+    const share = await create();
+    const member = '/api/organizations/team/documents/open';
+    const shared = `/api/share-links/${share.token}/document`;
+    const quality = '720-full-v2';
+    const digest = 'a'.repeat(64);
+    await env.FILES.put('derived/asset', 'original preview');
+    await DB.prepare(
+      "INSERT INTO video_previews(version_id,quality,storage_key,size,sha256,created_at) VALUES('v-open',?,'derived/asset',16,?,1)",
+    )
+      .bind(quality, digest)
+      .run();
+    const paths = [];
+    for (const base of [member, shared]) {
+      const selected = await request(base + '/media/download?quality=720');
+      expect(selected.status).toBe(200);
+      const url = new URL(((await selected.json()) as { url: string }).url);
+      expect(url.origin).toBe(env.APP_URL);
+      expect(url.pathname).toBe(
+        base + '/versions/v-open/previews/' + quality + '/' + digest + '/download',
+      );
+      expect(url.search).toBe('');
+      const response = await request(url.pathname, 'GET', undefined, 'member', undefined, {
+        Range: 'bytes=9-',
+      });
+      expect(response.status).toBe(206);
+      expect(await response.text()).toBe('preview');
+      paths.push(url.pathname);
+    }
+    expect((await request(paths[0]!, 'GET', undefined, 'outsider')).status).toBe(403);
+    await DB.prepare(
+      "UPDATE video_previews SET sha256=?,storage_key='derived/replacement' WHERE version_id='v-open'",
+    )
+      .bind('b'.repeat(64))
+      .run();
+    for (const path of paths) expect((await request(path)).status).toBe(404);
+    await request(`/api/organizations/team/share-links/${share.id}`, 'PATCH', { isEnabled: false });
+    expect((await request(paths[1]!)).status).toBe(410);
   });
 });
 
