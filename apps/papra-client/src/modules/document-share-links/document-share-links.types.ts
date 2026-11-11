@@ -21,6 +21,7 @@ export type ShareLink = {
 };
 
 export type PublicSharedDocument = {
+  versionId?: string;
   transcription?: TranscriptionStatus | null;
   upload?: { bytes: number; total: number; updatedAt: string; interrupted: boolean };
   name: string;

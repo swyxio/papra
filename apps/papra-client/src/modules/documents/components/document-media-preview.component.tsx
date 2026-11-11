@@ -3,12 +3,13 @@ import {
   mediaTimestamp,
   needsFullPlayback,
 } from './media-playback.policy';
-import { useQuery } from '@tanstack/solid-query';
+import { useMutation, useQuery } from '@tanstack/solid-query';
 import { For, Show, createEffect, createSignal, on, onCleanup } from 'solid-js';
 import { formatBytes } from '@corentinth/chisels';
 import { SharedTranscriptPanel } from '@/modules/document-share-links/components/shared-transcript.component';
 import type { SharedTranscript } from '@/modules/document-share-links/document-share-links.services';
 import { apiClient } from '@/modules/shared/http/api-client';
+import { getHttpErrorMessage } from '@/modules/shared/http/http-errors';
 import { Button } from '@/modules/ui/components/button';
 import { ReportProblem } from '@/modules/feedback/report.component';
 import { errorObservation, errorProof } from '@/modules/feedback/feedback.services';
@@ -687,14 +688,32 @@ export function DocumentMediaPreview(props: { document: Document }) {
       props.document.id,
       'transcript',
       props.document.currentVersionId,
+      processing.data?.transcription?.completed,
+      processing.data?.transcription?.total,
     ],
     queryFn: async () =>
       apiClient<{ transcript: SharedTranscript; versionId: string }>({
         path: `${base()}/transcript`,
       }),
-    enabled: processing.data?.transcription?.status === 'ready',
+    enabled: (processing.data?.transcription?.completed ?? 0) > 0,
     refetchOnWindowFocus: false,
     retry: 1,
+  }));
+  const retryTranscription = useMutation(() => ({
+    mutationFn: async ({
+      versionId,
+      stage,
+    }: {
+      versionId: string;
+      stage: 'chunks' | 'preparation';
+    }) =>
+      apiClient<{ queued: number }>({
+        path: `${base()}/versions/${encodeURIComponent(versionId)}/transcript/retry`,
+        query: { stage },
+        method: 'POST',
+        retry: 0,
+      }),
+    onSettled: async () => processing.refetch(),
   }));
   return (
     <section aria-label="Media preview" class="space-y-6">
@@ -719,6 +738,38 @@ export function DocumentMediaPreview(props: { document: Document }) {
       <Show when={processing.data?.transcription}>
         {(state) => <TranscriptionProgress state={state()} />}
       </Show>
+      <Show when={processing.data?.canRetryTranscription && processing.data?.versionId}>
+        {(versionId) => (
+          <div class="space-y-2">
+            <Button
+              variant="outline"
+              disabled={retryTranscription.isPending}
+              onClick={() =>
+                retryTranscription.mutate({
+                  versionId: versionId(),
+                  stage: processing.data?.transcription?.failed ? 'chunks' : 'preparation',
+                })
+              }
+            >
+              {retryTranscription.isPending
+                ? 'Queuing retry…'
+                : processing.data?.transcription?.failed
+                  ? 'Retry failed chunks'
+                  : 'Retry audio preparation'}
+            </Button>
+            <Show
+              when={
+                retryTranscription.isError &&
+                retryTranscription.variables?.versionId === versionId()
+              }
+            >
+              <p role="alert" class="text-sm text-destructive">
+                {getHttpErrorMessage(retryTranscription.error)}
+              </p>
+            </Show>
+          </div>
+        )}
+      </Show>
       <Show when={processing.isError}>
         <p role="status" class="text-sm text-muted-foreground">
           Transcription status unavailable.{' '}
@@ -727,7 +778,7 @@ export function DocumentMediaPreview(props: { document: Document }) {
           </button>
         </p>
       </Show>
-      <Show when={processing.data?.transcription?.status === 'ready'}>
+      <Show when={(processing.data?.transcription?.completed ?? 0) > 0}>
         <Show
           when={transcript.data?.transcript}
           fallback={
@@ -735,7 +786,7 @@ export function DocumentMediaPreview(props: { document: Document }) {
               {transcript.isError ? 'Could not load the transcript.' : 'Loading transcript…'}
               <Show when={transcript.isError}>
                 <Button variant="outline" class="ml-3" onClick={() => void transcript.refetch()}>
-                  Retry transcript
+                  Reload transcript
                 </Button>
               </Show>
             </div>

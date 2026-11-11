@@ -15,6 +15,7 @@ import {
   housekeeping,
   recoverBlockedBackupHashes,
   reserveDailyAI,
+  retryFailedTranscription,
 } from './jobs';
 
 vi.mock('@cloudflare/containers', () => ({ getContainer: vi.fn() }));
@@ -893,8 +894,8 @@ test('vision jobs use Gemma multimodal messages and publish its chat completion 
   });
 });
 
-test('transcription routes through the shared private gateway while retaining its deadline', async () => {
-  const { env, DB } = await fixture();
+test('retrying a failed transcription through the private gateway completes processing and schedules indexing', async () => {
+  const { env, DB, send } = await fixture();
   const bytes = new Uint8Array([1, 2, 3]);
   const sha256 = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (x) =>
     x.toString(16).padStart(2, '0'),
@@ -942,10 +943,12 @@ test('transcription routes through the shared private gateway while retaining it
       "INSERT INTO jobs(id,version_id,kind,status,generation,created_at,updated_at) VALUES('p','v','process','done',0,1,1)",
     ),
     DB.prepare(
-      "INSERT INTO jobs(id,version_id,kind,status,generation,created_at,updated_at) VALUES('transcribe','v','transcribe:0:0','pending',0,1,1)",
+      "INSERT INTO jobs(id,version_id,kind,status,error,generation,created_at,updated_at) VALUES('transcribe','v','transcribe:0:0','failed','daily_transcription_budget_exhausted',0,1,1)",
     ),
+    DB.prepare("UPDATE versions SET processing_status='ready' WHERE id='v'"),
   ]);
-  await consumeJobs(batch({ jobId: 'transcribe', generation: 0 }), env);
+  expect(await retryFailedTranscription(env, 'd', 'v')).toBe(1);
+  await consumeJobs(batch(send.mock.calls[0][0]), env);
   expect(ai).toHaveBeenCalledOnce();
   expect(ai).toHaveBeenCalledWith(
     '@cf/openai/whisper-large-v3-turbo',
@@ -959,6 +962,16 @@ test('transcription routes through the shared private gateway while retaining it
     status: 'done',
   });
   expect(JSON.parse(cache.get('derived/v/transcribe-0-0.json')!).text).toBe('Synthetic transcript');
+  expect(
+    await DB.prepare("SELECT processing_status FROM versions WHERE id='v'").first(
+      'processing_status',
+    ),
+  ).toBe('ready');
+  expect(
+    await DB.prepare("SELECT status FROM jobs WHERE version_id='v' AND kind='index'").first(
+      'status',
+    ),
+  ).toBe('pending');
 });
 
 test('indexing incorporates cached media scenes in numeric order without rerunning AI enrichment', async () => {

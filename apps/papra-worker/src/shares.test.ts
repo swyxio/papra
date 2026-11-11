@@ -714,6 +714,28 @@ test('shared transcript requires existing delegation and returns only current-ge
     'derived/v-open/transcribe-1-0.json',
     'derived/v-open/transcribe-1-1.json',
   ]);
+  await DB.exec(
+    "UPDATE jobs SET kind='transcribe:1:3' WHERE id='b'; INSERT INTO jobs(id,version_id,kind,status,created_at,updated_at) VALUES('gap1','v-open','transcribe:1:1','failed',1,1),('gap2','v-open','transcribe:1:2','pending',1,1),('gap4','v-open','transcribe:1:4','processing',1,1);",
+  );
+  get.mockClear();
+  const partial = await request(path, 'GET', undefined, 'owner', accessToken);
+  expect(await partial.json()).toEqual({
+    transcript: {
+      partial: { completed: 2, total: 5 },
+      text: 'Hello world.\n\n[Chunks 2–3 not transcribed]\n\nSecond part.\n\n[Chunk 5 not transcribed]',
+      segments: [
+        { text: 'Hello', startSeconds: 0 },
+        { text: 'world.', startSeconds: 2.5 },
+        { text: '[Chunks 2–3 not transcribed]', startSeconds: null },
+        { text: 'Second part.', startSeconds: 300 },
+        { text: '[Chunk 5 not transcribed]', startSeconds: null },
+      ],
+    },
+  });
+  expect(get.mock.calls.map(([key]) => key)).toEqual([
+    'derived/v-open/transcribe-1-0.json',
+    'derived/v-open/transcribe-1-3.json',
+  ]);
   expect((await request(`/api/share-links/${share.token}/document/file?direct=media`)).status).toBe(
     401,
   );
