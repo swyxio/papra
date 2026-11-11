@@ -518,6 +518,7 @@ export function registerShareRoutes(app: App) {
         name: doc.name,
         size: doc.original_size,
         mimeType: doc.mime_type,
+        versionId: doc.current_version_id,
         transcription: await fetchTranscriptionStatus(
           context.env,
           doc.current_version_id,

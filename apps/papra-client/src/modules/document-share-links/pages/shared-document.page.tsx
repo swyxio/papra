@@ -120,10 +120,18 @@ const SharedDocumentCard: Component<{
   const [seek, setSeek] = createSignal<(seconds: number) => void>();
   const [teaser, setTeaser] = createSignal<TeaserPlayback>();
   const transcriptQuery = useQuery(() => ({
-    queryKey: ['share-link', props.token, 'transcript', props.accessToken],
+    queryKey: [
+      'share-link',
+      props.token,
+      'transcript',
+      props.accessToken,
+      props.document.versionId,
+      props.document.transcription?.completed,
+      props.document.transcription?.total,
+    ],
     queryFn: async () =>
       fetchSharedTranscript({ token: props.token, accessToken: props.accessToken }),
-    enabled: props.document.transcription?.status === 'ready',
+    enabled: (props.document.transcription?.completed ?? 0) > 0,
     retry: 1,
     refetchOnWindowFocus: false,
   }));
@@ -322,7 +330,7 @@ const SharedDocumentCard: Component<{
           </div>
         )}
       </Show>
-      <Show when={props.document.transcription?.status === 'ready'}>
+      <Show when={(props.document.transcription?.completed ?? 0) > 0}>
         <Show
           when={transcriptQuery.data?.transcript}
           fallback={

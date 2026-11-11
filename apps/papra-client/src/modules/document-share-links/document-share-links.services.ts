@@ -213,6 +213,7 @@ export async function fetchSharedDocumentDirect({
 }
 
 export type SharedTranscript = {
+  partial?: { completed: number; total: number };
   text: string;
   segments: { text: string; startSeconds: number | null }[];
 };

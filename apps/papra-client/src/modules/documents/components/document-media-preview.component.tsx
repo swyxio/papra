@@ -688,19 +688,28 @@ export function DocumentMediaPreview(props: { document: Document }) {
       props.document.id,
       'transcript',
       props.document.currentVersionId,
+      processing.data?.transcription?.completed,
+      processing.data?.transcription?.total,
     ],
     queryFn: async () =>
       apiClient<{ transcript: SharedTranscript; versionId: string }>({
         path: `${base()}/transcript`,
       }),
-    enabled: processing.data?.transcription?.status === 'ready',
+    enabled: (processing.data?.transcription?.completed ?? 0) > 0,
     refetchOnWindowFocus: false,
     retry: 1,
   }));
   const retryTranscription = useMutation(() => ({
-    mutationFn: async (versionId: string) =>
+    mutationFn: async ({
+      versionId,
+      stage,
+    }: {
+      versionId: string;
+      stage: 'chunks' | 'preparation';
+    }) =>
       apiClient<{ queued: number }>({
         path: `${base()}/versions/${encodeURIComponent(versionId)}/transcript/retry`,
+        query: { stage },
         method: 'POST',
         retry: 0,
       }),
@@ -735,7 +744,12 @@ export function DocumentMediaPreview(props: { document: Document }) {
             <Button
               variant="outline"
               disabled={retryTranscription.isPending}
-              onClick={() => retryTranscription.mutate(versionId())}
+              onClick={() =>
+                retryTranscription.mutate({
+                  versionId: versionId(),
+                  stage: processing.data?.transcription?.failed ? 'chunks' : 'preparation',
+                })
+              }
             >
               {retryTranscription.isPending
                 ? 'Queuing retry…'
@@ -743,7 +757,12 @@ export function DocumentMediaPreview(props: { document: Document }) {
                   ? 'Retry failed chunks'
                   : 'Retry audio preparation'}
             </Button>
-            <Show when={retryTranscription.isError && retryTranscription.variables === versionId()}>
+            <Show
+              when={
+                retryTranscription.isError &&
+                retryTranscription.variables?.versionId === versionId()
+              }
+            >
               <p role="alert" class="text-sm text-destructive">
                 {getHttpErrorMessage(retryTranscription.error)}
               </p>
@@ -759,7 +778,7 @@ export function DocumentMediaPreview(props: { document: Document }) {
           </button>
         </p>
       </Show>
-      <Show when={processing.data?.transcription?.status === 'ready'}>
+      <Show when={(processing.data?.transcription?.completed ?? 0) > 0}>
         <Show
           when={transcript.data?.transcript}
           fallback={

@@ -191,8 +191,10 @@ export function registerProcessingRoutes(app: App) {
       throw error(409, 'The file version changed. Refresh the document.');
     if (!/^(audio|video)\//i.test(doc.mime_type))
       throw error(400, 'This file has no audio transcription');
-    const queued = await retryFailedTranscription(c.env, doc.id, versionId);
-    if (!queued) {
+    const stage = c.req.query('stage') ?? 'chunks';
+    if (stage !== 'chunks' && stage !== 'preparation') throw error(400, 'Unknown retry stage');
+    const queued = await retryFailedTranscription(c.env, doc.id, versionId, stage);
+    if (!queued && stage === 'chunks') {
       const state = await fetchTranscriptionStatus(c.env, versionId, doc.mime_type);
       if (state?.status === 'failed' && state.budgetLimited)
         throw error(

@@ -172,7 +172,16 @@ export async function dispatchVersionJobs(env: Env, versions: string[]) {
     ),
   );
 }
-export async function retryFailedTranscription(env: Env, documentId: string, versionId: string) {
+export async function retryFailedTranscription(
+  env: Env,
+  documentId: string,
+  versionId: string,
+  stage: 'chunks' | 'preparation' = 'chunks',
+) {
+  const selectedJobs =
+    stage === 'chunks'
+      ? "kind LIKE ('transcribe:' || (SELECT generation FROM jobs p WHERE p.version_id=jobs.version_id AND p.kind='process') || ':%')"
+      : "kind='process' AND NOT EXISTS (SELECT 1 FROM jobs t WHERE t.version_id=jobs.version_id AND t.kind LIKE ('transcribe:' || jobs.generation || ':%'))";
   const now = Date.now();
   const dayStart = new Date(now).setUTCHours(0, 0, 0, 0);
   // Keep the extraction generation: completed chunks and the audio manifest belong to it.
@@ -181,8 +190,7 @@ export async function retryFailedTranscription(env: Env, documentId: string, ver
       UPDATE jobs SET status='pending',attempts=0,lease_token=NULL,error=NULL,updated_at=?
       WHERE version_id=? AND status='failed'
         AND EXISTS (SELECT 1 FROM documents WHERE id=? AND current_version_id=jobs.version_id AND is_deleted=0)
-        AND (kind='process' OR kind LIKE ('transcribe:' ||
-          (SELECT generation FROM jobs p WHERE p.version_id=jobs.version_id AND p.kind='process') || ':%'))
+        AND ${selectedJobs}
         AND (error IS NOT 'daily_transcription_budget_exhausted' OR updated_at<?)
       RETURNING *`).bind(now, versionId, documentId, dayStart),
     // Let the usual completion path rebuild search from all successful chunks.

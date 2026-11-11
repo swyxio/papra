@@ -44,7 +44,11 @@ export function SharedTranscriptPanel(props: {
       class={props.class ?? 'max-w-5xl mx-auto px-6 pb-12 pt-6 space-y-6'}
     >
       <div class="flex flex-wrap items-center justify-between gap-3">
-        <h2 class="text-lg font-semibold">Transcript</h2>
+        <h2 class="text-lg font-semibold">
+          {props.transcript.partial
+            ? `Partial transcript · ${props.transcript.partial.completed}/${props.transcript.partial.total} chunks`
+            : 'Transcript'}
+        </h2>
         <Show when={props.transcript.text}>
           <div class="flex flex-wrap gap-2">
             <Button variant="outline" size="sm" onClick={copy}>

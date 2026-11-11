@@ -471,6 +471,11 @@ test('transcript retry preserves completed chunks, respects the budget reset and
   await f.DB.prepare(
     "UPDATE jobs SET updated_at=1 WHERE error='daily_transcription_budget_exhausted'",
   ).run();
+  await f.DB.prepare("UPDATE jobs SET status='failed' WHERE version_id=? AND kind='process'")
+    .bind(v)
+    .run();
+  expect((await f.call(retry + '?stage=invalid', 'POST')).status).toBe(400);
+  expect(await (await f.call(retry + '?stage=preparation', 'POST')).json()).toEqual({ queued: 0 });
   const concurrent = await Promise.all([f.call(retry, 'POST'), f.call(retry, 'POST')]);
   expect(await Promise.all(concurrent.map(async (r) => r.json()))).toEqual(
     expect.arrayContaining([{ queued: 6 }, { queued: 0 }]),
@@ -489,7 +494,7 @@ test('transcript retry preserves completed chunks, respects the budget reset and
   ).toBe(20);
   expect(
     await f.DB.prepare("SELECT count(*) AS n FROM jobs WHERE status='failed'").first('n'),
-  ).toBe(2);
+  ).toBe(3);
   expect(
     await f.DB.prepare('SELECT processing_status FROM versions WHERE id=?')
       .bind(v)
@@ -502,7 +507,8 @@ test('transcript retry preserves completed chunks, respects the budget reset and
   await f.DB.prepare("UPDATE jobs SET status='failed' WHERE version_id=? AND kind='process'")
     .bind(v)
     .run();
-  expect(await (await f.call(retry, 'POST')).json()).toEqual({ queued: 1 });
+  expect(await (await f.call(retry, 'POST')).json()).toEqual({ queued: 0 });
+  expect(await (await f.call(retry + '?stage=preparation', 'POST')).json()).toEqual({ queued: 1 });
   expect(
     await f.DB.prepare("SELECT generation,status FROM jobs WHERE version_id=? AND kind='process'")
       .bind(v)
