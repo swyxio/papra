@@ -8,7 +8,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from '@playwright/test';
 import { Hono } from 'hono';
 import { Miniflare } from 'miniflare';
-import { expect, test, vi } from 'vitest';
+import { test, vi } from 'vitest';
 import { registerDocumentRoutes } from '../src/documents';
 import { registerShareRoutes, hashSharePassword } from '../src/shares';
 
@@ -124,7 +124,7 @@ async function launchBrowser(directory) {
   });
 }
 
-async function verifyResume({ label, shared, startPath, versionPath }) {
+async function verifyResume({ label, shared, startPath, versionPath }, { expect }) {
   const directory = await mkdtemp(join(tmpdir(), 'swyxdrive-resume-'));
   const mf = new Miniflare({
     modules: true,
@@ -311,7 +311,7 @@ async function verifyResume({ label, shared, startPath, versionPath }) {
   }
 }
 
-test.concurrent.each([
+test.concurrent.for([
   {
     label: 'member original',
     shared: false,

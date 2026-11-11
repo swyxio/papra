@@ -1,3 +1,4 @@
+import { storedFileMime } from './file-type';
 import { hashObjectStep } from './checksum';
 import { JobError } from './job-error';
 import { AI_GATEWAY } from './ai-gateway';
@@ -1243,6 +1244,30 @@ export async function consumeJobs(batch: MessageBatch, env: Env) {
     try {
       const v = await version(env, j.version_id);
       if (!v) throw new JobError('version_missing', true);
+      // Older uploads can still be queued under the media type suggested by their extension.
+      if (
+        (j.kind === 'process' || j.kind.startsWith('video:')) &&
+        /^(audio|video)\//.test(v.mime_type)
+      ) {
+        const mime = await storedFileMime(
+          env.FILES,
+          v.storage_key,
+          v.original_name,
+          v.size,
+          v.mime_type,
+        );
+        if (mime !== v.mime_type) {
+          await env.DB.batch([
+            env.DB.prepare(
+              'UPDATE versions SET mime_type=? WHERE id=? AND storage_key=? AND mime_type=?',
+            ).bind(mime, v.id, v.storage_key, v.mime_type),
+            env.DB.prepare(
+              'UPDATE documents SET mime_type=? WHERE id=? AND current_version_id=? AND mime_type=?',
+            ).bind(mime, v.document_id, v.id, v.mime_type),
+          ]);
+          v.mime_type = mime;
+        }
+      }
       if (j.kind === 'process') await processVersion(env, j, v);
       else if (j.kind.startsWith('video:')) await runVideoJob(env, j, v, callNative);
       else if (j.kind === 'index') await indexVersion(env, j, v);

@@ -1,3 +1,4 @@
+import { storedFileMime } from './file-type';
 import type { App, Env, Identity } from './types';
 import { all, first, id, error, formatDocument, getDocument } from './db';
 import {
@@ -83,22 +84,7 @@ async function prepareCompletion(env: Env, user: Identity, u: Record<string, any
     object = await env.FILES.head(u.storage_key);
   }
   if (!object || object.size !== u.size) throw error(409, 'Stored object size does not match');
-  let mimeType: string = u.mime_type;
-  if (u.file_name.startsWith('._') && u.size >= 38) {
-    // AppleDouble v2 (RFC 1740): header, entry count, and room for the entry table.
-    const prefix = await env.FILES.get(u.storage_key, { range: { offset: 0, length: 26 } });
-    if (!prefix) throw error(409, 'Upload bytes have not arrived');
-    const data = new DataView(await prefix.arrayBuffer());
-    if (data.byteLength !== 26) throw error(409, 'Incomplete file header');
-    const entries = data.getUint16(24);
-    if (
-      data.getUint32(0) === 0x00051607 &&
-      data.getUint32(4) === 0x00020000 &&
-      entries > 0 &&
-      26 + 12 * entries <= u.size
-    )
-      mimeType = 'application/applefile';
-  }
+  const mimeType = await storedFileMime(env.FILES, u.storage_key, u.file_name, u.size, u.mime_type);
   const now = Date.now(),
     stmts = [];
   if (!u.replacement)

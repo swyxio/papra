@@ -1306,3 +1306,29 @@ test('an interrupted or misaddressed range cannot advance a checksum; purge rele
   await f.DB.prepare("DELETE FROM versions WHERE id='v'").run();
   expect(await f.progress('original')).toBeNull();
 });
+
+test('a queued legacy video probe recognizes its sidecar before reserving native compute', async () => {
+  const { DB, mf, env } = await fixture(['FILES']);
+  env.FILES = (await mf.getR2Bucket('FILES')) as unknown as R2Bucket;
+  const bytes = new ArrayBuffer(64);
+  const header = new DataView(bytes);
+  header.setUint32(0, 0x00051607);
+  header.setUint32(4, 0x00020000);
+  header.setUint16(24, 1);
+  await env.FILES.put('originals/v', bytes);
+  await DB.batch([
+    DB.prepare(
+      "UPDATE versions SET mime_type='video/mp4',original_name='._camera.mp4',size=64 WHERE id='v'",
+    ),
+    DB.prepare("UPDATE documents SET mime_type='video/mp4' WHERE id='d'"),
+    DB.prepare(
+      "INSERT INTO jobs(id,version_id,kind,status,created_at,updated_at) VALUES('probe','v','video:probe','pending',1,1)",
+    ),
+  ]);
+  await consumeJobs(batch({ jobId: 'probe', generation: 0 }), env);
+  expect(await DB.prepare("SELECT status FROM jobs WHERE id='probe'").first('status')).toBe('done');
+  expect(await DB.prepare("SELECT mime_type FROM documents WHERE id='d'").first('mime_type')).toBe(
+    'application/applefile',
+  );
+  expect(await DB.prepare('SELECT count(*) AS n FROM video_compute_attempts').first('n')).toBe(0);
+});
