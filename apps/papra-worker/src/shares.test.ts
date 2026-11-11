@@ -507,7 +507,7 @@ describe('Worker share link permission and revocation', () => {
     expect(Number(previewUrl.searchParams.get('X-Amz-Expires'))).toBeLessThanOrEqual(60);
     expect(previewUrl.pathname).toContain('previews/open.jpg');
     await env.FILES.put('original/open', 'original bytes');
-    const read = () =>
+    const read = async () =>
       request(url.pathname, 'GET', undefined, 'outsider', undefined, { range: 'bytes=9-' });
     const ranged = await read();
     expect(ranged.status).toBe(206);
@@ -541,7 +541,7 @@ describe('Worker share link permission and revocation', () => {
     const url = new URL(((await intent.json()) as { url: string }).url);
     expect(url.search).toBe('');
     expect(url.href).not.toContain(accessToken);
-    const read = (path = url.pathname, grant = cookie) =>
+    const read = async (path = url.pathname, grant = cookie) =>
       request(path, 'GET', undefined, 'outsider', undefined, { cookie: grant, Range: 'bytes=0-0' });
     await env.FILES.put('original/open', 'bytes');
     const native = await read();
