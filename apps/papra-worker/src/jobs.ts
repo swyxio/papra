@@ -1,3 +1,6 @@
+import { storedFileMime } from './file-type';
+import { hashObjectStep } from './checksum';
+import { JobError } from './job-error';
 import { AI_GATEWAY } from './ai-gateway';
 import { getContainer } from '@cloudflare/containers';
 import { S3mini } from 's3mini';
@@ -60,14 +63,6 @@ const MAX_TEXT = 200_000,
 const WHISPER = '@cf/openai/whisper-large-v3-turbo' as const;
 const VISION = '@cf/google/gemma-4-26b-a4b-it' as const;
 const EMBEDDING = '@cf/baai/bge-base-en-v1.5' as const;
-class JobError extends Error {
-  constructor(
-    public code: string,
-    public permanent = false,
-  ) {
-    super(code);
-  }
-}
 const manifestKey = (v: string, g: number) => `derived/${v}/native-g${g}.json`;
 export const enrichmentKey = (v: string, k: string) =>
   `derived/${v}/${k.replaceAll(':', '-')}.json`;
@@ -380,7 +375,7 @@ async function callNative<T>(
     await container.destroy().catch(() => {});
   }
 }
-// Web Crypto receives only bounded objects. Native tools stream larger files.
+// Web Crypto receives only bounded objects.
 async function smallObjectBytes(bucket: R2Bucket, key: string, size: number) {
   const object = await bucket.get(key);
   if (!object) throw new JobError('original_object_missing');
@@ -423,7 +418,9 @@ async function processVersion(env: Env, j: Job, v: Version) {
         outputs: [],
         metadata: {},
         warnings: [
-          'Automatic extraction is unavailable for this file type. The original remains available.',
+          v.mime_type === 'application/applefile'
+            ? 'Mac metadata sidecar. Original retained.'
+            : 'Automatic extraction is unavailable for this file type. The original remains available.',
         ],
       };
     else if (
@@ -847,32 +844,30 @@ async function indexVersion(env: Env, j: Job, initial: Version) {
   }
   if (old.length) await env.INDEX.deleteByIds(old.map((x) => x.id));
 }
+async function hashObject(env: Env, j: Job, v: Version) {
+  const backup = j.kind === 'backup-hash';
+  const bucket = backup ? env.BACKUPS : env.FILES;
+  const key = backup ? backupKey(v) : v.storage_key;
+  if (v.size <= WORKER_OBJECT_BYTES) return smallObjectHash(bucket, key, v.size, j.id);
+  const digest = await hashObjectStep(env.DB, bucket, {
+    jobId: j.id,
+    versionId: v.id,
+    generation: j.generation,
+    lease: j.lease_token!,
+    bucketName: backup ? 'papra-drive-backups' : env.R2_BUCKET,
+    key,
+    size: v.size,
+  });
+  return digest === 'continue' ? digest : { jobId: j.id, byteSize: v.size, sha256: digest };
+}
+
 async function hashVersion(env: Env, j: Job, v: Version) {
-  if (v.sha256) return;
-  const value =
-    v.size <= WORKER_OBJECT_BYTES
-      ? await smallObjectHash(env.FILES, v.storage_key, v.size, j.id)
-      : await callNative<{ sha256: string; byteSize: number; jobId: string }>(env, j, '/hash', {
-          jobId: j.id,
-          source: {
-            url: await s3(env).getPresignedUrl('GET', v.storage_key, 1800),
-            contentType: v.mime_type,
-            byteSize: v.size,
-          },
-        });
-  if (value.jobId !== j.id || value.byteSize !== v.size || !/^[a-f0-9]{64}$/.test(value.sha256))
-    throw new JobError('original_hash_receipt_invalid', true);
-  if (!(await owned(env, j))) return;
-  await run(
-    env,
-    'UPDATE versions SET sha256=? WHERE id=? AND EXISTS(SELECT 1 FROM jobs WHERE id=? AND generation=? AND lease_token=?)',
-    value.sha256,
-    v.id,
-    j.id,
-    j.generation,
-    j.lease_token,
-  );
-  await fencedPut(
+  if (v.sha256 && (await env.BACKUPS.head(`versions/${v.id}/original-hash.json`))) return;
+  const value = await hashObject(env, j, v);
+  if (value === 'continue') return value;
+  if (v.sha256 && v.sha256 !== value.sha256) throw new JobError('original_checksum_mismatch', true);
+  // Publish the receipt first. A retry after a lost D1 write can reuse the final checkpoint.
+  const recorded = await fencedPut(
     env,
     j,
     env.BACKUPS,
@@ -880,6 +875,17 @@ async function hashVersion(env: Env, j: Job, v: Version) {
     JSON.stringify({ versionId: v.id, sourceBucket: env.R2_BUCKET, key: v.storage_key, ...value }),
     { httpMetadata: { contentType: 'application/json' } },
   );
+  if (recorded) {
+    await run(
+      env,
+      'UPDATE versions SET sha256=? WHERE id=? AND EXISTS(SELECT 1 FROM jobs WHERE id=? AND generation=? AND lease_token=?)',
+      value.sha256,
+      v.id,
+      j.id,
+      j.generation,
+      j.lease_token,
+    );
+  }
 }
 const backupKey = (v: Version) => `originals/${v.id}/original`;
 const backupS3 = (env: Env) =>
@@ -962,13 +968,8 @@ async function verifyBackup(env: Env, j: Job, v: Version) {
     throw new JobError('original_hash_pending');
   }
   const key = backupKey(v);
-  const receipt =
-    v.size <= WORKER_OBJECT_BYTES
-      ? await smallObjectHash(env.BACKUPS, key, v.size, j.id)
-      : await callNative<{ jobId: string; sha256: string; byteSize: number }>(env, j, '/hash', {
-          jobId: j.id,
-          source: { url: await backupS3(env).getPresignedUrl('GET', key, 1800), byteSize: v.size },
-        });
+  const receipt = await hashObject(env, j, v);
+  if (receipt === 'continue') return receipt;
   if (receipt.jobId !== j.id || receipt.sha256 !== v.sha256 || receipt.byteSize !== v.size)
     throw new JobError('backup_checksum_mismatch', true);
   if (!(await owned(env, j))) return;
@@ -1243,12 +1244,38 @@ export async function consumeJobs(batch: MessageBatch, env: Env) {
     try {
       const v = await version(env, j.version_id);
       if (!v) throw new JobError('version_missing', true);
+      // Older uploads can still be queued under the media type suggested by their extension.
+      if (
+        (j.kind === 'process' || j.kind.startsWith('video:')) &&
+        /^(audio|video)\//.test(v.mime_type)
+      ) {
+        const mime = await storedFileMime(
+          env.FILES,
+          v.storage_key,
+          v.original_name,
+          v.size,
+          v.mime_type,
+        );
+        if (mime !== v.mime_type) {
+          await env.DB.batch([
+            env.DB.prepare(
+              'UPDATE versions SET mime_type=? WHERE id=? AND storage_key=? AND mime_type=?',
+            ).bind(mime, v.id, v.storage_key, v.mime_type),
+            env.DB.prepare(
+              'UPDATE documents SET mime_type=? WHERE id=? AND current_version_id=? AND mime_type=?',
+            ).bind(mime, v.document_id, v.id, v.mime_type),
+          ]);
+          v.mime_type = mime;
+        }
+      }
       if (j.kind === 'process') await processVersion(env, j, v);
       else if (j.kind.startsWith('video:')) await runVideoJob(env, j, v, callNative);
       else if (j.kind === 'index') await indexVersion(env, j, v);
-      else if (j.kind === 'hash') await hashVersion(env, j, v);
-      else if (j.kind === 'backup') {
-        const result = await backupOriginal(env, j, v);
+      else if (['hash', 'backup', 'backup-hash'].includes(j.kind)) {
+        let result;
+        if (j.kind === 'hash') result = await hashVersion(env, j, v);
+        else if (j.kind === 'backup-hash') result = await verifyBackup(env, j, v);
+        else result = await backupOriginal(env, j, v);
         if (result === 'continue') {
           const released = await run(
             env,
@@ -1262,8 +1289,7 @@ export async function consumeJobs(batch: MessageBatch, env: Env) {
           message.ack();
           continue;
         }
-      } else if (j.kind === 'backup-hash') await verifyBackup(env, j, v);
-      else await enrichVersion(env, j, v);
+      } else await enrichVersion(env, j, v);
       const finished = await run(
         env,
         "UPDATE jobs SET status='done',lease_token=NULL,error=NULL,updated_at=? WHERE id=? AND generation=? AND lease_token=?",
@@ -1272,6 +1298,17 @@ export async function consumeJobs(batch: MessageBatch, env: Env) {
         j.generation,
         lease,
       );
+      if (
+        finished.meta.changes &&
+        v.size > WORKER_OBJECT_BYTES &&
+        ['hash', 'backup-hash'].includes(j.kind)
+      )
+        await run(
+          env,
+          'DELETE FROM checksum_checkpoints WHERE job_id=? AND generation=?',
+          j.id,
+          j.generation,
+        );
       if (finished.meta.changes && j.kind !== 'index') await settled(env, j.version_id);
       message.ack();
     } catch (error) {
