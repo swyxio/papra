@@ -1,6 +1,7 @@
 import type { App, AppEnv, Env, Identity } from './types';
 import type { Context } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
+import { trackSelectedDownload } from './feedback-observations';
 import { downloadBytes } from './download';
 import { jwtVerify, SignJWT } from 'jose';
 import { HTTPException } from 'hono/http-exception';
@@ -564,7 +565,10 @@ export function registerShareRoutes(app: App) {
     if (!doc.current_version_id) return fail(404, 'Original unavailable');
     const versionUrl = selectVersionUrl(context, row, doc.current_version_id);
     versionUrl.pathname += '/download';
-    if (context.req.query('direct') === 'download') return context.json({ url: versionUrl.href });
+    if (context.req.query('direct') === 'download') {
+      await trackSelectedDownload(context, versionUrl);
+      return context.json({ url: versionUrl.href });
+    }
     return context.redirect(versionUrl.href, 302);
   });
   const versionBase = '/api/share-links/:token/document/versions/:version';

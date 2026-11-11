@@ -1,4 +1,5 @@
 import type { Env } from './types';
+import { attachmentLabel } from './feedback-observations';
 import { error } from './db';
 
 // A single range covers browser resumes and parallel downloads. Ignore unsupported range units
@@ -29,7 +30,7 @@ export async function downloadBytes(
     'Content-Type': mime,
     'Content-Length': String(object.size),
     'Content-Disposition': name
-      ? `attachment; filename*=UTF-8''${encodeURIComponent(name)}`
+      ? `attachment; filename*=UTF-8''${attachmentLabel(name)}`
       : 'attachment',
     'Cache-Control': 'private, no-store, no-transform',
     'Content-Security-Policy': "sandbox; default-src 'none'",

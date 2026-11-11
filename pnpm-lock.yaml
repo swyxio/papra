@@ -664,6 +664,9 @@ importers:
       '@papra/search-parser':
         specifier: workspace:*
         version: link:../../packages/search-parser
+      '@papra/std':
+        specifier: workspace:*
+        version: link:../../packages/std
       aws4fetch:
         specifier: 1.0.20
         version: 1.0.20

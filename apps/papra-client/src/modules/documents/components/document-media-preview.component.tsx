@@ -10,6 +10,9 @@ import { SharedTranscriptPanel } from '@/modules/document-share-links/components
 import type { SharedTranscript } from '@/modules/document-share-links/document-share-links.services';
 import { apiClient } from '@/modules/shared/http/api-client';
 import { Button } from '@/modules/ui/components/button';
+import { ReportProblem } from '@/modules/feedback/report.component';
+import { errorObservation, errorProof } from '@/modules/feedback/feedback.services';
+import type { Diagnostics } from '@/modules/feedback/feedback.services';
 import type { Document } from '../documents.types';
 import { fetchDocumentProcessing, transcriptionActive } from '../document-processing.services';
 import { TranscriptionProgress } from './transcription-progress.component';
@@ -84,6 +87,22 @@ export function MediaPlaybackPlayer(props: {
   let refreshSource = false;
   const [quality, setQuality] = createSignal<MediaQuality>();
   const [failed, setFailed] = createSignal(false);
+  const [playerDiagnostics, setPlayerDiagnostics] = createSignal<Diagnostics>({
+    stage: 'playback',
+  });
+  const [playbackRetries, setPlaybackRetries] = createSignal(0);
+  const [actionProof, setActionProof] = createSignal<string>();
+  const [actionDiagnostics, setActionDiagnostics] = createSignal<Diagnostics>({ stage: 'preview' });
+  const playbackError = (event: Event) => {
+    const media = event.currentTarget as HTMLMediaElement;
+    setPlayerDiagnostics({
+      stage: 'playback',
+      retries: playbackRetries(),
+      mediaError: media.error?.code,
+      mediaSeconds: Number.isFinite(media.currentTime) ? Math.floor(media.currentTime) : undefined,
+    });
+    setFailed(true);
+  };
   const [preparing, setPreparing] = createSignal(false);
   const [actionError, setActionError] = createSignal('');
   const [blockedSeek, setBlockedSeek] = createSignal<number>();
@@ -95,6 +114,7 @@ export function MediaPlaybackPlayer(props: {
         pendingSeek = undefined;
         resumePlaying = false;
         setQuality(undefined);
+        setPlaybackRetries(0);
         setFailed(false);
         setBlockedSeek(undefined);
         automaticallyRequested = '';
@@ -151,7 +171,9 @@ export function MediaPlaybackPlayer(props: {
       if (seekAfter !== undefined) resumeAt = seekAfter;
       setQuality(requested);
       await media.refetch();
-    } catch {
+    } catch (error) {
+      setActionDiagnostics({ stage: 'preview', ...errorObservation(error) });
+      setActionProof(errorProof(error));
       setActionError('Could not prepare this preview. Please try again.');
     } finally {
       setPreparing(false);
@@ -244,6 +266,7 @@ export function MediaPlaybackPlayer(props: {
     });
   };
   const retryPlayback = async () => {
+    setPlaybackRetries((n) => n + 1);
     rememberPlayback();
     setFailed(false);
     refreshSource = true;
@@ -258,7 +281,9 @@ export function MediaPlaybackPlayer(props: {
       const link = document.createElement('a');
       link.href = url;
       link.click();
-    } catch {
+    } catch (error) {
+      setActionDiagnostics({ stage: 'preview', ...errorObservation(error) });
+      setActionProof(errorProof(error));
       setActionError('Could not download the preview. Please try again.');
     }
   };
@@ -504,7 +529,7 @@ export function MediaPlaybackPlayer(props: {
                   aria-label="Audio player"
                   class="w-full"
                   onLoadedMetadata={loaded}
-                  onError={() => setFailed(true)}
+                  onError={playbackError}
                 />
               </div>
             }
@@ -519,7 +544,7 @@ export function MediaPlaybackPlayer(props: {
               aria-label="Video player"
               class="block w-full max-h-55vh sm:max-h-120 min-h-48 object-contain"
               onLoadedMetadata={loaded}
-              onError={() => setFailed(true)}
+              onError={playbackError}
             />
           </Show>
         </div>
@@ -606,6 +631,26 @@ export function MediaPlaybackPlayer(props: {
           Automatic preview compute budget: ${media.data?.preview?.automaticMonthlyBudgetUsd ?? 10}
           /month · estimated, not invoice-exact.
         </p>
+      </Show>
+      <Show
+        when={
+          failed() || media.isError || actionError() || media.data?.preview?.status === 'failed'
+        }
+      >
+        <ReportProblem
+          label="Report a preview problem"
+          observation={
+            failed() ? undefined : actionError() ? actionProof() : errorProof(media.error)
+          }
+          operation="media-preview"
+          diagnostics={
+            failed()
+              ? playerDiagnostics()
+              : actionError()
+                ? actionDiagnostics()
+                : { stage: 'preview', ...errorObservation(media.error) }
+          }
+        />
       </Show>
       <Show when={actionError()}>
         <p role="alert" class="text-sm text-destructive">

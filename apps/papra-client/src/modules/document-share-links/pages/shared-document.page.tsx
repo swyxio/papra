@@ -1,3 +1,7 @@
+import { downloadFile } from '@/modules/shared/files/download';
+import { ReportProblem } from '@/modules/feedback/report.component';
+import { observation } from '@/modules/feedback/feedback.services';
+import type { Diagnostics } from '@/modules/feedback/feedback.services';
 import type { TeaserPlayback } from '@/modules/documents/components/document-media-preview.component';
 import { MediaPlaybackPlayer } from '@/modules/documents/components/document-media-preview.component';
 import { PublicHeader } from '@/modules/ui/layouts/public.layout';
@@ -123,19 +127,30 @@ const SharedDocumentCard: Component<{
     retry: 1,
     refetchOnWindowFocus: false,
   }));
+  const [attempt, setAttempt] = createSignal<{
+    diagnostics: Diagnostics;
+    proof?: string;
+    handedOff: boolean;
+  }>();
+  let attempts = 0;
   const downloadMutation = useMutation(() => ({
-    mutationFn: async () =>
-      fetchSharedDocumentDirect({
+    mutationFn: async () => {
+      const retries = attempts++;
+      setAttempt({ diagnostics: { stage: 'select-download', retries }, handedOff: false });
+      const result = await fetchSharedDocumentDirect({
         token: props.token,
         accessToken: props.accessToken,
         mode: 'download',
-      }),
-    onSuccess: ({ url }) => {
-      if (url) {
-        const link = window.document.createElement('a');
-        link.href = url;
-        link.click();
-      }
+        onObserved: (response) =>
+          setAttempt({
+            diagnostics: { stage: 'select-download', retries, ...observation(response) },
+            proof: response.headers.get('X-Feedback-Observation') ?? undefined,
+            handedOff: false,
+          }),
+      });
+      if (!result.url) throw new Error('Shared download URL unavailable');
+      downloadFile({ url: result.url, fileName: props.document.name });
+      setAttempt((current) => current && { ...current, handedOff: true });
     },
     onError: (error) => {
       if (isHttpErrorWithStatusCode({ error, statusCode: 401 })) props.onPasswordRequired();
@@ -199,6 +214,27 @@ const SharedDocumentCard: Component<{
           </Button>
         </div>
       </div>
+
+      <Show when={!downloadMutation.isPending && attempt()}>
+        {(item) => (
+          <div
+            class="max-w-5xl mx-auto px-6 py-3 flex items-center flex-wrap gap-3 text-sm"
+            role="status"
+          >
+            <p>
+              {item().handedOff
+                ? 'The download was handed to your browser.'
+                : 'The download could not be started.'}
+            </p>
+            <ReportProblem
+              label="Report a download problem"
+              operation="shared-download"
+              diagnostics={item().diagnostics}
+              observation={item().proof}
+            />
+          </div>
+        )}
+      </Show>
 
       <Show when={props.document.upload}>
         {(upload) => (

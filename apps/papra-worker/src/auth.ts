@@ -276,6 +276,8 @@ export async function provisionUser(
   return userId;
 }
 
+export const canReviewFeedback = (identity: Identity) => identity.isOwner && !identity.serviceScope;
+
 export async function getIdentity(request: Request, env: AuthEnv): Promise<Identity | null> {
   const token = await readCookie(cookie(request, cookieName(env, 'session')), env, 'drive-session');
   if (!token) return null;

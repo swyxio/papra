@@ -17,6 +17,10 @@ export type Env = {
   ASSETS: Fetcher;
   BACKUP_WORKFLOW: Workflow<MetadataBackupParams>;
   SHARE_PASSWORD_LIMITER: RateLimit;
+  DEVIN_ORG_ID?: string;
+  DEVIN_API_KEY?: string;
+  DEVIN_SECURITY_PROFILE_ID?: string;
+  FEEDBACK_GITHUB_TOKEN?: string;
   AUTH_LIMITER: RateLimit;
   AUTH_SECRET: string;
   GOOGLE_CLIENT_ID: string;
@@ -44,5 +48,8 @@ export type Identity = {
   session: { id: string; expiresAt: Date };
   serviceScope?: { organizationId: string; folderId: string; permissions: string[] };
 };
-export type AppEnv = { Bindings: Env; Variables: { identity: Identity } };
+export type AppEnv = {
+  Bindings: Env;
+  Variables: { identity: Identity; feedbackRequestId?: string };
+};
 export type App = Hono<AppEnv>;

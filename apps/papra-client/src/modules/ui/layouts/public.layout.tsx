@@ -1,3 +1,4 @@
+import { HelpMenu } from '@/modules/feedback/help-menu.component';
 import type { ParentComponent } from 'solid-js';
 import { Show } from 'solid-js';
 import { A } from '@solidjs/router';
@@ -19,6 +20,7 @@ export const PublicHeader: ParentComponent<{ hideSignIn?: boolean }> = (props) =
           <span class="hidden md:inline text-xs text-muted-foreground truncate max-w-48">
             {getUser()?.email}
           </span>
+          <HelpMenu />
           {props.children}
           <Show when={!props.hideSignIn || getIsAuthenticated()}>
             <Button
