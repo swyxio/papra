@@ -5,6 +5,7 @@ export type TranscriptionStatus = {
   completed: number;
   failed: number;
   total: number;
+  budgetLimited?: boolean;
 };
 export const transcriptionActive = (state: TranscriptionStatus | null | undefined) =>
   !!state && ['queued', 'preparing', 'transcribing'].includes(state.status);
@@ -28,6 +29,7 @@ export type DocumentProcessing = {
   versionId: string;
   uploaded: true;
   transcription?: TranscriptionStatus | null;
+  canRetryTranscription?: boolean;
   backup: 'pending' | 'copying' | 'verifying' | 'verified' | 'failed';
   keyword: 'pending' | 'ready' | 'failed' | 'unavailable';
   semantic: 'pending' | 'ready' | 'failed' | 'unavailable';

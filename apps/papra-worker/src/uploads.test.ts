@@ -412,6 +412,104 @@ test('processing readback enforces restricted-folder and service-token scope in 
   });
 });
 
+test('transcript retry preserves completed chunks, respects the budget reset and only dispatches failed work once', async () => {
+  const f = await fixture();
+  const created = await f.call('', 'POST', {
+    fileName: 'track.wav',
+    mimeType: 'audio/wav',
+    size: 0,
+    fingerprint: '1'.repeat(64),
+    folderId: 'private',
+  });
+  const { session } = (await created.json()) as {
+    session: { id: string; documentId: string; versionId: string };
+  };
+  await f.call(`/${session.id}/complete`, 'POST', {});
+  const v = session.versionId;
+  const doc = `/../documents/${session.documentId}`;
+  const retry = `${doc}/versions/${v}/transcript/retry`;
+  const sendBatch = vi.fn(async () => {});
+  f.env.SEARCH_JOBS = { sendBatch } as unknown as Queue;
+  f.env.JOBS = { sendBatch } as unknown as Queue;
+  await f.DB.batch([
+    f.DB.prepare(
+      "UPDATE jobs SET status='done',generation=2 WHERE version_id=? AND kind='process'",
+    ).bind(v),
+    f.DB.prepare("UPDATE versions SET processing_status='ready' WHERE id=?").bind(v),
+    ...Array.from({ length: 26 }, (_, i) =>
+      f.DB.prepare(
+        'INSERT INTO jobs(id,version_id,kind,status,attempts,error,created_at,updated_at) VALUES(?,?,?,?,3,?,1,?)',
+      ).bind(
+        'chunk' + i,
+        v,
+        'transcribe:2:' + i,
+        i < 20 ? 'done' : 'failed',
+        i < 20 ? null : 'daily_transcription_budget_exhausted',
+        Date.now(),
+      ),
+    ),
+    ...['transcribe:1:0', 'vision:2:0'].map((kind) =>
+      f.DB.prepare(
+        "INSERT INTO jobs(id,version_id,kind,status,created_at,updated_at) VALUES(?,?,?,'failed',1,1)",
+      ).bind(kind, v, kind),
+    ),
+  ]);
+  expect(await (await f.call(doc + '/processing')).json()).toMatchObject({
+    canRetryTranscription: true,
+    transcription: { completed: 20, failed: 6, budgetLimited: true },
+  });
+  expect((await f.call(retry, 'POST')).status).toBe(429);
+  expect((await f.call(doc + '/versions/replaced/transcript/retry', 'POST')).status).toBe(409);
+  await f.DB.prepare("INSERT INTO folder_acl VALUES('private','other','reader')").run();
+  f.user.userId = 'other';
+  expect(await (await f.call(doc + '/processing')).json()).toMatchObject({
+    canRetryTranscription: false,
+  });
+  expect((await f.call(retry, 'POST')).status).toBe(404);
+  expect(sendBatch).not.toHaveBeenCalled();
+  f.user.userId = 'writer';
+  await f.DB.prepare(
+    "UPDATE jobs SET updated_at=1 WHERE error='daily_transcription_budget_exhausted'",
+  ).run();
+  const concurrent = await Promise.all([f.call(retry, 'POST'), f.call(retry, 'POST')]);
+  expect(await Promise.all(concurrent.map(async (r) => r.json()))).toEqual(
+    expect.arrayContaining([{ queued: 6 }, { queued: 0 }]),
+  );
+  expect(sendBatch).toHaveBeenCalledTimes(1);
+  expect(sendBatch).toHaveBeenCalledWith(
+    Array.from({ length: 6 }, (_, i) => ({ body: { jobId: 'chunk' + (i + 20), generation: 0 } })),
+  );
+  expect(await (await f.call(doc + '/processing')).json()).toMatchObject({
+    transcription: { status: 'transcribing', completed: 20, failed: 0, total: 26 },
+  });
+  expect(
+    await f.DB.prepare(
+      "SELECT count(*) AS n FROM jobs WHERE id LIKE 'chunk%' AND status='done' AND attempts=3",
+    ).first('n'),
+  ).toBe(20);
+  expect(
+    await f.DB.prepare("SELECT count(*) AS n FROM jobs WHERE status='failed'").first('n'),
+  ).toBe(2);
+  expect(
+    await f.DB.prepare('SELECT processing_status FROM versions WHERE id=?')
+      .bind(v)
+      .first('processing_status'),
+  ).toBe('processing');
+
+  await f.DB.prepare("DELETE FROM jobs WHERE version_id=? AND kind LIKE 'transcribe:%'")
+    .bind(v)
+    .run();
+  await f.DB.prepare("UPDATE jobs SET status='failed' WHERE version_id=? AND kind='process'")
+    .bind(v)
+    .run();
+  expect(await (await f.call(retry, 'POST')).json()).toEqual({ queued: 1 });
+  expect(
+    await f.DB.prepare("SELECT generation,status FROM jobs WHERE version_id=? AND kind='process'")
+      .bind(v)
+      .first(),
+  ).toEqual({ generation: 2, status: 'pending' });
+});
+
 test('reserved short ID exposes progress before bytes arrive, activates atomically and survives rename', async () => {
   const f = await fixture();
   await f.DB.prepare("UPDATE organization_members SET role='admin' WHERE user_id='writer'").run();

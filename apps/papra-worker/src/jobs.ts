@@ -177,6 +177,27 @@ export async function dispatchVersionJobs(env: Env, versions: string[]) {
     ),
   );
 }
+export async function retryFailedTranscription(env: Env, documentId: string, versionId: string) {
+  const now = Date.now();
+  const dayStart = new Date(now).setUTCHours(0, 0, 0, 0);
+  // Keep the extraction generation: completed chunks and the audio manifest belong to it.
+  const [retried] = await env.DB.batch([
+    env.DB.prepare(`
+      UPDATE jobs SET status='pending',attempts=0,lease_token=NULL,error=NULL,updated_at=?
+      WHERE version_id=? AND status='failed'
+        AND EXISTS (SELECT 1 FROM documents WHERE id=? AND current_version_id=jobs.version_id AND is_deleted=0)
+        AND (kind='process' OR kind LIKE ('transcribe:' ||
+          (SELECT generation FROM jobs p WHERE p.version_id=jobs.version_id AND p.kind='process') || ':%'))
+        AND (error IS NOT 'daily_transcription_budget_exhausted' OR updated_at<?)
+      RETURNING *`).bind(now, versionId, documentId, dayStart),
+    // Let the usual completion path rebuild search from all successful chunks.
+    env.DB.prepare(
+      "UPDATE versions SET processing_status='processing',processing_error=NULL WHERE id=? AND changes()>0",
+    ).bind(versionId),
+  ]);
+  await dispatchJobs(env, retried.results as Job[]);
+  return retried.results.length;
+}
 export async function enqueueVersion(env: Env, v: string, kind = 'process') {
   if (!['process', 'index'].includes(kind)) throw new JobError('invalid_job_kind', true);
   if (!(await version(env, v))) throw new JobError('version_missing', true);

@@ -1,6 +1,7 @@
 import type { App, Env, Identity } from './types';
-import { all, error } from './db';
-import { permittedDocumentPredicateSQL } from './collaboration';
+import { all, error, first } from './db';
+import { ensureDocumentAccess, permittedDocumentPredicateSQL } from './collaboration';
+import { retryFailedTranscription } from './jobs';
 
 type ProcessingDocument = {
   id: string;
@@ -40,7 +41,10 @@ export function transcriptionStatus(mimeType: string, jobs: ProcessingJob[]) {
         : process?.status === 'processing'
           ? 'preparing'
           : 'queued';
-  return { status, completed, failed, total };
+  const budgetLimited = pieces.some(
+    (job) => job.status === 'failed' && job.error === 'daily_transcription_budget_exhausted',
+  );
+  return { status, completed, failed, total, ...(budgetLimited && { budgetLimited }) };
 }
 export async function fetchTranscriptionStatus(env: Env, versionId: string, mimeType: string) {
   if (!/^(audio|video)\//i.test(mimeType)) return null;
@@ -125,13 +129,13 @@ async function statuses(env: Env, user: Identity, org: string, ids: string[]) {
     return d
       ? {
           documentId,
-          status: 200,
+          status: 200 as const,
           ...processingStatus(
             d,
             jobs.filter((j) => j.version_id === d.version_id),
           ),
         }
-      : { documentId, status: 404, message: 'Document not found' };
+      : { documentId, status: 404 as const, message: 'Document not found' };
   });
 }
 export function registerProcessingRoutes(app: App) {
@@ -156,6 +160,46 @@ export function registerProcessingRoutes(app: App) {
     ]);
     if (result.status !== 200) throw error(404, 'Document not found');
     const { documentId: _documentId, status: _status, ...body } = result;
+    const user = c.get('identity');
+    if (
+      body.transcription?.status === 'failed' &&
+      (!user.serviceScope || user.serviceScope.permissions.includes('write'))
+    ) {
+      const access = await permittedDocumentPredicateSQL(
+        c.env,
+        user,
+        c.req.param('org'),
+        'd',
+        'write',
+      );
+      const writable = await first(
+        c.env,
+        `SELECT d.id FROM documents d WHERE d.id=? AND (${access.sql})`,
+        c.req.param('doc'),
+        ...access.bindings,
+      );
+      return c.json({ ...body, canRetryTranscription: !!writable });
+    }
     return c.json(body);
+  });
+  app.post(`${base}/:doc/versions/:version/transcript/retry`, async (c) => {
+    const doc = await ensureDocumentAccess(c.env, c.get('identity'), c.req.param('doc'), 'write');
+    if (doc.organization_id !== c.req.param('org') || doc.is_deleted)
+      throw error(404, 'Document not found');
+    const versionId = c.req.param('version');
+    if (doc.current_version_id !== versionId)
+      throw error(409, 'The file version changed. Refresh the document.');
+    if (!/^(audio|video)\//i.test(doc.mime_type))
+      throw error(400, 'This file has no audio transcription');
+    const queued = await retryFailedTranscription(c.env, doc.id, versionId);
+    if (!queued) {
+      const state = await fetchTranscriptionStatus(c.env, versionId, doc.mime_type);
+      if (state?.status === 'failed' && state.budgetLimited)
+        throw error(
+          429,
+          'The daily transcription allowance resets at 00:00 UTC. Try again after the reset.',
+        );
+    }
+    return c.json({ queued });
   });
 }
