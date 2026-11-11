@@ -23,6 +23,8 @@ type Bug = {
   reports: Report[];
   sessionId?: string;
   prUrl?: string;
+  prNumber?: number;
+  headSha?: string;
   runState?: string;
   releaseVersion?: string;
 };
@@ -56,6 +58,10 @@ function BugReview(props: { bug: Bug; bugs: Bug[]; refresh: () => Promise<void> 
     }
     if (action() === 'group') body.targetBugId = value();
     if (action() === 'link-pr') body.prNumber = Number(value());
+    if (action() === 'approve-pr') {
+      body.prNumber = props.bug.prNumber;
+      body.headSha = props.bug.headSha;
+    }
     if (action() === 'link-session') body.sessionId = value().trim();
     if (action() === 'verify-release' && value().trim()) body.releaseTag = value().trim();
     try {
@@ -93,7 +99,7 @@ function BugReview(props: { bug: Bug; bugs: Bug[]; refresh: () => Promise<void> 
         <Show when={props.bug.prUrl?.startsWith('https://github.com/') && props.bug.prUrl}>
           {(url) => (
             <a class="underline" href={url()} target="_blank" rel="noreferrer">
-              Review draft pull request
+              Review PR #{props.bug.prNumber} · {props.bug.headSha?.slice(0, 12)}
             </a>
           )}
         </Show>
@@ -149,6 +155,7 @@ function BugReview(props: { bug: Bug; bugs: Bug[]; refresh: () => Promise<void> 
           <label class="block">
             Decision{' '}
             <select
+              aria-label="Decision"
               class="bg-background p-2 border rounded"
               value={action()}
               onChange={(e) => {

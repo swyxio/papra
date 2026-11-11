@@ -101,10 +101,38 @@ test('one atomic creation per bug, two reserved starts per day, safe prompt and 
   expect(await f.state('bug-a')).toBe('draft-pr');
   hooks.changedHead = true;
   await expect(
-    reviewFeedbackBug(f.env, 'bug-a', action('approve-pr'), provider.http),
+    reviewFeedbackBug(
+      f.env,
+      'bug-a',
+      action('approve-pr', { prNumber: 17, headSha: revision }),
+      provider.http,
+    ),
   ).rejects.toThrow(/changed/);
+  await reviewFeedbackBug(f.env, 'bug-a', action('link-pr', { prNumber: 17 }), provider.http);
+  await expect(
+    reviewFeedbackBug(
+      f.env,
+      'bug-a',
+      action('approve-pr', { prNumber: 17, headSha: revision }),
+      provider.http,
+    ),
+  ).rejects.toThrow(/linked draft changed/);
   hooks.changedHead = false;
-  await reviewFeedbackBug(f.env, 'bug-a', action('approve-pr'), provider.http);
+  await reviewFeedbackBug(f.env, 'bug-a', action('link-pr', { prNumber: 17 }), provider.http);
+  await expect(
+    reviewFeedbackBug(
+      f.env,
+      'bug-a',
+      action('approve-pr', { prNumber: 18, headSha: revision }),
+      provider.http,
+    ),
+  ).rejects.toThrow(/linked draft changed/);
+  await reviewFeedbackBug(
+    f.env,
+    'bug-a',
+    action('approve-pr', { prNumber: 17, headSha: revision }),
+    provider.http,
+  );
   expect(await f.state('bug-a')).toBe('awaiting-release');
   await expect(
     reviewFeedbackBug(f.env, 'bug-a', action('verify-release'), provider.http),
@@ -223,7 +251,12 @@ test('desktop human investigation checks draft evidence, approval, installer and
   ).rejects.toThrow(/sections/);
   hooks.badBody = false;
   await reviewFeedbackBug(f.env, 'bug-desktop', action('link-pr', { prNumber: 17 }), provider.http);
-  await reviewFeedbackBug(f.env, 'bug-desktop', action('approve-pr'), provider.http);
+  await reviewFeedbackBug(
+    f.env,
+    'bug-desktop',
+    action('approve-pr', { prNumber: 17, headSha: revision }),
+    provider.http,
+  );
   hooks.merged = true;
   const verify = async () =>
     reviewFeedbackBug(

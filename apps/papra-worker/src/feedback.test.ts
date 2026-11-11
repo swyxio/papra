@@ -119,7 +119,14 @@ test('two signed-out recipients, native range evidence, one dispatch, private co
   hooks.noPr = false;
   await processFeedbackWork(f.env, http);
   expect((await receipt(aPath, aHeaders)).status).toBe('draft-pr');
-  expect((await decision('approve-pr')).status).toBe(200);
+  const queue = (await (await f.request('/api/feedback-review', undefined, owner)).json()) as {
+    bugs: { bugId: string; prNumber: number; headSha: string }[];
+  };
+  const draft = queue.bugs.find((bug) => bug.bugId === ar.bugId)!;
+  expect(draft).toMatchObject({ prNumber: 17, headSha: revision });
+  expect(
+    (await decision('approve-pr', { prNumber: draft.prNumber, headSha: draft.headSha })).status,
+  ).toBe(200);
   expect((await decision('verify-release')).status).toBe(409);
   hooks.merged = true;
   hooks.liveSha = revision;

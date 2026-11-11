@@ -237,6 +237,7 @@ type Decision = {
   generation?: unknown;
   sessionId?: unknown;
   prNumber?: unknown;
+  headSha?: unknown;
   releaseTag?: unknown;
 };
 
@@ -272,6 +273,12 @@ export async function reviewFeedbackBug(
   }
   if (action.action === 'approve-pr') {
     if (row.state !== 'draft-pr' || !row.pr_number) throw error(409, 'Link the draft first');
+    if (
+      action.prNumber !== row.pr_number ||
+      !row.approved_head_sha ||
+      action.headSha !== row.approved_head_sha
+    )
+      throw error(409, 'The linked draft changed. Refresh and review the current revision');
     const pr = await readPr(env, http, bug, row.pr_number);
     if (pr.head.sha !== row.approved_head_sha || (pr.state !== 'open' && !pr.merged))
       throw error(409, 'The PR changed or closed. Review and link its current draft first');

@@ -9,7 +9,7 @@ import { expect, test, vi } from 'vitest';
 import { app } from '../src/index';
 import { feedbackFixture } from '../src/feedback-intake.fixture';
 import { DownloadLabelError } from '../src/feedback-observations';
-import { fakeProvider } from '../src/feedback-provider.fixture';
+import { fakeProvider, revision } from '../src/feedback-provider.fixture';
 import { processFeedbackWork } from '../src/feedback-workflow';
 import * as download from '../src/download';
 
@@ -105,9 +105,13 @@ test('native download failure through private receipt, human review and verified
     hooks.noPr = false;
     await processFeedbackWork(f.env, http);
     const reviewer = await f.cookie('owner');
-    const act = async (action) =>
-      f.request('/api/feedback-review/' + bug + '/decisions', { generation: 1, action }, reviewer);
-    expect((await act('approve-pr')).status).toBe(200);
+    const act = async (action, details = {}) =>
+      f.request(
+        '/api/feedback-review/' + bug + '/decisions',
+        { generation: 1, action, ...details },
+        reviewer,
+      );
+    expect((await act('approve-pr', { prNumber: 17, headSha: revision })).status).toBe(200);
     hooks.merged = true;
     expect((await act('verify-release')).status).toBe(200);
     await page.reload();

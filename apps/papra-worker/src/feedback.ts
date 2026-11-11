@@ -225,6 +225,7 @@ type BugRow = {
   state: string | null;
   session_id: string | null;
   pr_number: number | null;
+  approved_head_sha: string | null;
   release_version: string | null;
 };
 async function reportsMessages(env: Env, id: string) {
@@ -268,7 +269,7 @@ async function queue(c: Context<AppEnv>) {
   const rows = (
     await statement(
       c.env,
-      `SELECT r.*,r.rowid AS cursor,b.status,b.generation,run.state,run.session_id,run.pr_number,run.release_version
+      `SELECT r.*,r.rowid AS cursor,b.status,b.generation,run.state,run.session_id,run.pr_number,run.approved_head_sha,run.release_version
     FROM feedback_reports r JOIN feedback_bugs b ON b.id=r.bug_id LEFT JOIN feedback_runs run ON run.bug_id=b.id AND run.generation=b.generation
     WHERE r.rowid<? ORDER BY r.rowid DESC LIMIT 21`,
       cursor,
@@ -294,6 +295,8 @@ function bugDto(r: BugRow, id: string) {
     operation: r.operation,
     runState: r.state,
     sessionId: r.session_id,
+    prNumber: r.pr_number,
+    headSha: r.approved_head_sha,
     prUrl: r.pr_number ? `https://github.com/swyxio/${repo}/pull/${r.pr_number}` : null,
     releaseVersion: r.release_version,
     reports: [] as (ReturnType<typeof reportDto> & { messages: Record<string, unknown>[] })[],

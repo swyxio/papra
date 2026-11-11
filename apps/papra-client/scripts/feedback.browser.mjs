@@ -231,6 +231,23 @@ try {
       feedbackId: 'fb_fixture',
       body: 'Which retry failed?',
     });
+  Object.assign(queueBug, {
+    status: 'draft-pr',
+    runState: 'draft-pr',
+    prNumber: 17,
+    headSha: sha,
+    prUrl: 'https://github.com/swyxio/papra/pull/17',
+  });
+  await page.reload();
+  await page.getByText('Draft fix ready for human review', { exact: false }).click();
+  await expect(
+    page.getByRole('link', { name: 'Review PR #17 · ' + sha.slice(0, 12) }),
+  ).toBeVisible();
+  await page.getByLabel('Decision', { exact: true }).selectOption('approve-pr');
+  await page.getByRole('button', { name: 'Apply decision' }).click();
+  await expect
+    .poll(() => decision)
+    .toEqual({ generation: 3, action: 'approve-pr', prNumber: 17, headSha: sha });
   await page.goto(origin + '/orgs/org_test');
   await page.getByRole('button', { name: 'Import a document' }).click();
   const chooser = page.waitForEvent('filechooser');
