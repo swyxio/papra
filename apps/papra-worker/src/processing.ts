@@ -17,6 +17,7 @@ type ProcessingJob = {
   status: string;
   error: string | null;
   generation?: number;
+  updated_at?: number;
 };
 export function transcriptionStatus(mimeType: string, jobs: ProcessingJob[]) {
   if (!/^(audio|video)\//i.test(mimeType)) return null;
@@ -41,16 +42,29 @@ export function transcriptionStatus(mimeType: string, jobs: ProcessingJob[]) {
         : process?.status === 'processing'
           ? 'preparing'
           : 'queued';
+  const deferred = pieces.find(
+    (job) =>
+      job.status === 'pending' &&
+      job.error === 'daily_transcription_budget_exhausted' &&
+      (job.updated_at ?? 0) > Date.now(),
+  );
   const budgetLimited = pieces.some(
     (job) => job.status === 'failed' && job.error === 'daily_transcription_budget_exhausted',
   );
-  return { status, completed, failed, total, ...(budgetLimited && { budgetLimited }) };
+  return {
+    status,
+    completed,
+    failed,
+    total,
+    ...(budgetLimited && { budgetLimited }),
+    ...(deferred?.updated_at && { resumesAt: new Date(deferred.updated_at).toISOString() }),
+  };
 }
 export async function fetchTranscriptionStatus(env: Env, versionId: string, mimeType: string) {
   if (!/^(audio|video)\//i.test(mimeType)) return null;
   const jobs = await all<ProcessingJob>(
     env,
-    "SELECT version_id,kind,status,error,generation FROM jobs WHERE version_id=? AND (kind='process' OR kind LIKE 'transcribe:%')",
+    "SELECT version_id,kind,status,error,generation,updated_at FROM jobs WHERE version_id=? AND (kind='process' OR kind LIKE 'transcribe:%')",
     versionId,
   );
   return transcriptionStatus(mimeType, jobs);
@@ -120,7 +134,7 @@ async function statuses(env: Env, user: Identity, org: string, ids: string[]) {
   const jobs = versions.length
     ? await all<ProcessingJob>(
         env,
-        `SELECT version_id,kind,status,error,generation FROM jobs WHERE version_id IN (${versions.map(() => '?').join(',')}) AND (kind IN ('process','index','hash','backup','backup-hash') OR kind LIKE 'transcribe:%')`,
+        `SELECT version_id,kind,status,error,generation,updated_at FROM jobs WHERE version_id IN (${versions.map(() => '?').join(',')}) AND (kind IN ('process','index','hash','backup','backup-hash') OR kind LIKE 'transcribe:%')`,
         ...versions,
       )
     : [];
@@ -162,7 +176,7 @@ export function registerProcessingRoutes(app: App) {
     const { documentId: _documentId, status: _status, ...body } = result;
     const user = c.get('identity');
     if (
-      body.transcription?.status === 'failed' &&
+      (body.transcription?.status === 'failed' || body.transcription?.status === 'ready') &&
       (!user.serviceScope || user.serviceScope.permissions.includes('write'))
     ) {
       const access = await permittedDocumentPredicateSQL(
@@ -178,7 +192,12 @@ export function registerProcessingRoutes(app: App) {
         c.req.param('doc'),
         ...access.bindings,
       );
-      return c.json({ ...body, canRetryTranscription: !!writable });
+      return c.json({
+        ...body,
+        canRetryTranscription: !!writable && body.transcription.status === 'failed',
+        canCreateRecordingNotes:
+          !!writable && !user.serviceScope && body.transcription.status === 'ready',
+      });
     }
     return c.json(body);
   });
@@ -194,14 +213,6 @@ export function registerProcessingRoutes(app: App) {
     const stage = c.req.query('stage') ?? 'chunks';
     if (stage !== 'chunks' && stage !== 'preparation') throw error(400, 'Unknown retry stage');
     const queued = await retryFailedTranscription(c.env, doc.id, versionId, stage);
-    if (!queued && stage === 'chunks') {
-      const state = await fetchTranscriptionStatus(c.env, versionId, doc.mime_type);
-      if (state?.status === 'failed' && state.budgetLimited)
-        throw error(
-          429,
-          'The daily transcription allowance resets at 00:00 UTC. Try again after the reset.',
-        );
-    }
     return c.json({ queued });
   });
 }

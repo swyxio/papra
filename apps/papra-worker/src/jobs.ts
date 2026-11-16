@@ -1,7 +1,14 @@
 import { storedFileMime } from './file-type';
 import { hashObjectStep } from './checksum';
 import { JobError } from './job-error';
-import { AI_GATEWAY } from './ai-gateway';
+import { AI_GATEWAY, reserveDocumentAnswer } from './ai-gateway';
+import { enrichmentKey } from './transcripts';
+import {
+  generateRecordingNotes,
+  recordingNotesKey,
+  recordingNotesJob,
+  RECORDING_NOTES_JOB,
+} from './recording-notes';
 import { getContainer } from '@cloudflare/containers';
 import { S3mini } from 's3mini';
 import { AwsClient } from 'aws4fetch';
@@ -64,8 +71,6 @@ const WHISPER = '@cf/openai/whisper-large-v3-turbo' as const;
 const VISION = '@cf/google/gemma-4-26b-a4b-it' as const;
 const EMBEDDING = '@cf/baai/bge-base-en-v1.5' as const;
 const manifestKey = (v: string, g: number) => `derived/${v}/native-g${g}.json`;
-export const enrichmentKey = (v: string, k: string) =>
-  `derived/${v}/${k.replaceAll(':', '-')}.json`;
 async function version(env: Env, v: string) {
   return first<Version>(
     env,
@@ -126,7 +131,7 @@ function jobQueue(env: Env, j: Job) {
 async function dispatchJobs(env: Env, jobs: Job[]) {
   const groups = new Map<Queue, Job[]>();
   for (const j of jobs) {
-    if (j.status !== 'pending') continue;
+    if (j.status !== 'pending' || j.updated_at > Date.now()) continue;
     const queue = jobQueue(env, j).binding;
     groups.set(queue, [...(groups.get(queue) || []), j]);
   }
@@ -185,14 +190,35 @@ export async function retryFailedTranscription(
   const now = Date.now();
   const dayStart = new Date(now).setUTCHours(0, 0, 0, 0);
   // Keep the extraction generation: completed chunks and the audio manifest belong to it.
+  const usage =
+    stage === 'chunks'
+      ? await first<{ audio_seconds: number }>(
+          env,
+          'SELECT audio_seconds FROM ai_usage WHERE day=?',
+          new Date(now).toISOString().slice(0, 10),
+        )
+      : null;
+  const resumeAt = dayStart + 86400000;
+  const deferBudget = (usage?.audio_seconds ?? 0) > 21600 - 300;
+  const deferred = "error='daily_transcription_budget_exhausted' AND (updated_at>=? OR ?=1)";
   const [retried] = await env.DB.batch([
     env.DB.prepare(`
-      UPDATE jobs SET status='pending',attempts=0,lease_token=NULL,error=NULL,updated_at=?
+      UPDATE jobs SET status='pending',attempts=0,lease_token=NULL,
+        updated_at=CASE WHEN ${deferred} THEN ? ELSE ? END,
+        error=CASE WHEN ${deferred} THEN error ELSE NULL END
       WHERE version_id=? AND status='failed'
         AND EXISTS (SELECT 1 FROM documents WHERE id=? AND current_version_id=jobs.version_id AND is_deleted=0)
         AND ${selectedJobs}
-        AND (error IS NOT 'daily_transcription_budget_exhausted' OR updated_at<?)
-      RETURNING *`).bind(now, versionId, documentId, dayStart),
+      RETURNING *`).bind(
+      dayStart,
+      Number(deferBudget),
+      resumeAt,
+      now,
+      dayStart,
+      Number(deferBudget),
+      versionId,
+      documentId,
+    ),
     // Let the usual completion path rebuild search from all successful chunks.
     env.DB.prepare(
       "UPDATE versions SET processing_status='processing',processing_error=NULL WHERE id=? AND changes()>0",
@@ -200,6 +226,33 @@ export async function retryFailedTranscription(
   ]);
   await dispatchJobs(env, retried.results as Job[]);
   return retried.results.length;
+}
+export async function enqueueRecordingNotes(
+  env: Env,
+  documentId: string,
+  versionId: string,
+  generation: number,
+) {
+  const now = Date.now();
+  const job = await first<Job>(
+    env,
+    `
+    INSERT INTO jobs(id,version_id,kind,status,created_at,updated_at)
+    SELECT ?,?,?,'pending',?,? FROM documents
+    WHERE id=? AND current_version_id=? AND is_deleted=0
+    ON CONFLICT(version_id,kind) DO UPDATE SET status='pending',attempts=0,error=NULL,
+      lease_token=NULL,generation=jobs.generation+1,updated_at=excluded.updated_at
+    WHERE jobs.status='failed'
+    RETURNING *`,
+    id('job'),
+    versionId,
+    recordingNotesJob(generation),
+    now,
+    now,
+    documentId,
+    versionId,
+  );
+  if (job) await dispatchJobs(env, [job]);
 }
 export async function enqueueVersion(env: Env, v: string, kind = 'process') {
   if (!['process', 'index'].includes(kind)) throw new JobError('invalid_job_kind', true);
@@ -1239,7 +1292,7 @@ export async function consumeJobs(batch: MessageBatch, env: Env) {
       body.jobId,
       body.generation,
     );
-    if (!j || j.status !== 'pending') {
+    if (!j || j.status !== 'pending' || j.updated_at > Date.now()) {
       message.ack();
       continue;
     }
@@ -1317,6 +1370,17 @@ export async function consumeJobs(batch: MessageBatch, env: Env) {
           if (released.meta.changes) await dispatchJobs(env, [{ ...j, status: 'pending' }]);
           message.ack();
           continue;
+        }
+      } else if (j.kind.startsWith(RECORDING_NOTES_JOB)) {
+        const generation = Number(j.kind.slice(RECORDING_NOTES_JOB.length));
+        const key = recordingNotesKey(v.id, generation);
+        if (v.current_version_id === v.id && !v.is_deleted && !(await env.FILES.head(key))) {
+          if (!(await reserveDocumentAnswer(env)))
+            throw new JobError('daily_recording_summary_limit_reached', true);
+          const notes = await generateRecordingNotes(env, v.id, generation);
+          await fencedPut(env, j, env.FILES, key, JSON.stringify(notes), {
+            httpMetadata: { contentType: 'application/json' },
+          });
         }
       } else await enrichVersion(env, j, v);
       const finished = await run(
@@ -1457,8 +1521,11 @@ export async function housekeeping(env: Env) {
     env,
     await all<Job>(
       env,
-      `${jobSelect} WHERE j.status='pending' AND j.updated_at<? ORDER BY j.updated_at,j.id LIMIT 1000`,
+      `${jobSelect} WHERE j.status='pending' AND
+        (j.updated_at<? OR (j.error='daily_transcription_budget_exhausted' AND j.updated_at<=?))
+        ORDER BY j.updated_at,j.id LIMIT 1000`,
       now - 5 * 60_000,
+      now,
     ),
   );
   for (const v of await all<{ id: string }>(
