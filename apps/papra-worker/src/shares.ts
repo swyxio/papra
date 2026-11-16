@@ -5,12 +5,13 @@ import { trackSelectedDownload } from './feedback-observations';
 import { downloadBytes } from './download';
 import { jwtVerify, SignJWT } from 'jose';
 import { HTTPException } from 'hono/http-exception';
-import { approvedIdentityEmail, OWNER_EMAIL } from './auth';
+import { approvedIdentityEmail, getIdentity, OWNER_EMAIL } from './auth';
 import { ensureDocumentAccess, ensureOrganizationMember } from './collaboration';
 import { getDocument } from './db';
 import { shareUrl, newShareId, validShareId } from './share-urls';
 import { pendingUploadShare } from './upload-shares';
 import { fetchTranscript } from './transcripts';
+import { readRecordingNotes } from './recording-notes';
 import { fetchTranscriptionStatus } from './processing';
 import { s3, signedMedia } from './storage';
 import { mediaResponse, requestVideoPreview, previewDownload, downloadPreviewBytes } from './video';
@@ -513,12 +514,20 @@ export function registerShareRoutes(app: App) {
     );
     const doc = await getDocument(context.env, row.document_id);
     if (!doc || doc.is_deleted) return fail(410, 'Share link unavailable');
+    const member = /^(audio|video)\//.test(doc.mime_type)
+      ? await getIdentity(context.req.raw, context.env)
+      : null;
+    const manage =
+      member && (await canManageSharing(context.env, member, row.organization_id, row.document_id));
     return context.json({
       document: {
         name: doc.name,
         size: doc.original_size,
         mimeType: doc.mime_type,
         versionId: doc.current_version_id,
+        ...(manage && {
+          recordingEditor: { organizationId: row.organization_id, documentId: doc.id },
+        }),
         transcription: await fetchTranscriptionStatus(
           context.env,
           doc.current_version_id,
@@ -538,7 +547,11 @@ export function registerShareRoutes(app: App) {
     if (!/^(audio|video)\//.test(doc.mime_type)) return fail(404, 'No transcript for this file');
     const transcript = await fetchTranscript(context.env, doc.current_version_id);
     if (!transcript) throw new HTTPException(503, { message: 'Transcript is not available yet' });
-    return context.json({ transcript });
+    return context.json({
+      transcript,
+      versionId: doc.current_version_id,
+      notes: await readRecordingNotes(context.env, doc.current_version_id, transcript.generation),
+    });
   });
   app.get('/api/share-links/:token/document/file', async (context) => {
     const row = await authorizedPublicShare(

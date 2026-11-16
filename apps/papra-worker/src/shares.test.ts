@@ -7,6 +7,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import { hashSharePassword, registerShareRoutes, verifySharePassword } from './shares';
 import { pageMetadata, rewritePageMetadata } from './page-metadata';
 import { registerDocumentRoutes } from './documents';
+import { consumeJobs } from './jobs';
 
 // Share authorization uses real D1. Containers are unrelated to these routes and only exist in workerd.
 vi.mock('@cloudflare/containers', () => ({ Container: class {}, getContainer: vi.fn() }));
@@ -701,7 +702,10 @@ test('shared transcript requires existing delegation and returns only current-ge
   const response = await request(path, 'GET', undefined, 'owner', accessToken);
   expect(response.status).toBe(200);
   expect(await response.json()).toEqual({
+    versionId: 'v-open',
+    notes: null,
     transcript: {
+      generation: 1,
       text: 'Hello world.\n\nSecond part.',
       segments: [
         { text: 'Hello', startSeconds: 0 },
@@ -720,7 +724,10 @@ test('shared transcript requires existing delegation and returns only current-ge
   get.mockClear();
   const partial = await request(path, 'GET', undefined, 'owner', accessToken);
   expect(await partial.json()).toEqual({
+    versionId: 'v-open',
+    notes: null,
     transcript: {
+      generation: 1,
       partial: { completed: 2, total: 5 },
       text: 'Hello world.\n\n[Chunks 2–3 not transcribed]\n\nSecond part.\n\n[Chunk 5 not transcribed]',
       segments: [
@@ -767,6 +774,85 @@ test('shared transcript requires existing delegation and returns only current-ge
       .status,
   ).toBe(410);
 });
+test('recording notes queue once and use the existing protected share for readback', async () => {
+  const { DB, env, request, create } = await fixture();
+  await DB.exec(
+    "UPDATE documents SET mime_type='video/mp4' WHERE id='open'; INSERT INTO jobs(id,version_id,kind,status,generation,created_at,updated_at) VALUES('p','v-open','process','done',1,1,1),('a','v-open','transcribe:1:0','done',0,1,1);",
+  );
+  await env.FILES.put(
+    'derived/v-open/transcribe-1-0.json',
+    JSON.stringify({
+      text: 'The queue replays on reconnect.',
+      chunks: [{ text: 'The queue replays on reconnect.', startSeconds: 35 }],
+    }),
+  );
+  const sendBatch = vi.fn(async () => {});
+  env.SEARCH_JOBS = { sendBatch } as unknown as Queue;
+  const runModel = vi.fn(async () => ({
+    choices: [
+      {
+        message: {
+          content: JSON.stringify({
+            sections: [
+              {
+                title: 'Replay the queue',
+                summary: 'The queue replays when connectivity returns.',
+                first: 0,
+                last: 0,
+                witness: 0,
+                quote: 'The queue replays on reconnect.',
+              },
+            ],
+          }),
+        },
+      },
+    ],
+  }));
+  env.AI = { run: runModel } as unknown as Ai;
+  const route = '/api/organizations/team/documents/open/versions/v-open/recording-notes';
+  expect((await request(route, 'POST', undefined, 'outsider')).status).toBe(403);
+  expect((await request(route.replace('/v-open/', '/v-stale/'), 'POST')).status).toBe(409);
+  expect((await request(route, 'POST')).status).toBe(202);
+  expect((await request(route, 'POST')).status).toBe(202);
+  expect(sendBatch).toHaveBeenCalledTimes(1);
+  const job = await DB.prepare(
+    "SELECT id,generation FROM jobs WHERE kind='recording-notes:v1:1'",
+  ).first<{ id: string; generation: number }>();
+  await consumeJobs(
+    {
+      queue: 'papra-drive-search',
+      messages: [
+        { body: { jobId: job!.id, generation: job!.generation }, ack: vi.fn(), retry: vi.fn() },
+      ],
+    } as unknown as MessageBatch,
+    env,
+  );
+  expect(runModel).toHaveBeenCalledTimes(1);
+  const share = await create('open', 'password');
+  const path = `/api/share-links/${share.token}`;
+  expect((await request(`${path}/document/transcript`)).status).toBe(401);
+  const unlocked = await request(`${path}/verify`, 'POST', { password: 'password' });
+  const { accessToken } = (await unlocked.json()) as { accessToken: string };
+  expect(
+    await (
+      await request(`${path}/document/transcript`, 'GET', undefined, 'owner', accessToken)
+    ).json(),
+  ).toMatchObject({
+    notes: {
+      status: 'done',
+      result: {
+        sections: [{ startSeconds: 35, evidence: { quote: 'The queue replays on reconnect.' } }],
+      },
+    },
+  });
+  await DB.prepare("UPDATE jobs SET generation=2 WHERE id='p'").run();
+  expect(
+    await (
+      await request(`${path}/document/transcript`, 'GET', undefined, 'owner', accessToken)
+    ).json(),
+  ).toMatchObject({ notes: null });
+});
+
 test('transcript preserves full text from truncated legacy segments and retries missing result objects', async () => {
   const { DB, env, request, create } = await fixture();
   await DB.prepare("UPDATE documents SET mime_type='audio/wav' WHERE id='open'").run();
@@ -785,7 +871,10 @@ test('transcript preserves full text from truncated legacy segments and retries 
   const share = await create();
   const path = `/api/share-links/${share.token}/document/transcript`;
   expect(await (await request(path)).json()).toEqual({
+    versionId: 'v-open',
+    notes: null,
     transcript: {
+      generation: 0,
       text: 'The entire transcript including the ending.',
       segments: [{ text: 'The entire transcript including the ending.', startSeconds: 17 }],
     },

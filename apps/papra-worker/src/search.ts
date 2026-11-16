@@ -1,6 +1,6 @@
-import { AI_GATEWAY } from './ai-gateway';
+import { AI_GATEWAY, reserveDocumentAnswer } from './ai-gateway';
 import type { App, Env, Identity } from './types';
-import { first, run, error } from './db';
+import { first, error } from './db';
 import { splitSearchChunks } from './jobs';
 import {
   allowedFolderIds,
@@ -190,13 +190,7 @@ export function registerSearchRoutes(app: App) {
         sources: [],
         status,
       });
-    const day = new Date().toISOString().slice(0, 10);
-    await run(c.env, 'INSERT OR IGNORE INTO ai_usage(day) VALUES(?)', day);
-    const reserved = await c.env.DB.prepare(
-      'UPDATE ai_usage SET chat_requests=chat_requests+1 WHERE day=? AND chat_requests<100 RETURNING day',
-    )
-      .bind(day)
-      .first();
+    const reserved = await reserveDocumentAnswer(c.env);
     if (!reserved) throw error(429, 'Daily document answer limit reached');
     const context = sources
       .slice(0, 8)

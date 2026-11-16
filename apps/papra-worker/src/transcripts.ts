@@ -1,6 +1,8 @@
 import type { Env } from './types';
 import { all, first } from './db';
-import { enrichmentKey } from './jobs';
+
+export const enrichmentKey = (v: string, k: string) =>
+  `derived/${v}/${k.replaceAll(':', '-')}.json`;
 
 export type TranscriptSegment = { text: string; startSeconds: number | null };
 export async function fetchTranscript(env: Env, versionId: string) {
@@ -18,6 +20,7 @@ export async function fetchTranscript(env: Env, versionId: string) {
   const segments: TranscriptSegment[] = [];
   const texts: string[] = [];
   let remaining = 200000;
+  let truncated = false;
   const completed = jobs.filter((job) => job.status === 'done').length;
   let index = 0;
   while (index < jobs.length) {
@@ -36,14 +39,19 @@ export async function fetchTranscript(env: Env, versionId: string) {
       }
       continue;
     }
-    if (remaining <= 0) continue;
+    if (remaining <= 0) {
+      truncated = true;
+      continue;
+    }
     const object = await env.FILES.get(enrichmentKey(versionId, job.kind));
     if (!object || object.size > 1024 ** 2) return null;
     const result = await object.json<{
       text: string;
       chunks: { text: string; startSeconds?: number }[];
     }>();
-    const text = result.text.trim().slice(0, remaining);
+    const fullText = result.text.trim();
+    if (fullText.length > remaining) truncated = true;
+    const text = fullText.slice(0, remaining);
     remaining -= text.length;
     texts.push(text);
     const chunks = result.chunks.filter((chunk) => chunk.text.trim());
@@ -61,8 +69,10 @@ export async function fetchTranscript(env: Env, versionId: string) {
     }
   }
   return {
+    generation: process?.generation ?? 0,
     text: texts.filter(Boolean).join('\n\n'),
     segments,
+    ...(truncated && { truncated }),
     ...(completed < jobs.length && { partial: { completed, total: jobs.length } }),
   };
 }

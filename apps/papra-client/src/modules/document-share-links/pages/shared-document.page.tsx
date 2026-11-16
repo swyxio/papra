@@ -5,6 +5,7 @@ import type { Diagnostics } from '@/modules/feedback/feedback.services';
 import type { TeaserPlayback } from '@/modules/documents/components/document-media-preview.component';
 import { MediaPlaybackPlayer } from '@/modules/documents/components/document-media-preview.component';
 import { PublicHeader } from '@/modules/ui/layouts/public.layout';
+import { apiClient } from '@/modules/shared/http/api-client';
 import { SharedTranscriptPanel } from '../components/shared-transcript.component';
 import type { PublicSharedDocument } from '../document-share-links.types';
 import { TranscriptionProgress } from '@/modules/documents/components/transcription-progress.component';
@@ -18,7 +19,7 @@ import { DocumentBlobPreview } from '@/modules/documents/components/document-pre
 import { getDocumentIcon } from '@/modules/documents/document.models';
 import { useI18n } from '@/modules/i18n/i18n.provider';
 import { useAboutDialog } from '@/modules/shared/components/about-dialog';
-import { isHttpErrorWithStatusCode } from '@/modules/shared/http/http-errors';
+import { getHttpErrorMessage, isHttpErrorWithStatusCode } from '@/modules/shared/http/http-errors';
 import { cn } from '@/modules/shared/style/cn';
 import { ThemeSwitcher } from '@/modules/theme/theme-switcher.component';
 import { Button } from '@/modules/ui/components/button';
@@ -113,12 +114,29 @@ const SharedDocumentCard: Component<{
   accessToken: string | undefined;
   document: PublicSharedDocument;
   onPasswordRequired: () => void;
+  refresh: () => Promise<unknown>;
 }> = (props) => {
   const { t } = useI18n();
 
   const isMedia = () => /^(audio|video)\//.test(props.document.mimeType);
   const [seek, setSeek] = createSignal<(seconds: number) => void>();
   const [teaser, setTeaser] = createSignal<TeaserPlayback>();
+  const memberVersionPath = () => {
+    const editor = props.document.recordingEditor;
+    const version = props.document.versionId;
+    if (!editor || !version) return undefined;
+    return `/api/organizations/${encodeURIComponent(editor.organizationId)}/documents/${encodeURIComponent(editor.documentId)}/versions/${encodeURIComponent(version)}`;
+  };
+  const retryTranscription = useMutation(() => ({
+    mutationFn: async (path: string) =>
+      apiClient({
+        path: `${path}/transcript/retry`,
+        method: 'POST',
+        query: { stage: props.document.transcription?.total ? 'chunks' : 'preparation' },
+        retry: 0,
+      }),
+    onSuccess: async () => props.refresh(),
+  }));
   const transcriptQuery = useQuery(() => ({
     queryKey: [
       'share-link',
@@ -133,7 +151,9 @@ const SharedDocumentCard: Component<{
       fetchSharedTranscript({ token: props.token, accessToken: props.accessToken }),
     enabled: (props.document.transcription?.completed ?? 0) > 0,
     retry: 1,
-    refetchOnWindowFocus: false,
+    refetchOnWindowFocus: true,
+    refetchInterval: (query) =>
+      ['pending', 'processing'].includes(query.state.data?.notes?.status ?? '') ? 3000 : false,
   }));
   const [attempt, setAttempt] = createSignal<{
     diagnostics: Diagnostics;
@@ -327,6 +347,29 @@ const SharedDocumentCard: Component<{
         {(state) => (
           <div class="max-w-5xl mx-auto px-6 pt-6">
             <TranscriptionProgress state={state()} />
+            <Show when={memberVersionPath() && state().status === 'failed' && memberVersionPath()}>
+              {(path) => (
+                <div class="mt-3 space-y-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={retryTranscription.isPending}
+                    onClick={() => retryTranscription.mutate(path())}
+                  >
+                    {retryTranscription.isPending
+                      ? 'Queuing retry…'
+                      : state().total
+                        ? 'Retry failed chunks'
+                        : 'Retry audio preparation'}
+                  </Button>
+                  <Show when={retryTranscription.isError}>
+                    <p role="alert" class="text-sm text-destructive">
+                      {getHttpErrorMessage(retryTranscription.error)}
+                    </p>
+                  </Show>
+                </div>
+              )}
+            </Show>
           </div>
         )}
       </Show>
@@ -347,6 +390,13 @@ const SharedDocumentCard: Component<{
           {(transcript) => (
             <SharedTranscriptPanel
               transcript={transcript()}
+              notes={transcriptQuery.data?.notes}
+              generatePath={
+                memberVersionPath() && transcriptQuery.data?.versionId === props.document.versionId
+                  ? `${memberVersionPath()}/recording-notes`
+                  : undefined
+              }
+              refresh={async () => transcriptQuery.refetch()}
               name={props.document.name}
               onSeek={seek()}
               teaser={teaser()}
@@ -441,6 +491,7 @@ export const SharedDocumentPage: Component = () => {
             accessToken={getAccessToken()}
             document={documentQuery.data!.document}
             onPasswordRequired={() => void documentQuery.refetch()}
+            refresh={async () => documentQuery.refetch()}
           />
         </Match>
 

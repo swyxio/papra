@@ -11,10 +11,11 @@ import { signedDownload, signedMedia, s3 } from './storage';
 import { downloadBytes } from './download';
 import { mediaResponse, requestVideoPreview, previewDownload, downloadPreviewBytes } from './video';
 import type { MediaDocument } from './video';
-import { abortBackupMultipartsForPurge, enqueueVersion } from './jobs';
+import { abortBackupMultipartsForPurge, enqueueVersion, enqueueRecordingNotes } from './jobs';
 import { keywordPredicate } from './keyword';
 import { modifiedBySQL, modifiedAtSQL, actorNameSQL } from './document-attribution';
 import { fetchTranscript } from './transcripts';
+import { canSummarizeTranscript, readRecordingNotes } from './recording-notes';
 
 const base = '/api/organizations/:org/documents';
 const smallFileLimit = 32 * 1024 ** 2;
@@ -290,7 +291,26 @@ export function registerDocumentRoutes(app: App) {
     const transcript = await fetchTranscript(c.env, doc.current_version_id);
     if (!transcript) throw error(503, 'Transcript is not available yet');
     c.header('Cache-Control', 'private, no-store');
-    return c.json({ transcript, versionId: doc.current_version_id });
+    return c.json({
+      transcript,
+      versionId: doc.current_version_id,
+      notes: await readRecordingNotes(c.env, doc.current_version_id, transcript.generation),
+    });
+  });
+  app.post(`${base}/:doc/versions/:version/recording-notes`, async (c) => {
+    const identity = c.get('identity');
+    if (identity.serviceScope) throw error(403, 'Sign in to create sections and summaries');
+    const doc = await document(c.env, identity, c.req.param('org'), c.req.param('doc'), 'write');
+    if (doc.is_deleted || !/^(audio|video)\//.test(doc.mime_type))
+      throw error(404, 'Recording not found');
+    const version = c.req.param('version');
+    if (!doc.current_version_id || doc.current_version_id !== version)
+      throw error(409, 'The file version changed. Refresh the document.');
+    const transcript = await fetchTranscript(c.env, version);
+    if (!transcript || !canSummarizeTranscript(transcript))
+      throw error(409, 'A complete timestamped transcript is required');
+    await enqueueRecordingNotes(c.env, doc.id, version, transcript.generation);
+    return c.json({ queued: true }, 202);
   });
   app.patch(`${base}/:doc`, async (c) => {
     const d = await document(

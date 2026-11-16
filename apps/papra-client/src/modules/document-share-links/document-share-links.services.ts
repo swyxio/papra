@@ -212,7 +212,27 @@ export async function fetchSharedDocumentDirect({
   });
 }
 
+export type RecordingNotesState =
+  | { status: 'pending' | 'processing' }
+  | { status: 'failed'; error: string }
+  | {
+      status: 'done';
+      result: {
+        sections: {
+          title: string;
+          summary: string;
+          startSeconds: number;
+          evidence: { startSeconds: number; quote: string };
+        }[];
+      };
+    };
+export type TranscriptResponse = {
+  transcript: SharedTranscript;
+  versionId: string;
+  notes: RecordingNotesState | null;
+};
 export type SharedTranscript = {
+  truncated?: boolean;
   partial?: { completed: number; total: number };
   text: string;
   segments: { text: string; startSeconds: number | null }[];
@@ -224,7 +244,7 @@ export async function fetchSharedTranscript({
   token: string;
   accessToken?: string;
 }) {
-  return httpClient<{ transcript: SharedTranscript }>({
+  return httpClient<TranscriptResponse>({
     method: 'GET',
     baseUrl: buildTimeConfig.baseApiUrl,
     url: `/api/share-links/${token}/document/transcript`,

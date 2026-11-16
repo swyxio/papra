@@ -7,7 +7,7 @@ import { useMutation, useQuery } from '@tanstack/solid-query';
 import { For, Show, createEffect, createSignal, on, onCleanup } from 'solid-js';
 import { formatBytes } from '@corentinth/chisels';
 import { SharedTranscriptPanel } from '@/modules/document-share-links/components/shared-transcript.component';
-import type { SharedTranscript } from '@/modules/document-share-links/document-share-links.services';
+import type { TranscriptResponse } from '@/modules/document-share-links/document-share-links.services';
 import { apiClient } from '@/modules/shared/http/api-client';
 import { getHttpErrorMessage } from '@/modules/shared/http/http-errors';
 import { Button } from '@/modules/ui/components/button';
@@ -692,11 +692,13 @@ export function DocumentMediaPreview(props: { document: Document }) {
       processing.data?.transcription?.total,
     ],
     queryFn: async () =>
-      apiClient<{ transcript: SharedTranscript; versionId: string }>({
+      apiClient<TranscriptResponse>({
         path: `${base()}/transcript`,
       }),
     enabled: (processing.data?.transcription?.completed ?? 0) > 0,
-    refetchOnWindowFocus: false,
+    refetchOnWindowFocus: true,
+    refetchInterval: (query) =>
+      ['pending', 'processing'].includes(query.state.data?.notes?.status ?? '') ? 3000 : false,
     retry: 1,
   }));
   const retryTranscription = useMutation(() => ({
@@ -795,6 +797,14 @@ export function DocumentMediaPreview(props: { document: Document }) {
           {(text) => (
             <SharedTranscriptPanel
               transcript={text()}
+              notes={transcript.data?.notes}
+              generatePath={
+                processing.data?.canCreateRecordingNotes &&
+                transcript.data?.versionId === props.document.currentVersionId
+                  ? `${base()}/versions/${encodeURIComponent(props.document.currentVersionId!)}/recording-notes`
+                  : undefined
+              }
+              refresh={async () => transcript.refetch()}
               name={props.document.name}
               onSeek={seek()}
               teaser={teaser()}

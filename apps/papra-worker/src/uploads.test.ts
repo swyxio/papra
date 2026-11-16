@@ -458,7 +458,7 @@ test('transcript retry preserves completed chunks, respects the budget reset and
     canRetryTranscription: true,
     transcription: { completed: 20, failed: 6, budgetLimited: true },
   });
-  expect((await f.call(retry, 'POST')).status).toBe(429);
+
   expect((await f.call(doc + '/versions/replaced/transcript/retry', 'POST')).status).toBe(409);
   await f.DB.prepare("INSERT INTO folder_acl VALUES('private','other','reader')").run();
   f.user.userId = 'other';
@@ -468,8 +468,19 @@ test('transcript retry preserves completed chunks, respects the budget reset and
   expect((await f.call(retry, 'POST')).status).toBe(404);
   expect(sendBatch).not.toHaveBeenCalled();
   f.user.userId = 'writer';
+  expect(await (await f.call(retry, 'POST')).json()).toEqual({ queued: 6 });
+  expect(await (await f.call(doc + '/processing')).json()).toMatchObject({
+    transcription: {
+      status: 'transcribing',
+      completed: 20,
+      failed: 0,
+      resumesAt: expect.any(String),
+    },
+  });
+  expect(sendBatch).not.toHaveBeenCalled();
+  // Simulate a legacy failure from a previous budget window to exercise immediate retries too.
   await f.DB.prepare(
-    "UPDATE jobs SET updated_at=1 WHERE error='daily_transcription_budget_exhausted'",
+    "UPDATE jobs SET status='failed',updated_at=1 WHERE error='daily_transcription_budget_exhausted'",
   ).run();
   await f.DB.prepare("UPDATE jobs SET status='failed' WHERE version_id=? AND kind='process'")
     .bind(v)
