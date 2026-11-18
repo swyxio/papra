@@ -371,13 +371,37 @@ export function registerCollaborationRoutes(app: App) {
         last_activity_at: number | null;
       }>();
     const summaries = new Map(summary.results.map((row) => [row.folder_id, row]));
+    // Roll up direct file bytes through the readable tree. A scoped token can start below home.
+    const sizes = new Map(
+      results.map((folder) => [folder.id, summaries.get(folder.id)?.documents_size ?? 0]),
+    );
+    const children = new Map<string, FolderRow[]>();
+    const treeOrder: FolderRow[] = [];
+    for (const folder of results) {
+      if (!folder.parent_id || !sizes.has(folder.parent_id)) {
+        treeOrder.push(folder);
+        continue;
+      }
+      const siblings = children.get(folder.parent_id) ?? [];
+      siblings.push(folder);
+      children.set(folder.parent_id, siblings);
+    }
+    for (let index = 0; index < treeOrder.length; index++) {
+      for (const child of children.get(treeOrder[index]!.id) ?? []) treeOrder.push(child);
+    }
+    for (const folder of treeOrder.reverse()) {
+      const parent = folder.parent_id;
+      if (parent && sizes.has(parent))
+        sizes.set(parent, sizes.get(parent)! + sizes.get(folder.id)!);
+    }
+
     return context.json({
       folders: results.map((folder) => ({
         ...folderDto(folder),
         canWrite: writableIds.has(folder.id),
         effectiveRestricted: !!folder.effective_restricted,
         documentsCount: summaries.get(folder.id)?.documents_count ?? 0,
-        documentsSize: summaries.get(folder.id)?.documents_size ?? 0,
+        documentsSize: sizes.get(folder.id)!,
         shortcutsCount: summaries.get(folder.id)?.shortcuts_count ?? 0,
         lastActivityAt: iso(summaries.get(folder.id)?.last_activity_at ?? null),
       })),
