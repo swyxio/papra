@@ -10,7 +10,6 @@ test('sections retain chronology, the ending and verifiable transcript reference
     title: 'Queue edits while offline',
     summary: 'Edits wait until the connection returns.',
     first: 0,
-    last: 1,
     witness: 1,
     quote: 'The queue replays on reconnect.',
   };
@@ -24,15 +23,20 @@ test('sections retain chronology, the ending and verifiable transcript reference
       },
     ],
   });
-  for (const section of [
-    { ...first, first: 1 },
-    { ...first, last: 0, witness: 0, quote: source[0]!.text },
-    { ...first, quote: 'Invented quote.' },
-    { ...first, witness: 2 },
-    { ...first, last: 2 },
+  const ending = { ...first, title: 'Reconnect', first: 1, quote: 'Invented quote.' };
+  expect(
+    validateRecordingNotes({ sections: [{ ...first, witness: 0 }, ending] }, source).sections,
+  ).toMatchObject([
+    { startSeconds: 7, evidence: { startSeconds: 7, quote: source[0]!.text } },
+    { startSeconds: 35, evidence: { startSeconds: 35, quote: source[1]!.text } },
+  ]);
+  for (const sections of [
+    [{ ...first, first: 1 }],
+    [first, { ...ending, first: 0 }],
+    [first, ending],
+    [first, { ...ending, first: 2 }],
+    [{ ...first, witness: 2 }],
   ]) {
-    expect(() => validateRecordingNotes({ sections: [section] }, source)).toThrow(
-      'invalid_recording_summary',
-    );
+    expect(() => validateRecordingNotes({ sections }, source)).toThrow('invalid_recording_summary');
   }
 });

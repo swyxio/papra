@@ -798,7 +798,6 @@ test('recording notes queue once and use the existing protected share for readba
                 title: 'Replay the queue',
                 summary: 'The queue replays when connectivity returns.',
                 first: 0,
-                last: 0,
                 witness: 0,
                 quote: 'The queue replays on reconnect.',
               },
