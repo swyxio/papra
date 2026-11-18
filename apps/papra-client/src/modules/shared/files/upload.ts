@@ -18,7 +18,7 @@ export async function promptUploadFiles({
     input.onchange = () => {
       resolve({ files: [...(input.files ?? [])] });
     };
-    input.oncancel = () => resolve({files:[]});
+    input.oncancel = () => resolve({ files: [] });
 
     input.click();
   });

@@ -15,45 +15,45 @@ Live Chrome checks used the currently authenticated swyx@latent.space account, w
 
 ## Signed-in pages using the common layout
 
-| Screen | Route | Audit evidence |
-|---|---|---|
-| Space dashboard | `/orgs/:space` | Live desktop + mobile |
-| Documents / folders | `/orgs/:space/documents` | Live desktop; source confirms folder scope |
-| Create doc from template | `/orgs/:space/documents/new` | Source |
-| Document editor | `/orgs/:space/documents/:id/editor` | Source |
-| Request signatures | `/orgs/:space/documents/:id/signing` | Source |
-| Document details | `/orgs/:space/documents/:id` | Source |
-| Deleted documents | `/orgs/:space/deleted` | Source |
-| Tags | `/orgs/:space/tags` | Source |
-| Saved document view | `/orgs/:space/views/:id` | Source |
-| Custom properties | `/orgs/:space/custom-properties` | Source |
-| Create custom property | `/orgs/:space/custom-properties/create` | Source |
-| Edit custom property | `/orgs/:space/custom-properties/:id` | Source |
-| Share links | `/orgs/:space/share-links` | Source |
-| Members | `/orgs/:space/members` | Source |
+| Screen                   | Route                                   | Audit evidence                             |
+| ------------------------ | --------------------------------------- | ------------------------------------------ |
+| Space dashboard          | `/orgs/:space`                          | Live desktop + mobile                      |
+| Documents / folders      | `/orgs/:space/documents`                | Live desktop; source confirms folder scope |
+| Create doc from template | `/orgs/:space/documents/new`            | Source                                     |
+| Document editor          | `/orgs/:space/documents/:id/editor`     | Source                                     |
+| Request signatures       | `/orgs/:space/documents/:id/signing`    | Source                                     |
+| Document details         | `/orgs/:space/documents/:id`            | Source                                     |
+| Deleted documents        | `/orgs/:space/deleted`                  | Source                                     |
+| Tags                     | `/orgs/:space/tags`                     | Source                                     |
+| Saved document view      | `/orgs/:space/views/:id`                | Source                                     |
+| Custom properties        | `/orgs/:space/custom-properties`        | Source                                     |
+| Create custom property   | `/orgs/:space/custom-properties/create` | Source                                     |
+| Edit custom property     | `/orgs/:space/custom-properties/:id`    | Source                                     |
+| Share links              | `/orgs/:space/share-links`              | Source                                     |
+| Members                  | `/orgs/:space/members`                  | Source                                     |
 
 ## Signed-in layout exceptions
 
-| Screen | Route | Current layout | Audit evidence |
-|---|---|---|---|
-| Your spaces | `/orgs` | None; no account controls | Live desktop + 390px mobile |
-| Full-screen PDF viewer | `/orgs/:space/documents/:id/pdf-viewer` | None; PDF-only filename / close header | Source |
-| Space settings | `/orgs/:space/settings` | Alternate settings sidebar; account menu retained | Live desktop |
-| Account settings | `/settings` | Alternate account sidebar; no normal app header | Live desktop |
+| Screen                 | Route                                   | Current layout                                    | Audit evidence              |
+| ---------------------- | --------------------------------------- | ------------------------------------------------- | --------------------------- |
+| Your spaces            | `/orgs`                                 | None; no account controls                         | Live desktop + 390px mobile |
+| Full-screen PDF viewer | `/orgs/:space/documents/:id/pdf-viewer` | None; PDF-only filename / close header            | Source                      |
+| Space settings         | `/orgs/:space/settings`                 | Alternate settings sidebar; account menu retained | Live desktop                |
+| Account settings       | `/settings`                             | Alternate account sidebar; no normal app header   | Live desktop                |
 
 ## Public and system pages
 
 These should remain usable without an account. Public links need a consistent public header with Sign in / Open my Drive, rather than requiring access to an organization sidebar. Signed-in visits can preserve account context without exposing private team navigation to anonymous recipients.
 
-| Screen | Route | Current layout |
-|---|---|---|
-| Login / register | `/login, /register` | Authentication layout |
-| About | `/about` | Standalone; back-to-home |
-| Signing introduction | `/sign` | Standalone; Open Drive link |
-| Recipient signing | `/sign/:token` | Standalone; no account needed |
-| External review | `/review/:token` | Standalone bearer-link review |
-| Shared document | `/s/:token/:title?` | Public brand header; appearance menu, no account-aware navigation |
-| Not found | `Unmatched URL` | Standalone; back-to-home |
+| Screen               | Route               | Current layout                                                    |
+| -------------------- | ------------------- | ----------------------------------------------------------------- |
+| Login / register     | `/login, /register` | Authentication layout                                             |
+| About                | `/about`            | Standalone; back-to-home                                          |
+| Signing introduction | `/sign`             | Standalone; Open Drive link                                       |
+| Recipient signing    | `/sign/:token`      | Standalone; no account needed                                     |
+| External review      | `/review/:token`    | Standalone bearer-link review                                     |
+| Shared document      | `/s/:token/:title?` | Public brand header; appearance menu, no account-aware navigation |
+| Not found            | `Unmatched URL`     | Standalone; back-to-home                                          |
 
 ## Findings
 

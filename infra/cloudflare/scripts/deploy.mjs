@@ -25,8 +25,8 @@ const nativeChanged =
     'apps/papra-worker/native',
     'apps/papra-worker/wrangler.jsonc',
   ) !== '';
-console.log(
-  `Deploying ${sha}; native container ${nativeChanged ? 'will be rebuilt' : 'unchanged'}`,
+process.stdout.write(
+  `Deploying ${sha}; native container ${nativeChanged ? 'will be rebuilt' : 'unchanged'}\n`,
 );
 execFileSync(
   'pnpm',
@@ -54,11 +54,11 @@ for (let attempt = 0; attempt < 12; attempt++) {
     });
     const result = await response.json();
     if (response.ok && result.status === 'ok' && result.sourceSha === sha) {
-      console.log(`Verified production release ${sha} at https://drive.swyx.io`);
+      process.stdout.write(`Verified production release ${sha} at https://drive.swyx.io\n`);
       process.exit(0);
     }
   } catch (error) {
-    console.warn(`Health verification attempt ${attempt + 1}: ${error.message}`);
+    process.stderr.write(`Health verification attempt ${attempt + 1}: ${error.message}\n`);
   }
   await new Promise((resolve) => setTimeout(resolve, 5000));
 }

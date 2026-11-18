@@ -30,68 +30,8 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'auth.email-provider.open': 'Άνοιγμα {{ provider }}',
 
-  'auth.login.title': 'Σύνδεση στο SwyxDrive',
-  'auth.login.description':
-    'Εισαγάγετε το email σας ή χρησιμοποιήστε κοινωνική σύνδεση για πρόσβαση στον λογαριασμό σας.',
-  'auth.login.login-with-provider': 'Σύνδεση με {{ provider }}',
-  'auth.login.no-account': 'Δεν έχετε λογαριασμό;',
-  'auth.login.register': 'Εγγραφή',
-  'auth.login.form.email.label': 'Email',
-  'auth.login.form.email.placeholder': 'Παράδειγμα: ada@papra.app',
-  'auth.login.form.email.required': 'Παρακαλώ εισαγάγετε το email σας',
-  'auth.login.form.email.invalid': 'Η διεύθυνση email δεν είναι έγκυρη',
-  'auth.login.form.password.label': 'Κωδικός πρόσβασης',
-  'auth.login.form.password.placeholder': 'Ορίστε έναν κωδικό',
-  'auth.login.form.password.required': 'Παρακαλώ εισαγάγετε τον κωδικό σας',
-  'auth.login.form.remember-me.label': 'Απομνημόνευση',
-  'auth.login.form.forgot-password.label': 'Ξεχάσατε τον κωδικό;',
-  'auth.login.form.submit': 'Σύνδεση',
-
-  'auth.login.two-factor.title': 'Έλεγχος Δύο Παραγόντων',
-  'auth.login.two-factor.description.totp':
-    'Εισαγάγετε τον 6-ψήφιο κωδικό από την εφαρμογή αυθεντικοποίησης.',
-  'auth.login.two-factor.description.backup-code':
-    'Εισαγάγετε έναν από τους κωδικούς ανάκτησής σας.',
-  'auth.login.two-factor.code.label.totp': 'Κωδικός εφαρμογής',
-  'auth.login.two-factor.code.label.backup-code': 'Κωδικός ανάκτησης',
-  'auth.login.two-factor.code.placeholder.backup-code': 'Εισαγάγετε κωδικό ανάκτησης',
-  'auth.login.two-factor.code.required': 'Παρακαλώ εισαγάγετε τον κωδικό επιβεβαίωσης',
-  'auth.login.two-factor.trust-device.label': 'Εμπιστοσύνη σε αυτή τη συσκευή για 30 ημέρες',
-  'auth.login.two-factor.back': 'Επιστροφή στη σύνδεση',
-  'auth.login.two-factor.submit': 'Επιβεβαίωση',
-  'auth.login.two-factor.verification-failed':
-    'Η επιβεβαίωση απέτυχε. Ελέγξτε τον κωδικό και δοκιμάστε ξανά.',
-  'auth.login.two-factor.use-backup-code': 'Χρήση κωδικού ανάκτησης',
-  'auth.login.two-factor.use-totp': 'Χρήση εφαρμογής αυθεντικοποίησης',
-
-  'auth.register.title': 'Εγγραφή στο SwyxDrive',
-  'auth.register.description': 'Δημιουργήστε λογαριασμό για να ξεκινήσετε.',
-  'auth.register.register-with-email': 'Εγγραφή με email',
-  'auth.register.register-with-provider': 'Εγγραφή με {{ provider }}',
   'auth.register.providers.google': 'Google',
   'auth.register.providers.github': 'GitHub',
-  'auth.register.have-account': 'Έχετε ήδη λογαριασμό;',
-  'auth.register.login': 'Σύνδεση',
-  'auth.register.registration-disabled.title': 'Η εγγραφή είναι απενεργοποιημένη',
-  'auth.register.registration-disabled.description':
-    'Η δημιουργία νέων λογαριασμών είναι απενεργοποιημένη σε αυτήν την εγκατάσταση του SwyxDrive.',
-  'auth.register.form.email.label': 'Email',
-  'auth.register.form.email.placeholder': 'Παράδειγμα: ada@papra.app',
-  'auth.register.form.email.required': 'Παρακαλώ εισαγάγετε το email σας',
-  'auth.register.form.email.invalid': 'Η διεύθυνση email δεν είναι έγκυρη',
-  'auth.register.form.password.label': 'Κωδικός πρόσβασης',
-  'auth.register.form.password.placeholder': 'Ορίστε έναν κωδικό',
-  'auth.register.form.password.required': 'Παρακαλώ εισαγάγετε τον κωδικό σας',
-  'auth.register.form.password.min-length':
-    'Ο κωδικός πρέπει να έχει τουλάχιστον {{ minLength }} χαρακτήρες',
-  'auth.register.form.password.max-length':
-    'Ο κωδικός πρέπει να έχει λιγότερους από {{ maxLength }} χαρακτήρες',
-  'auth.register.form.name.label': 'Όνομα',
-  'auth.register.form.name.placeholder': 'Παράδειγμα: Ada Lovelace',
-  'auth.register.form.name.required': 'Παρακαλώ εισαγάγετε το όνομά σας',
-  'auth.register.form.name.max-length':
-    'Το όνομα πρέπει να έχει λιγότερους από {{ maxLength }} χαρακτήρες',
-  'auth.register.form.submit': 'Εγγραφή',
 
   'auth.email-validation-required.title': 'Επαλήθευση email',
   'auth.email-validation-required.description':
@@ -121,7 +61,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'user.settings.description': 'Διαχειριστείτε τις ρυθμίσεις του λογαριασμού σας εδώ.',
 
   'user.settings.email.title': 'Διεύθυνση email',
-  'user.settings.email.description': 'Η διεύθυνση email δεν μπορεί να αλλάξει.',
   'user.settings.email.label': 'Διεύθυνση email',
 
   'user.settings.name.title': 'Πλήρες όνομα',
@@ -198,10 +137,6 @@ export const translations: Partial<TranslationsDictionary> = {
 
   // Organizations
 
-  'organizations.list.title': 'Οι οργανισμοί σας',
-  'organizations.list.description':
-    'Οι οργανισμοί σας βοηθούν να οργανώνετε και να διαχειρίζεστε έγγραφα και πρόσβαση.',
-  'organizations.list.create-new': 'Δημιουργία νέου οργανισμού',
   'organizations.list.back': 'Πίσω στους οργανισμούς',
   'organizations.list.deleted.title': 'Διαγεγραμμένοι οργανισμοί',
   'organizations.list.deleted.description':
@@ -239,36 +174,12 @@ export const translations: Partial<TranslationsDictionary> = {
   'organizations.create.form.name.required': 'Παρακαλώ εισαγάγετε όνομα οργανισμού',
   'organizations.create.form.submit': 'Δημιουργία οργανισμού',
   'organizations.create.success': 'Ο οργανισμός δημιουργήθηκε με επιτυχία',
-  'organizations.switcher.create': 'Δημιουργία νέου οργανισμού',
 
   'organizations.create-first.title': 'Δημιουργήστε τον οργανισμό σας',
   'organizations.create-first.description':
     'Τα έγγραφά σας ομαδοποιούνται ανά οργανισμό. Δημιουργήστε όσους χρειάζεστε.',
   'organizations.create-first.default-name': 'Ο οργανισμός μου',
   'organizations.create-first.user-name': 'Ο οργανισμός του/της {{ name }}',
-
-  'organization.settings.page.title': 'Ρυθμίσεις οργανισμού',
-  'organization.settings.page.description': 'Διαχειριστείτε τις ρυθμίσεις του οργανισμού σας εδώ.',
-  'organization.settings.name.title': 'Όνομα οργανισμού',
-  'organization.settings.name.update': 'Ενημέρωση ονόματος',
-  'organization.settings.name.placeholder': 'Π.χ. Acme Inc.',
-  'organization.settings.name.updated': 'Το όνομα οργανισμού ενημερώθηκε',
-  'organization.settings.subscription.title': 'Συνδρομή',
-  'organization.settings.subscription.description':
-    'Διαχείριση τιμολόγησης, τιμολογίων και μεθόδων πληρωμής.',
-  'organization.settings.subscription.manage': 'Διαχείριση συνδρομής',
-  'organization.settings.subscription.error': 'Αποτυχία λήψης URL πελάτη',
-  'organization.settings.delete.title': 'Διαγραφή οργανισμού',
-  'organization.settings.delete.description': 'Η διαγραφή θα αφαιρέσει οριστικά όλα τα δεδομένα.',
-  'organization.settings.delete.confirm.title': 'Διαγραφή οργανισμού',
-  'organization.settings.delete.confirm.message':
-    'Σίγουρα; Ο οργανισμός θα σημειωθεί προς διαγραφή και θα αφαιρεθεί μετά από {{ days }} ημέρες.',
-  'organization.settings.delete.confirm.confirm-button': 'Διαγραφή οργανισμού',
-  'organization.settings.delete.confirm.cancel-button': 'Ακύρωση',
-  'organization.settings.delete.success': 'Ο οργανισμός διαγράφηκε',
-  'organization.settings.delete.only-owner': 'Μόνο ο ιδιοκτήτης μπορεί να διαγράψει τον οργανισμό.',
-  'organization.settings.delete.has-active-subscription':
-    'Δεν είναι δυνατή η διαγραφή με ενεργή συνδρομή. Ακυρώστε πρώτα.',
 
   'organization.usage.page.title': 'Χρήση',
   'organization.usage.page.description': 'Δείτε τη χρήση και τα όρια του οργανισμού σας.',
@@ -281,21 +192,10 @@ export const translations: Partial<TranslationsDictionary> = {
   'organization.usage.unlimited': 'Απεριόριστο',
 
   'organizations.members.title': 'Μέλη',
-  'organizations.members.description': 'Διαχειριστείτε τα μέλη του οργανισμού σας',
-  'organizations.members.invite-member': 'Πρόσκληση μέλους',
-  'organizations.members.invite-member-disabled-tooltip':
-    'Μόνο διαχειριστές/ιδιοκτήτες μπορούν να προσκαλούν μέλη',
-  'organizations.members.remove-from-organization': 'Αφαίρεση από τον οργανισμό',
   'organizations.members.role': 'Ρόλος',
   'organizations.members.roles.owner': 'Ιδιοκτήτης',
   'organizations.members.roles.admin': 'Διαχειριστής',
   'organizations.members.roles.member': 'Μέλος',
-  'organizations.members.delete.confirm.title': 'Αφαίρεση μέλους',
-  'organizations.members.delete.confirm.message':
-    'Σίγουρα θέλετε να αφαιρέσετε το μέλος από τον οργανισμό;',
-  'organizations.members.delete.confirm.confirm-button': 'Αφαίρεση',
-  'organizations.members.delete.confirm.cancel-button': 'Ακύρωση',
-  'organizations.members.delete.success': 'Το μέλος αφαιρέθηκε',
   'organizations.members.update-role.success': 'Ο ρόλος του μέλους ενημερώθηκε',
   'organizations.members.table.headers.name': 'Όνομα',
   'organizations.members.table.headers.email': 'Email',
@@ -416,7 +316,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'documents.info.type': 'Τύπος',
   'documents.info.size': 'Μέγεθος',
   'documents.info.created-at': 'Ημερομηνία δημιουργίας',
-  'documents.info.updated-at': 'Ημερομηνία ενημέρωσης',
   'documents.info.never': 'Ποτέ',
   'documents.info.document-date': 'Ημερομηνία',
   'documents.list.table.headers.document-date': 'Ημερομηνία',
@@ -431,9 +330,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'documents.management.details': 'Λεπτομέρειες εγγράφου',
   'documents.management.rename': 'Μετονομασία εγγράφου',
   'documents.management.delete': 'Διαγραφή εγγράφου',
-
-  'documents.import.drop-area.title': 'Αποθέστε τα αρχεία εδώ',
-  'documents.import.drop-area.description': 'Σύρετε και αποθέστε αρχεία εδώ για να τα εισαγάγετε',
 
   'documents.list.select.all': 'Επιλογή όλων των γραμμών σε αυτή τη σελίδα',
   'documents.list.select.row': 'Επιλογή γραμμής',
@@ -522,7 +418,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'documents.rename.success': 'Το έγγραφο μετονομάστηκε με επιτυχία',
   'documents.rename.cancel': 'Ακύρωση',
 
-  'import-documents.title.error': '{{ count }} έγγραφα απέτυχαν',
   'import-documents.title.success': '{{ count }} έγγραφα εισήχθησαν',
   'import-documents.title.pending': '{{ count }} / {{ total }} έγγραφα εισήχθησαν',
   'import-documents.title.none': 'Εισαγωγή εγγράφων',
@@ -641,7 +536,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'document-share-links.create.expiration.pick-date': 'Επιλέξτε ημερομηνία',
   'document-share-links.create.cancel': 'Άκυρο',
   'document-share-links.create.submit': 'Δημιουργία συνδέσμου',
-  'document-share-links.create.error': 'Αποτυχία δημιουργίας του συνδέσμου κοινής χρήσης',
   'document-share-links.created.title': 'Ο σύνδεσμος κοινής χρήσης δημιουργήθηκε',
   'document-share-links.created.description':
     'Ο σύνδεσμος κοινής χρήσης είναι έτοιμος — αντιγράψτε τον και μοιραστείτε τον.',
@@ -1023,22 +917,10 @@ export const translations: Partial<TranslationsDictionary> = {
   'layout.menu.documents': 'Έγγραφα',
   'layout.menu.tags': 'Ετικέτες',
   'layout.menu.custom-properties': 'Προσαρμοσμένες ιδιότητες',
-  'layout.menu.tagging-rules': 'Κανόνες ετικετοποίησης',
-  'layout.menu.share-links': 'Σύνδεσμοι κοινής χρήσης',
   'layout.menu.deleted-documents': 'Διαγεγραμμένα έγγραφα',
   'layout.menu.organization-settings': 'Ρυθμίσεις',
-  'layout.menu.api-keys': 'API keys',
-  'layout.menu.usage': 'Χρήση',
-  'layout.menu.intake-emails': 'Email εισαγωγής',
-  'layout.menu.webhooks': 'Webhooks',
   'layout.menu.members': 'Μέλη',
   'layout.menu.document-views': 'Προβολές',
-  'layout.menu.invitations': 'Προσκλήσεις',
-  'layout.menu.admin': 'Διαχείριση',
-
-  'layout.upgrade-cta.title': 'Χρειάζεστε περισσότερο χώρο;',
-  'layout.upgrade-cta.description': 'Αποκτήστε 10x περισσότερο χώρο + συνεργασία ομάδας',
-  'layout.upgrade-cta.button': 'Αναβάθμιση τώρα',
 
   'layout.theme.light': 'Φωτεινό θέμα',
   'layout.theme.dark': 'Σκούρο θέμα',
@@ -1052,8 +934,6 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'user-menu.trigger.label': 'Μενού χρήστη',
   'user-menu.account-settings': 'Ρυθμίσεις λογαριασμού',
-  'user-menu.api-keys': 'API keys',
-  'user-menu.invitations': 'Προσκλήσεις',
   'user-menu.language': 'Γλώσσα',
   'user-menu.theme': 'Θέμα',
   'user-menu.about': 'Σχετικά με το SwyxDrive',

@@ -233,7 +233,7 @@ describe('Worker Google admission', () => {
     ];
     for (const email of colleagues)
       await provisionUser(env, { sub: email, email, name: email, image: null });
-    const roles = () =>
+    const roles = async () =>
       DB.prepare('SELECT user_id,organization_id,role FROM organization_members ORDER BY id').all();
     const before = (await roles()).results;
     // An independent grant to another team must remain an ordinary membership.

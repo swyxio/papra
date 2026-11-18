@@ -31,67 +31,8 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'auth.email-provider.open': 'Abrir {{ provider }}',
 
-  'auth.login.title': 'Inicia sesión en SwyxDrive',
-  'auth.login.description':
-    'Ingresa tu correo electrónico o usa un inicio de sesión social para acceder a tu cuenta de SwyxDrive.',
-  'auth.login.login-with-provider': 'Iniciar sesión con {{ provider }}',
-  'auth.login.no-account': '¿No tienes una cuenta?',
-  'auth.login.register': 'Registrarse',
-  'auth.login.form.email.label': 'Correo electrónico',
-  'auth.login.form.email.placeholder': 'Ejemplo: ada@papra.app',
-  'auth.login.form.email.required': 'Por favor, ingresa tu correo electrónico',
-  'auth.login.form.email.invalid': 'Esta dirección de correo electrónico no es válida',
-  'auth.login.form.password.label': 'Contraseña',
-  'auth.login.form.password.placeholder': 'Establece una contraseña',
-  'auth.login.form.password.required': 'Por favor, ingresa tu contraseña',
-  'auth.login.form.remember-me.label': 'Recordarme',
-  'auth.login.form.forgot-password.label': '¿Olvidaste tu contraseña?',
-  'auth.login.form.submit': 'Iniciar sesión',
-
-  'auth.login.two-factor.title': 'Verificación en dos pasos',
-  'auth.login.two-factor.description.totp':
-    'Introduce el código de verificación de 6 dígitos de tu aplicación autenticadora.',
-  'auth.login.two-factor.description.backup-code':
-    'Introduce uno de tus códigos de respaldo para acceder a tu cuenta.',
-  'auth.login.two-factor.code.label.totp': 'Código de autenticación',
-  'auth.login.two-factor.code.label.backup-code': 'Código de respaldo',
-  'auth.login.two-factor.code.placeholder.backup-code': 'Introduce el código de respaldo',
-  'auth.login.two-factor.code.required': 'Por favor, introduce el código de verificación',
-  'auth.login.two-factor.trust-device.label': 'Confiar en este dispositivo durante 30 días',
-  'auth.login.two-factor.back': 'Volver al inicio de sesión',
-  'auth.login.two-factor.submit': 'Verificar',
-  'auth.login.two-factor.verification-failed':
-    'Verificación fallida. Por favor, verifica tu código e inténtalo de nuevo.',
-  'auth.login.two-factor.use-backup-code': 'Usar código de respaldo',
-  'auth.login.two-factor.use-totp': 'Usar aplicación autenticadora',
-
-  'auth.register.title': 'Regístrate en SwyxDrive',
-  'auth.register.description': 'Crea una cuenta para comenzar a usar SwyxDrive.',
-  'auth.register.register-with-email': 'Registrarse con correo electrónico',
-  'auth.register.register-with-provider': 'Registrarse con {{ provider }}',
   'auth.register.providers.google': 'Google',
   'auth.register.providers.github': 'GitHub',
-  'auth.register.have-account': '¿Ya tienes una cuenta?',
-  'auth.register.login': 'Iniciar sesión',
-  'auth.register.registration-disabled.title': 'El registro está deshabilitado',
-  'auth.register.registration-disabled.description':
-    'La creación de nuevas cuentas está deshabilitada actualmente en esta instancia de SwyxDrive. Solo los usuarios con cuentas existentes pueden iniciar sesión. Si crees que esto es un error, contacta al administrador de esta instancia.',
-  'auth.register.form.email.label': 'Correo electrónico',
-  'auth.register.form.email.placeholder': 'Ejemplo: ada@papra.app',
-  'auth.register.form.email.required': 'Por favor, ingresa tu correo electrónico',
-  'auth.register.form.email.invalid': 'Esta dirección de correo electrónico no es válida',
-  'auth.register.form.password.label': 'Contraseña',
-  'auth.register.form.password.placeholder': 'Establece una contraseña',
-  'auth.register.form.password.required': 'Por favor, ingresa tu contraseña',
-  'auth.register.form.password.min-length':
-    'La contraseña debe tener al menos {{ minLength }} caracteres',
-  'auth.register.form.password.max-length':
-    'La contraseña debe tener menos de {{ maxLength }} caracteres',
-  'auth.register.form.name.label': 'Nombre',
-  'auth.register.form.name.placeholder': 'Ejemplo: Ada Lovelace',
-  'auth.register.form.name.required': 'Por favor, ingresa tu nombre',
-  'auth.register.form.name.max-length': 'El nombre debe tener menos de {{ maxLength }} caracteres',
-  'auth.register.form.submit': 'Registrarse',
 
   'auth.email-validation-required.title': 'Verifica tu correo electrónico',
   'auth.email-validation-required.description':
@@ -121,7 +62,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'user.settings.description': 'Administra aquí la configuración de tu cuenta.',
 
   'user.settings.email.title': 'Dirección de correo electrónico',
-  'user.settings.email.description': 'Tu dirección de correo electrónico no puede ser cambiada.',
   'user.settings.email.label': 'Correo electrónico',
 
   'user.settings.name.title': 'Nombre completo',
@@ -197,10 +137,6 @@ export const translations: Partial<TranslationsDictionary> = {
 
   // Organizations
 
-  'organizations.list.title': 'Tus organizaciones',
-  'organizations.list.description':
-    'Las organizaciones son una manera de agrupar tus documentos y gestionar el acceso a ellos. Puedes crear varias organizaciones e invitar a tus compañeros para colaborar.',
-  'organizations.list.create-new': 'Crear nueva organización',
   'organizations.list.back': 'Volver a organizaciones',
   'organizations.list.deleted.title': 'Organizaciones eliminadas',
   'organizations.list.deleted.description':
@@ -238,38 +174,12 @@ export const translations: Partial<TranslationsDictionary> = {
   'organizations.create.form.name.required': 'Por favor, ingresa un nombre para la organización',
   'organizations.create.form.submit': 'Crear organización',
   'organizations.create.success': 'Organización creada exitosamente',
-  'organizations.switcher.create': 'Crear nueva organización',
 
   'organizations.create-first.title': 'Crea tu organización',
   'organizations.create-first.description':
     'Tus documentos se agruparán por organización. Puedes crear varias organizaciones para separar tus documentos, por ejemplo, para documentos personales y de trabajo.',
   'organizations.create-first.default-name': 'Mi organización',
   'organizations.create-first.user-name': 'Organización de {{ name }}',
-
-  'organization.settings.page.title': 'Configuración de la organización',
-  'organization.settings.page.description': 'Administra la configuración de tu organización aquí.',
-  'organization.settings.name.title': 'Nombre de la organización',
-  'organization.settings.name.update': 'Actualizar nombre',
-  'organization.settings.name.placeholder': 'Ej. Acme Inc.',
-  'organization.settings.name.updated': 'Nombre de la organización actualizado',
-  'organization.settings.subscription.title': 'Suscripción',
-  'organization.settings.subscription.description':
-    'Administra tu facturación, facturas y métodos de pago.',
-  'organization.settings.subscription.manage': 'Gestionar suscripción',
-  'organization.settings.subscription.error': 'Error al obtener la URL del portal del cliente',
-  'organization.settings.delete.title': 'Eliminar organización',
-  'organization.settings.delete.description':
-    'Eliminar esta organización eliminará permanentemente todos los datos asociados a ella.',
-  'organization.settings.delete.confirm.title': 'Eliminar organización',
-  'organization.settings.delete.confirm.message':
-    '¿Estás seguro de que deseas eliminar esta organización? La organización se marcará para eliminación y se eliminará permanentemente después de {{ days }} días. Durante este período, puedes restaurarla desde tu lista de organizaciones. Todos los documentos y datos se eliminarán permanentemente después de este plazo.',
-  'organization.settings.delete.confirm.confirm-button': 'Eliminar organización',
-  'organization.settings.delete.confirm.cancel-button': 'Cancelar',
-  'organization.settings.delete.success': 'Organización eliminada',
-  'organization.settings.delete.only-owner':
-    'Solo el propietario de la organización puede eliminar esta organización.',
-  'organization.settings.delete.has-active-subscription':
-    'No se puede eliminar la organización con una suscripción activa, por favor cancela tu suscripción arriba primero.',
 
   'organization.usage.page.title': 'Uso',
   'organization.usage.page.description': 'Ver el uso y los límites actuales de su organización.',
@@ -282,21 +192,10 @@ export const translations: Partial<TranslationsDictionary> = {
   'organization.usage.unlimited': 'Ilimitado',
 
   'organizations.members.title': 'Miembros',
-  'organizations.members.description': 'Administra los miembros de tu organización',
-  'organizations.members.invite-member': 'Invitar miembro',
-  'organizations.members.invite-member-disabled-tooltip':
-    'Solo los administradores o propietarios pueden invitar miembros a la organización',
-  'organizations.members.remove-from-organization': 'Eliminar de la organización',
   'organizations.members.role': 'Rol',
   'organizations.members.roles.owner': 'Propietario',
   'organizations.members.roles.admin': 'Administrador',
   'organizations.members.roles.member': 'Miembro',
-  'organizations.members.delete.confirm.title': 'Eliminar miembro',
-  'organizations.members.delete.confirm.message':
-    '¿Estás seguro de que deseas eliminar a este miembro de la organización?',
-  'organizations.members.delete.confirm.confirm-button': 'Eliminar',
-  'organizations.members.delete.confirm.cancel-button': 'Cancelar',
-  'organizations.members.delete.success': 'Miembro eliminado de la organización',
   'organizations.members.update-role.success': 'Rol del miembro actualizado',
   'organizations.members.table.headers.name': 'Nombre',
   'organizations.members.table.headers.email': 'Correo electrónico',
@@ -421,7 +320,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'documents.info.type': 'Tipo',
   'documents.info.size': 'Tamaño',
   'documents.info.created-at': 'Creado el',
-  'documents.info.updated-at': 'Actualizado el',
   'documents.info.never': 'Nunca',
   'documents.info.document-date': 'Fecha',
   'documents.list.table.headers.document-date': 'Fecha',
@@ -436,9 +334,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'documents.management.details': 'Detalles del documento',
   'documents.management.rename': 'Renombrar documento',
   'documents.management.delete': 'Eliminar documento',
-
-  'documents.import.drop-area.title': 'Suelta los archivos aquí',
-  'documents.import.drop-area.description': 'Arrastra y suelta archivos aquí para importarlos',
 
   'documents.list.select.all': 'Seleccionar todas las filas de esta página',
   'documents.list.select.row': 'Seleccionar fila',
@@ -526,7 +421,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'documents.rename.success': 'Documento renombrado exitosamente',
   'documents.rename.cancel': 'Cancelar',
 
-  'import-documents.title.error': '{{ count }} documentos fallidos',
   'import-documents.title.success': '{{ count }} documentos importados',
   'import-documents.title.pending': '{{ count }} / {{ total }} documentos importados',
   'import-documents.title.none': 'Importar documentos',
@@ -644,7 +538,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'document-share-links.create.expiration.pick-date': 'Elige una fecha',
   'document-share-links.create.cancel': 'Cancelar',
   'document-share-links.create.submit': 'Crear enlace',
-  'document-share-links.create.error': 'No se pudo crear el enlace de uso compartido',
   'document-share-links.created.title': 'Enlace de uso compartido creado',
   'document-share-links.created.description':
     'Tu enlace de uso compartido está listo: cópialo y compártelo.',
@@ -1025,22 +918,10 @@ export const translations: Partial<TranslationsDictionary> = {
   'layout.menu.documents': 'Documentos',
   'layout.menu.tags': 'Etiquetas',
   'layout.menu.custom-properties': 'Propiedades personalizadas',
-  'layout.menu.tagging-rules': 'Reglas de etiquetado',
-  'layout.menu.share-links': 'Enlaces de uso compartido',
   'layout.menu.deleted-documents': 'Documentos eliminados',
   'layout.menu.organization-settings': 'Configuración',
-  'layout.menu.api-keys': 'Claves API',
-  'layout.menu.usage': 'Uso',
-  'layout.menu.intake-emails': 'Correos de ingreso',
-  'layout.menu.webhooks': 'Webhooks',
   'layout.menu.members': 'Miembros',
   'layout.menu.document-views': 'Vistas',
-  'layout.menu.invitations': 'Invitaciones',
-  'layout.menu.admin': 'Administración',
-
-  'layout.upgrade-cta.title': '¿Necesitas más espacio?',
-  'layout.upgrade-cta.description': 'Obtén 10x más almacenamiento + colaboración en equipo',
-  'layout.upgrade-cta.button': 'Actualizar ahora',
 
   'layout.theme.light': 'Modo claro',
   'layout.theme.dark': 'Modo oscuro',
@@ -1054,8 +935,6 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'user-menu.trigger.label': 'Menú de usuario',
   'user-menu.account-settings': 'Ajustes de cuenta',
-  'user-menu.api-keys': 'Claves API',
-  'user-menu.invitations': 'Invitaciones',
   'user-menu.language': 'Idioma',
   'user-menu.theme': 'Tema',
   'user-menu.about': 'Acerca de SwyxDrive',

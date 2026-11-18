@@ -23,6 +23,8 @@ export function resolveOrganizationRoute(path: string): string {
 }
 
 export function canonicalOrganizationUrl(path: string): string {
-  return mapOrganizationSegment(path.replace(/^\/orgs(?=[/?#]|$)/, '/organizations'), 'name')
-    .replace(/^\/organizations(?=[/?#]|$)/, '/orgs');
+  return mapOrganizationSegment(
+    path.replace(/^\/orgs(?=[/?#]|$)/, '/organizations'),
+    'name',
+  ).replace(/^\/organizations(?=[/?#]|$)/, '/orgs');
 }

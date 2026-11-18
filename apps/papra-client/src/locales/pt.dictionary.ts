@@ -32,67 +32,8 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'auth.email-provider.open': 'Abrir {{ provider }}',
 
-  'auth.login.title': 'Iniciar sessão no SwyxDrive',
-  'auth.login.description':
-    'Introduza o seu e-mail ou use o início de sessão social para aceder à sua conta SwyxDrive.',
-  'auth.login.login-with-provider': 'Iniciar sessão com {{ provider }}',
-  'auth.login.no-account': 'Não tem uma conta?',
-  'auth.login.register': 'Registar',
-  'auth.login.form.email.label': 'E-mail',
-  'auth.login.form.email.placeholder': 'Exemplo: joao@papra.app',
-  'auth.login.form.email.required': 'Por favor, introduza o seu endereço de e-mail',
-  'auth.login.form.email.invalid': 'Este endereço de e-mail é inválido',
-  'auth.login.form.password.label': 'Palavra-passe',
-  'auth.login.form.password.placeholder': 'Definir uma palavra-passe',
-  'auth.login.form.password.required': 'Por favor, introduza a sua palavra-passe',
-  'auth.login.form.remember-me.label': 'Lembrar-me',
-  'auth.login.form.forgot-password.label': 'Esqueceu-se da palavra-passe?',
-  'auth.login.form.submit': 'Iniciar sessão',
-
-  'auth.login.two-factor.title': 'Verificação em dois passos',
-  'auth.login.two-factor.description.totp':
-    'Introduza o código de verificação de 6 dígitos da sua aplicação de autenticação.',
-  'auth.login.two-factor.description.backup-code':
-    'Introduza um dos seus códigos de segurança para aceder à sua conta.',
-  'auth.login.two-factor.code.label.totp': 'Código de autenticação',
-  'auth.login.two-factor.code.label.backup-code': 'Código de segurança',
-  'auth.login.two-factor.code.placeholder.backup-code': 'Introduza o código de segurança',
-  'auth.login.two-factor.code.required': 'Por favor, introduza o código de verificação',
-  'auth.login.two-factor.trust-device.label': 'Confiar neste dispositivo durante 30 dias',
-  'auth.login.two-factor.back': 'Voltar ao início de sessão',
-  'auth.login.two-factor.submit': 'Verificar',
-  'auth.login.two-factor.verification-failed':
-    'Falha na verificação. Verifique o seu código e tente novamente.',
-  'auth.login.two-factor.use-backup-code': 'Usar código de segurança',
-  'auth.login.two-factor.use-totp': 'Usar aplicação de autenticação',
-
-  'auth.register.title': 'Registar no SwyxDrive',
-  'auth.register.description': 'Crie uma conta para começar a usar o SwyxDrive.',
-  'auth.register.register-with-email': 'Registar com e-mail',
-  'auth.register.register-with-provider': 'Registar com {{ provider }}',
   'auth.register.providers.google': 'Google',
   'auth.register.providers.github': 'GitHub',
-  'auth.register.have-account': 'Já tem uma conta?',
-  'auth.register.login': 'Iniciar sessão',
-  'auth.register.registration-disabled.title': 'O registo está desativado',
-  'auth.register.registration-disabled.description':
-    'A criação de novas contas está atualmente desativada nesta instância do SwyxDrive. Apenas utilizadores com contas existentes podem iniciar sessão. Se acha que isto é um erro, contacte o administrador desta instância.',
-  'auth.register.form.email.label': 'E-mail',
-  'auth.register.form.email.placeholder': 'Exemplo: joao@papra.app',
-  'auth.register.form.email.required': 'Por favor, introduza o seu endereço de e-mail',
-  'auth.register.form.email.invalid': 'Este endereço de e-mail é inválido',
-  'auth.register.form.password.label': 'Palavra-passe',
-  'auth.register.form.password.placeholder': 'Definir uma palavra-passe',
-  'auth.register.form.password.required': 'Por favor, introduza a sua palavra-passe',
-  'auth.register.form.password.min-length':
-    'A palavra-passe deve ter pelo menos {{ minLength }} caracteres',
-  'auth.register.form.password.max-length':
-    'A palavra-passe deve ter menos de {{ maxLength }} caracteres',
-  'auth.register.form.name.label': 'Nome',
-  'auth.register.form.name.placeholder': 'Exemplo: Ada Lovelace',
-  'auth.register.form.name.required': 'Por favor, introduza o seu nome',
-  'auth.register.form.name.max-length': 'O nome deve ter menos de {{ maxLength }} caracteres',
-  'auth.register.form.submit': 'Registar',
 
   'auth.email-validation-required.title': 'Verifique o seu e-mail',
   'auth.email-validation-required.description':
@@ -122,7 +63,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'user.settings.description': 'Gira as definições da sua conta aqui.',
 
   'user.settings.email.title': 'Endereço de e-mail',
-  'user.settings.email.description': 'O seu endereço de e-mail não pode ser alterado.',
   'user.settings.email.label': 'Endereço de e-mail',
 
   'user.settings.name.title': 'Nome completo',
@@ -202,10 +142,6 @@ export const translations: Partial<TranslationsDictionary> = {
 
   // Organizations
 
-  'organizations.list.title': 'As suas organizações',
-  'organizations.list.description':
-    'As organizações são uma forma de agrupar os seus documentos e gerir o acesso aos mesmos. Pode criar várias organizações e convidar os membros da sua equipa para colaborar.',
-  'organizations.list.create-new': 'Criar nova organização',
   'organizations.list.back': 'Voltar às organizações',
   'organizations.list.deleted.title': 'Organizações eliminadas',
   'organizations.list.deleted.description':
@@ -243,38 +179,12 @@ export const translations: Partial<TranslationsDictionary> = {
   'organizations.create.form.name.required': 'Por favor, introduza um nome para a organização',
   'organizations.create.form.submit': 'Criar organização',
   'organizations.create.success': 'Organização criada com sucesso',
-  'organizations.switcher.create': 'Criar nova organização',
 
   'organizations.create-first.title': 'Criar a sua organização',
   'organizations.create-first.description':
     'Os seus documentos serão agrupados por organização. Pode criar várias organizações para separar os seus documentos, por exemplo, para documentos pessoais e de trabalho.',
   'organizations.create-first.default-name': 'A minha organização',
   'organizations.create-first.user-name': 'Organização de {{ name }}',
-
-  'organization.settings.page.title': 'Definições da organização',
-  'organization.settings.page.description': 'Gira as definições da sua organização aqui.',
-  'organization.settings.name.title': 'Nome da organização',
-  'organization.settings.name.update': 'Atualizar nome',
-  'organization.settings.name.placeholder': 'Ex. Acme Inc.',
-  'organization.settings.name.updated': 'Nome da organização atualizado',
-  'organization.settings.subscription.title': 'Subscrição',
-  'organization.settings.subscription.description':
-    'Gira a sua faturação, faturas e métodos de pagamento.',
-  'organization.settings.subscription.manage': 'Gerir subscrição',
-  'organization.settings.subscription.error': 'Falha ao obter URL do portal do cliente',
-  'organization.settings.delete.title': 'Eliminar organização',
-  'organization.settings.delete.description':
-    'Eliminar esta organização removerá permanentemente todos os dados associados à mesma.',
-  'organization.settings.delete.confirm.title': 'Eliminar organização',
-  'organization.settings.delete.confirm.message':
-    'Tem a certeza de que pretende eliminar esta organização? A organização será marcada para eliminação e permanentemente removida após {{ days }} dias. Durante este período, pode restaurá-la a partir da sua lista de organizações. Todos os documentos e dados serão permanentemente eliminados após este prazo.',
-  'organization.settings.delete.confirm.confirm-button': 'Eliminar organização',
-  'organization.settings.delete.confirm.cancel-button': 'Cancelar',
-  'organization.settings.delete.success': 'Organização eliminada',
-  'organization.settings.delete.only-owner':
-    'Apenas o proprietário da organização pode eliminar esta organização.',
-  'organization.settings.delete.has-active-subscription':
-    'Não é possível eliminar a organização com uma subscrição ativa, por favor cancele a sua subscrição acima primeiro.',
 
   'organization.usage.page.title': 'Uso',
   'organization.usage.page.description': 'Visualize o uso atual e os limites da sua organização.',
@@ -287,21 +197,10 @@ export const translations: Partial<TranslationsDictionary> = {
   'organization.usage.unlimited': 'Ilimitado',
 
   'organizations.members.title': 'Membros',
-  'organizations.members.description': 'Gira os membros da sua organização',
-  'organizations.members.invite-member': 'Convidar membro',
-  'organizations.members.invite-member-disabled-tooltip':
-    'Apenas administradores ou proprietários podem convidar membros para a organização',
-  'organizations.members.remove-from-organization': 'Remover da organização',
   'organizations.members.role': 'Função',
   'organizations.members.roles.owner': 'Proprietário',
   'organizations.members.roles.admin': 'Administrador',
   'organizations.members.roles.member': 'Membro',
-  'organizations.members.delete.confirm.title': 'Remover membro',
-  'organizations.members.delete.confirm.message':
-    'Tem a certeza de que quer remover este membro da organização?',
-  'organizations.members.delete.confirm.confirm-button': 'Remover',
-  'organizations.members.delete.confirm.cancel-button': 'Cancelar',
-  'organizations.members.delete.success': 'Membro removido da organização',
   'organizations.members.update-role.success': 'Função do membro atualizada',
   'organizations.members.table.headers.name': 'Nome',
   'organizations.members.table.headers.email': 'E-mail',
@@ -425,7 +324,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'documents.info.type': 'Tipo',
   'documents.info.size': 'Tamanho',
   'documents.info.created-at': 'Criado em',
-  'documents.info.updated-at': 'Atualizado em',
   'documents.info.never': 'Nunca',
   'documents.info.document-date': 'Data',
   'documents.list.table.headers.document-date': 'Data',
@@ -440,9 +338,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'documents.management.details': 'Detalhes do documento',
   'documents.management.rename': 'Renomear documento',
   'documents.management.delete': 'Eliminar documento',
-
-  'documents.import.drop-area.title': 'Largue os ficheiros aqui',
-  'documents.import.drop-area.description': 'Arraste e largue os ficheiros aqui para os importar',
 
   'documents.list.select.all': 'Selecionar todas as linhas desta página',
   'documents.list.select.row': 'Selecionar linha',
@@ -529,7 +424,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'documents.rename.success': 'Documento renomeado com sucesso',
   'documents.rename.cancel': 'Cancelar',
 
-  'import-documents.title.error': '{{ count }} documentos falharam',
   'import-documents.title.success': '{{ count }} documentos importados',
   'import-documents.title.pending': '{{ count }} / {{ total }} documentos importados',
   'import-documents.title.none': 'Importar documentos',
@@ -648,7 +542,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'document-share-links.create.expiration.pick-date': 'Escolha uma data',
   'document-share-links.create.cancel': 'Cancelar',
   'document-share-links.create.submit': 'Criar ligação',
-  'document-share-links.create.error': 'Falha ao criar a ligação de partilha',
   'document-share-links.created.title': 'Ligação de partilha criada',
   'document-share-links.created.description':
     'A sua ligação de partilha está pronta — copie-a e partilhe-a.',
@@ -1029,22 +922,10 @@ export const translations: Partial<TranslationsDictionary> = {
   'layout.menu.documents': 'Documentos',
   'layout.menu.tags': 'Tags',
   'layout.menu.custom-properties': 'Propriedades personalizadas',
-  'layout.menu.tagging-rules': 'Regras de etiquetagem',
-  'layout.menu.share-links': 'Ligações de partilha',
   'layout.menu.deleted-documents': 'Documentos eliminados',
   'layout.menu.organization-settings': 'Definições',
-  'layout.menu.api-keys': 'Chaves API',
-  'layout.menu.usage': 'Uso',
-  'layout.menu.intake-emails': 'E-mails de entrada',
-  'layout.menu.webhooks': 'Webhooks',
   'layout.menu.members': 'Membros',
   'layout.menu.document-views': 'Vistas',
-  'layout.menu.invitations': 'Convites',
-  'layout.menu.admin': 'Administração',
-
-  'layout.upgrade-cta.title': 'Precisa de mais espaço?',
-  'layout.upgrade-cta.description': 'Obtenha 10x mais armazenamento + colaboração em equipa',
-  'layout.upgrade-cta.button': 'Atualizar agora',
 
   'layout.theme.light': 'Tema claro',
   'layout.theme.dark': 'Tema escuro',
@@ -1058,8 +939,6 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'user-menu.trigger.label': 'Menu do utilizador',
   'user-menu.account-settings': 'Definições da conta',
-  'user-menu.api-keys': 'Chaves API',
-  'user-menu.invitations': 'Convites',
   'user-menu.language': 'Linguagem',
   'user-menu.theme': 'Tema',
   'user-menu.about': 'Acerca do SwyxDrive',

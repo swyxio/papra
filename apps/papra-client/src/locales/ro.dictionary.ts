@@ -29,68 +29,8 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'auth.email-provider.open': 'Deschide {{ provider }}',
 
-  'auth.login.title': 'Autentificare la SwyxDrive',
-  'auth.login.description':
-    'Introdu e-mailul sau folosește autentificarea cu cont social pentru a accesa contul SwyxDrive.',
-  'auth.login.login-with-provider': 'Autentificare cu {{ provider }}',
-  'auth.login.no-account': 'Nu ai cont?',
-  'auth.login.register': 'Înregistrare',
-  'auth.login.form.email.label': 'E-mail',
-  'auth.login.form.email.placeholder': 'Exemplu: popescu@papra.app',
-  'auth.login.form.email.required': 'Introdu adresa de e-mail',
-  'auth.login.form.email.invalid': 'Adresa e-mail este invalidă',
-  'auth.login.form.password.label': 'Parola',
-  'auth.login.form.password.placeholder': 'Setează o parola noua',
-  'auth.login.form.password.required': 'Introdu parola noua',
-  'auth.login.form.remember-me.label': 'Ține-mă minte',
-  'auth.login.form.forgot-password.label': 'Ai uitat parola?',
-  'auth.login.form.submit': 'Autentificare',
-
-  'auth.login.two-factor.title': 'Verificare în doi pași',
-  'auth.login.two-factor.description.totp':
-    'Introduceți codul de verificare de 6 cifre din aplicația dvs. de autentificare.',
-  'auth.login.two-factor.description.backup-code':
-    'Introduceți unul dintre codurile dvs. de rezervă pentru a accesa contul.',
-  'auth.login.two-factor.code.label.totp': 'Cod de autentificare',
-  'auth.login.two-factor.code.label.backup-code': 'Cod de rezervă',
-  'auth.login.two-factor.code.placeholder.backup-code': 'Introduceți codul de rezervă',
-  'auth.login.two-factor.code.required': 'Vă rugăm să introduceți codul de verificare',
-  'auth.login.two-factor.trust-device.label':
-    'Acordă încredere acestui dispozitiv pentru 30 de zile',
-  'auth.login.two-factor.back': 'Înapoi la autentificare',
-  'auth.login.two-factor.submit': 'Verifică',
-  'auth.login.two-factor.verification-failed':
-    'Verificare eșuată. Verificați codul și încercați din nou.',
-  'auth.login.two-factor.use-backup-code': 'Folosește cod de rezervă',
-  'auth.login.two-factor.use-totp': 'Folosește aplicația de autentificare',
-
-  'auth.register.title': 'Înregistrare la SwyxDrive',
-  'auth.register.description': 'Introdu e-mailul pentru a accesa SwyxDrive.',
-  'auth.register.register-with-email': 'înregistrează-te cu e-mail',
-  'auth.register.register-with-provider': 'Inregistreaza-te cu {{ provider }}',
   'auth.register.providers.google': 'Google',
   'auth.register.providers.github': 'GitHub',
-  'auth.register.have-account': 'Ai deja un cont?',
-  'auth.register.login': 'Autentificare',
-  'auth.register.registration-disabled.title': 'Înregistrarea este dezactivată',
-  'auth.register.registration-disabled.description':
-    'Crearea de conturi noi este momentan dezactivată pe această instanță de SwyxDrive. Doar utilizatorii cu conturi existente se pot autentifica. Dacă aceasta pare a fi o greșeală, contactează administratorul acestei instanțe.',
-  'auth.register.form.email.label': 'E-mail',
-  'auth.register.form.email.placeholder': 'Exemplu: popescu@papra.app',
-  'auth.register.form.email.required': 'Introdu adresa de e-mail',
-  'auth.register.form.email.invalid': 'Adresa e-mail este invalida',
-  'auth.register.form.password.label': 'Parola',
-  'auth.register.form.password.placeholder': 'Setează parola',
-  'auth.register.form.password.required': 'Te rugăm să introduci parola',
-  'auth.register.form.password.min-length':
-    'Parola trebuie să fie de minim {{ minLength }} caractere',
-  'auth.register.form.password.max-length':
-    'Parola trebuie să fie de maxim {{ maxLength }} de caractere',
-  'auth.register.form.name.label': 'Nume',
-  'auth.register.form.name.placeholder': 'Exemplu: Andrei Popescu',
-  'auth.register.form.name.required': 'Introdu numele',
-  'auth.register.form.name.max-length': 'Numele trebuie să fie de minim {{ maxLength }} caractere',
-  'auth.register.form.submit': 'Înregistrare',
 
   'auth.email-validation-required.title': 'Verifică-ți email-ul',
   'auth.email-validation-required.description':
@@ -120,7 +60,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'user.settings.description': 'Configurează setările contului aici.',
 
   'user.settings.email.title': 'Adresa de e-mail',
-  'user.settings.email.description': 'Adresa de e-mail nu poate fi schimbată.',
   'user.settings.email.label': 'Adresa de e-mail',
 
   'user.settings.name.title': 'Numele complet',
@@ -195,10 +134,6 @@ export const translations: Partial<TranslationsDictionary> = {
 
   // Organizations
 
-  'organizations.list.title': 'Organizațiile tale',
-  'organizations.list.description':
-    'Organizațiile sunt o modalitate de a grupa documentele și de a gestiona accesul la acestea. Poți crea multiple organizații și invita membrii echipei tale să colaboreze.',
-  'organizations.list.create-new': 'Creează o organizație nouă',
   'organizations.list.back': 'Înapoi la organizații',
   'organizations.list.deleted.title': 'Organizații șterse',
   'organizations.list.deleted.description':
@@ -236,37 +171,12 @@ export const translations: Partial<TranslationsDictionary> = {
   'organizations.create.form.name.required': 'Introdu numele organizației',
   'organizations.create.form.submit': 'Creează organizația',
   'organizations.create.success': 'Organizația a fost creată cu succes',
-  'organizations.switcher.create': 'Creează o organizație nouă',
 
   'organizations.create-first.title': 'Creează organizația',
   'organizations.create-first.description':
     'Documentele sunt grupate în funcție de organizație. Poți crea mai multe organizații pentru documente diferite, de exemplu, pentru uz personal și profesional.',
   'organizations.create-first.default-name': 'Organizația mea',
   'organizations.create-first.user-name': 'Organizația lui {{ name }}',
-
-  'organization.settings.page.title': 'Setările organizației',
-  'organization.settings.page.description': 'Gestionează setarile organizației aici.',
-  'organization.settings.name.title': 'Numele organizației',
-  'organization.settings.name.update': 'Actualizează numele',
-  'organization.settings.name.placeholder': 'Ex. Acme SRL.',
-  'organization.settings.name.updated': 'Numele organizației a fost actualizat',
-  'organization.settings.subscription.title': 'Abonament',
-  'organization.settings.subscription.description': 'Gestionează facturile și metodele de plată.',
-  'organization.settings.subscription.manage': 'Gestionează-ți abonamentul',
-  'organization.settings.subscription.error': 'Eroare la obținerea URL-ului portalului de client',
-  'organization.settings.delete.title': 'Șterge organizația',
-  'organization.settings.delete.description':
-    'Ștergerea acestei organizații va elimina definitiv toate datele asociate cu aceasta.',
-  'organization.settings.delete.confirm.title': 'Șterge organizatia',
-  'organization.settings.delete.confirm.message':
-    'Sigur doriți să ștergeți această organizație? Organizația va fi marcată pentru ștergere și eliminată definitiv după {{ days }} zile. În această perioadă, o puteți restaura din lista dvs. de organizații. Toate documentele și datele vor fi șterse definitiv după această perioadă.',
-  'organization.settings.delete.confirm.confirm-button': 'Șterge organizație',
-  'organization.settings.delete.confirm.cancel-button': 'Anulează',
-  'organization.settings.delete.success': 'Organizație ștearsă cu succes',
-  'organization.settings.delete.only-owner':
-    'Doar proprietarul organizației poate șterge această organizație.',
-  'organization.settings.delete.has-active-subscription':
-    'Nu se poate șterge organizația cu un abonament activ, vă rugăm să anulați mai întâi abonamentul de mai sus.',
 
   'organization.usage.page.title': 'Utilizare',
   'organization.usage.page.description':
@@ -280,21 +190,10 @@ export const translations: Partial<TranslationsDictionary> = {
   'organization.usage.unlimited': 'Nelimitat',
 
   'organizations.members.title': 'Membri',
-  'organizations.members.description': 'Gestionează membrii organizației tale',
-  'organizations.members.invite-member': 'Invită membru',
-  'organizations.members.invite-member-disabled-tooltip':
-    'Doar administratorii sau proprietarii pot invita membrii la organizație',
-  'organizations.members.remove-from-organization': 'Elimina din organizație',
   'organizations.members.role': 'Rol',
   'organizations.members.roles.owner': 'Proprietar',
   'organizations.members.roles.admin': 'Admin',
   'organizations.members.roles.member': 'Membru',
-  'organizations.members.delete.confirm.title': 'Elimină membrul',
-  'organizations.members.delete.confirm.message':
-    'Ești sigur că vrei să elimini acest membru din organizație?',
-  'organizations.members.delete.confirm.confirm-button': 'Elimină',
-  'organizations.members.delete.confirm.cancel-button': 'Anulează',
-  'organizations.members.delete.success': 'Membru eliminat cu succes',
   'organizations.members.update-role.success': 'Rolul membrului a fost actualizat',
   'organizations.members.table.headers.name': 'Nume',
   'organizations.members.table.headers.email': 'E-mail',
@@ -418,7 +317,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'documents.info.type': 'Tip',
   'documents.info.size': 'Dimensiune',
   'documents.info.created-at': 'Creat la',
-  'documents.info.updated-at': 'Actualizat la',
   'documents.info.never': 'Niciodată',
   'documents.info.document-date': 'Data',
   'documents.list.table.headers.document-date': 'Data',
@@ -433,9 +331,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'documents.management.details': 'Detalii document',
   'documents.management.rename': 'Redenumește documentul',
   'documents.management.delete': 'Șterge documentul',
-
-  'documents.import.drop-area.title': 'Plasează fișierele aici',
-  'documents.import.drop-area.description': 'Trage și plasează fișierele aici pentru a le importa',
 
   'documents.list.select.all': 'Selectează toate rândurile de pe această pagină',
   'documents.list.select.row': 'Selectează rândul',
@@ -522,7 +417,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'documents.rename.success': 'Document redenumit cu succes',
   'documents.rename.cancel': 'Anulează',
 
-  'import-documents.title.error': '{{ count }} documente au eșuat',
   'import-documents.title.success': '{{ count }} documente importate',
   'import-documents.title.pending': '{{ count }} / {{ total }} documente importate',
   'import-documents.title.none': 'Importă documente',
@@ -640,7 +534,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'document-share-links.create.expiration.pick-date': 'Alegeți o dată',
   'document-share-links.create.cancel': 'Anulează',
   'document-share-links.create.submit': 'Creează linkul',
-  'document-share-links.create.error': 'Crearea linkului de partajare a eșuat',
   'document-share-links.created.title': 'Link de partajare creat',
   'document-share-links.created.description':
     'Linkul de partajare este gata — copiați-l și partajați-l.',
@@ -1028,23 +921,10 @@ export const translations: Partial<TranslationsDictionary> = {
   'layout.menu.documents': 'Documente',
   'layout.menu.tags': 'Etichete',
   'layout.menu.custom-properties': 'Proprietăți personalizate',
-  'layout.menu.tagging-rules': 'Reguli de etichetare',
-  'layout.menu.share-links': 'Linkuri de partajare',
   'layout.menu.deleted-documents': 'Documente șterse',
   'layout.menu.organization-settings': 'Setări organizație',
-  'layout.menu.api-keys': 'Chei API',
-  'layout.menu.usage': 'Utilizare',
-  'layout.menu.intake-emails': 'Email-uri de primire',
-  'layout.menu.webhooks': 'Webhook-uri',
   'layout.menu.members': 'Membri',
   'layout.menu.document-views': 'Vizualizări',
-  'layout.menu.invitations': 'Invitații',
-  'layout.menu.admin': 'Administrare',
-
-  'layout.upgrade-cta.title': 'Ai nevoie de mai mult spațiu?',
-  'layout.upgrade-cta.description':
-    'Obține de 10x mai mult spațiu de stocare + colaborare în echipă',
-  'layout.upgrade-cta.button': 'Actualizează la Plus',
 
   'layout.theme.light': 'Mod luminos',
   'layout.theme.dark': 'Mod intunecat',
@@ -1058,8 +938,6 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'user-menu.trigger.label': 'Meniu utilizator',
   'user-menu.account-settings': 'Setări cont',
-  'user-menu.api-keys': 'Chei API',
-  'user-menu.invitations': 'Invitații',
   'user-menu.language': 'Limbă',
   'user-menu.theme': 'Temă',
   'user-menu.about': 'Despre SwyxDrive',

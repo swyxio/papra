@@ -6,17 +6,17 @@ Selected B prioritizes the file and readable transcript over administrative cont
 
 ## Final delta ledger
 
-| Delta | Correction / disposition |
-| --- | --- |
-| Portrait video consumed too much vertical space | Cap video at 480 CSS pixels on larger screens, 55vh on mobile, object contain |
-| Metadata competed with file content | Closed Details sheet, native player and expanded transcript first |
-| Details tabs cramped on phones | Five equal columns, smaller padding and type, minimum-width fixes |
-| Removing Open with would lose existing export routes | Restored in Details for every file type, retained explicit PDF viewer link |
-| Spaces had no shared context and required another click | Shared shell and direct link to files; role/access/count/size/activity summaries |
-| Duplicate folder/document lists and undisclosed sharing | One scoped paginated list, folder breadcrumbs and permission-aware metadata |
-| Export scope unclear inside folder | Button explicitly says Export space |
-| Account loading/error could lose context | Same app shell in readiness mode; no private workspace queries before account verification |
-| Focus viewer lacked reliable recovery | Back to file and account controls in loading/error/non-PDF states; signed ranged URL rather than full blob |
+| Delta                                                   | Correction / disposition                                                                                   |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Portrait video consumed too much vertical space         | Cap video at 480 CSS pixels on larger screens, 55vh on mobile, object contain                              |
+| Metadata competed with file content                     | Closed Details sheet, native player and expanded transcript first                                          |
+| Details tabs cramped on phones                          | Five equal columns, smaller padding and type, minimum-width fixes                                          |
+| Removing Open with would lose existing export routes    | Restored in Details for every file type, retained explicit PDF viewer link                                 |
+| Spaces had no shared context and required another click | Shared shell and direct link to files; role/access/count/size/activity summaries                           |
+| Duplicate folder/document lists and undisclosed sharing | One scoped paginated list, folder breadcrumbs and permission-aware metadata                                |
+| Export scope unclear inside folder                      | Button explicitly says Export space                                                                        |
+| Account loading/error could lose context                | Same app shell in readiness mode; no private workspace queries before account verification                 |
+| Focus viewer lacked reliable recovery                   | Back to file and account controls in loading/error/non-PDF states; signed ranged URL rather than full blob |
 
 ## Validation evidence
 

@@ -18,12 +18,17 @@ describe('organization UI URLs', () => {
     }
   });
 
-  test.each(['org_personal', 'AIE-extra', 'aie', 'Smolish'])('shortens all organization UI paths without changing unknown identity: %s', (id) => {
-    expect(canonicalOrganizationUrl(`/organizations/${id}/documents?tab=versions#source`))
-      .toBe(`/orgs/${id}/documents?tab=versions#source`);
-    expect(resolveOrganizationRoute(`/orgs/${id}/documents?tab=versions#source`))
-      .toBe(`/organizations/${id}/documents?tab=versions#source`);
-  });
+  test.each(['org_personal', 'AIE-extra', 'aie', 'Smolish'])(
+    'shortens all organization UI paths without changing unknown identity: %s',
+    (id) => {
+      expect(canonicalOrganizationUrl(`/organizations/${id}/documents?tab=versions#source`)).toBe(
+        `/orgs/${id}/documents?tab=versions#source`,
+      );
+      expect(resolveOrganizationRoute(`/orgs/${id}/documents?tab=versions#source`)).toBe(
+        `/organizations/${id}/documents?tab=versions#source`,
+      );
+    },
+  );
 
   test('shortens the organization index and preserves segment boundaries', () => {
     expect(canonicalOrganizationUrl('/organizations?sort=name')).toBe('/orgs?sort=name');

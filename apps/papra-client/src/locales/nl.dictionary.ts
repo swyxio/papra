@@ -31,67 +31,8 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'auth.email-provider.open': 'Open {{ provider }}',
 
-  'auth.login.title': 'Inloggen bij SwyxDrive',
-  'auth.login.description':
-    'Voer uw e-mailadres in of gebruik sociale media om toegang te krijgen tot uw SwyxDrive-account.',
-  'auth.login.login-with-provider': 'Inloggen met {{ provider }}',
-  'auth.login.no-account': 'Nog geen account?',
-  'auth.login.register': 'Registreren',
-  'auth.login.form.email.label': 'E-mail',
-  'auth.login.form.email.placeholder': 'Voorbeeld: ada@papra.app',
-  'auth.login.form.email.required': 'Voer uw e-mailadres in',
-  'auth.login.form.email.invalid': 'Dit e-mailadres is ongeldig',
-  'auth.login.form.password.label': 'Wachtwoord',
-  'auth.login.form.password.placeholder': 'Voer een wachtwoord in',
-  'auth.login.form.password.required': 'Voer uw wachtwoord in',
-  'auth.login.form.remember-me.label': 'Onthoud mij',
-  'auth.login.form.forgot-password.label': 'Wachtwoord vergeten?',
-  'auth.login.form.submit': 'Inloggen',
-
-  'auth.login.two-factor.title': 'Twee-staps-verificatie',
-  'auth.login.two-factor.description.totp':
-    'Voer de 6-cijferige verificatiecode van je authenticatie-app in.',
-  'auth.login.two-factor.description.backup-code':
-    'Voer een van je back-upcodes in om toegang te krijgen tot je account.',
-  'auth.login.two-factor.code.label.totp': 'Authenticatiecode',
-  'auth.login.two-factor.code.label.backup-code': 'Back-upcode',
-  'auth.login.two-factor.code.placeholder.backup-code': 'Voer back-upcode in',
-  'auth.login.two-factor.code.required': 'Voer de verificatiecode in',
-  'auth.login.two-factor.trust-device.label': 'Dit apparaat 30 dagen vertrouwen',
-  'auth.login.two-factor.back': 'Terug naar inloggen',
-  'auth.login.two-factor.submit': 'Verifiëren',
-  'auth.login.two-factor.verification-failed':
-    'Verificatie mislukt. Controleer je code en probeer het opnieuw.',
-  'auth.login.two-factor.use-backup-code': 'Gebruik in plaats daarvan een back-upcode',
-  'auth.login.two-factor.use-totp': 'Gebruik in plaats daarvan de authenticatie-app',
-
-  'auth.register.title': 'Registreren bij SwyxDrive',
-  'auth.register.description': 'Maak een account aan om SwyxDrive te gebruiken.',
-  'auth.register.register-with-email': 'Registreren met e-mail',
-  'auth.register.register-with-provider': 'Registreren met {{ provider }}',
   'auth.register.providers.google': 'Google',
   'auth.register.providers.github': 'GitHub',
-  'auth.register.have-account': 'Heeft u al een account?',
-  'auth.register.login': 'Inloggen',
-  'auth.register.registration-disabled.title': 'Registratie is uitgeschakeld',
-  'auth.register.registration-disabled.description':
-    'Het aanmaken van nieuwe accounts is momenteel uitgeschakeld op deze SwyxDrive-instantie. Alleen gebruikers met bestaande accounts kunnen inloggen. Als u denkt dat dit een vergissing is, neem dan contact op met de beheerder van deze instantie.',
-  'auth.register.form.email.label': 'E-mail',
-  'auth.register.form.email.placeholder': 'Voorbeeld: ada@papra.app',
-  'auth.register.form.email.required': 'Voer uw e-mailadres in',
-  'auth.register.form.email.invalid': 'Dit e-mailadres is ongeldig',
-  'auth.register.form.password.label': 'Wachtwoord',
-  'auth.register.form.password.placeholder': 'Kies een wachtwoord',
-  'auth.register.form.password.required': 'Voer uw wachtwoord in',
-  'auth.register.form.password.min-length':
-    'Wachtwoord moet minimaal {{ minLength }} tekens bevatten',
-  'auth.register.form.password.max-length':
-    'Wachtwoord mag maximaal {{ maxLength }} tekens bevatten',
-  'auth.register.form.name.label': 'Naam',
-  'auth.register.form.name.placeholder': 'Voorbeeld: Ada Lovelace',
-  'auth.register.form.name.required': 'Voer uw naam in',
-  'auth.register.form.name.max-length': 'Naam mag maximaal {{ maxLength }} tekens bevatten',
-  'auth.register.form.submit': 'Registreren',
 
   'auth.email-validation-required.title': 'Bevestig uw e-mail',
   'auth.email-validation-required.description':
@@ -121,7 +62,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'user.settings.description': 'Beheer hier uw accountinstellingen.',
 
   'user.settings.email.title': 'E-mailadres',
-  'user.settings.email.description': 'Uw e-mailadres kan niet worden gewijzigd.',
   'user.settings.email.label': 'E-mailadres',
 
   'user.settings.name.title': 'Volledige naam',
@@ -196,10 +136,6 @@ export const translations: Partial<TranslationsDictionary> = {
 
   // Organizations
 
-  'organizations.list.title': 'Uw organisaties',
-  'organizations.list.description':
-    'Organisaties zijn een manier om uw documenten te groeperen en toegang te beheren. U kunt meerdere organisaties aanmaken en uw teamleden uitnodigen om samen te werken.',
-  'organizations.list.create-new': 'Nieuwe organisatie aanmaken',
   'organizations.list.back': 'Terug naar organisaties',
   'organizations.list.deleted.title': 'Verwijderde organisaties',
   'organizations.list.deleted.description':
@@ -237,38 +173,12 @@ export const translations: Partial<TranslationsDictionary> = {
   'organizations.create.form.name.required': 'Voer een organisatienaam in',
   'organizations.create.form.submit': 'Organisatie aanmaken',
   'organizations.create.success': 'Organisatie succesvol aangemaakt',
-  'organizations.switcher.create': 'Nieuwe organisatie maken',
 
   'organizations.create-first.title': 'Maak uw organisatie',
   'organizations.create-first.description':
     'Uw documenten worden per organisatie gegroepeerd. U kunt meerdere organisaties aanmaken om uw documenten te scheiden, bijvoorbeeld privé en werk.',
   'organizations.create-first.default-name': 'Mijn organisatie',
   'organizations.create-first.user-name': "{{ name }}'s organisatie",
-
-  'organization.settings.page.title': 'Organisatie-instellingen',
-  'organization.settings.page.description': 'Beheer hier uw organisatie-instellingen.',
-  'organization.settings.name.title': 'Organisatienaam',
-  'organization.settings.name.update': 'Naam bijwerken',
-  'organization.settings.name.placeholder': 'Bijv. Acme Inc.',
-  'organization.settings.name.updated': 'Organisatienaam bijgewerkt',
-  'organization.settings.subscription.title': 'Abonnement',
-  'organization.settings.subscription.description':
-    'Beheer uw facturering, facturen en betaalmethoden.',
-  'organization.settings.subscription.manage': 'Abonnement beheren',
-  'organization.settings.subscription.error': 'Kan customer portal-URL niet ophalen',
-  'organization.settings.delete.title': 'Organisatie verwijderen',
-  'organization.settings.delete.description':
-    'Het verwijderen van deze organisatie zal alle bijbehorende gegevens permanent verwijderen.',
-  'organization.settings.delete.confirm.title': 'Organisatie verwijderen',
-  'organization.settings.delete.confirm.message':
-    'Weet u zeker dat u deze organisatie wilt verwijderen? De organisatie wordt gemarkeerd voor verwijdering en na {{ days }} dagen permanent verwijderd. Tijdens deze periode kunt u deze herstellen vanuit uw organisatieslijst. Alle documenten en gegevens worden na deze termijn permanent verwijderd.',
-  'organization.settings.delete.confirm.confirm-button': 'Organisatie verwijderen',
-  'organization.settings.delete.confirm.cancel-button': 'Annuleren',
-  'organization.settings.delete.success': 'Organisatie verwijderd',
-  'organization.settings.delete.only-owner':
-    'Alleen de eigenaar van de organisatie kan deze verwijderen.',
-  'organization.settings.delete.has-active-subscription':
-    'Kan organisatie met een actief abonnement niet verwijderen. Annuleer eerst uw abonnement hierboven.',
 
   'organization.usage.page.title': 'Gebruik',
   'organization.usage.page.description':
@@ -282,21 +192,10 @@ export const translations: Partial<TranslationsDictionary> = {
   'organization.usage.unlimited': 'Onbeperkt',
 
   'organizations.members.title': 'Leden',
-  'organizations.members.description': 'Beheer de leden van uw organisatie',
-  'organizations.members.invite-member': 'Lid uitnodigen',
-  'organizations.members.invite-member-disabled-tooltip':
-    'Alleen beheerders of eigenaren kunnen leden uitnodigen voor de organisatie',
-  'organizations.members.remove-from-organization': 'Verwijderen uit organisatie',
   'organizations.members.role': 'Rol',
   'organizations.members.roles.owner': 'Eigenaar',
   'organizations.members.roles.admin': 'Beheerder',
   'organizations.members.roles.member': 'Lid',
-  'organizations.members.delete.confirm.title': 'Lid verwijderen',
-  'organizations.members.delete.confirm.message':
-    'Weet u zeker dat u dit lid uit de organisatie wilt verwijderen?',
-  'organizations.members.delete.confirm.confirm-button': 'Verwijderen',
-  'organizations.members.delete.confirm.cancel-button': 'Annuleren',
-  'organizations.members.delete.success': 'Lid verwijderd uit organisatie',
   'organizations.members.update-role.success': 'Rol van lid bijgewerkt',
   'organizations.members.table.headers.name': 'Naam',
   'organizations.members.table.headers.email': 'E-mail',
@@ -420,7 +319,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'documents.info.type': 'Type',
   'documents.info.size': 'Grootte',
   'documents.info.created-at': 'Aangemaakt op',
-  'documents.info.updated-at': 'Bijgewerkt op',
   'documents.info.never': 'Nooit',
   'documents.info.document-date': 'Datum',
   'documents.list.table.headers.document-date': 'Datum',
@@ -435,9 +333,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'documents.management.details': 'Documentdetails',
   'documents.management.rename': 'Document hernoemen',
   'documents.management.delete': 'Document verwijderen',
-
-  'documents.import.drop-area.title': 'Zet bestanden hier neer',
-  'documents.import.drop-area.description': 'Sleep bestanden hierheen om ze te importeren',
 
   'documents.list.select.all': 'Alle rijen op deze pagina selecteren',
   'documents.list.select.row': 'Rij selecteren',
@@ -525,7 +420,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'documents.rename.success': 'Document succesvol hernoemd',
   'documents.rename.cancel': 'Annuleren',
 
-  'import-documents.title.error': '{{ count }} documenten mislukt',
   'import-documents.title.success': '{{ count }} documenten geïmporteerd',
   'import-documents.title.pending': '{{ count }} / {{ total }} documenten geïmporteerd',
   'import-documents.title.none': 'Documenten importeren',
@@ -641,7 +535,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'document-share-links.create.expiration.pick-date': 'Kies een datum',
   'document-share-links.create.cancel': 'Annuleren',
   'document-share-links.create.submit': 'Link maken',
-  'document-share-links.create.error': 'Maken van deellink mislukt',
   'document-share-links.created.title': 'Deellink gemaakt',
   'document-share-links.created.description': 'Uw deellink is klaar — kopieer en deel hem.',
   'document-share-links.created.done': 'Klaar',
@@ -1020,22 +913,10 @@ export const translations: Partial<TranslationsDictionary> = {
   'layout.menu.documents': 'Documenten',
   'layout.menu.tags': 'Labels',
   'layout.menu.custom-properties': 'Aangepaste eigenschappen',
-  'layout.menu.tagging-rules': 'Labelregels',
-  'layout.menu.share-links': 'Deellinks',
   'layout.menu.deleted-documents': 'Verwijderde documenten',
   'layout.menu.organization-settings': 'Instellingen',
-  'layout.menu.api-keys': 'API-sleutels',
-  'layout.menu.usage': 'Gebruik',
-  'layout.menu.intake-emails': 'Intake-e-mails',
-  'layout.menu.webhooks': 'Webhooks',
   'layout.menu.members': 'Leden',
   'layout.menu.document-views': 'Weergaven',
-  'layout.menu.invitations': 'Uitnodigingen',
-  'layout.menu.admin': 'Beheer',
-
-  'layout.upgrade-cta.title': 'Meer ruimte nodig?',
-  'layout.upgrade-cta.description': 'Krijg 10x meer opslag + team samenwerking',
-  'layout.upgrade-cta.button': 'Nu upgraden',
 
   'layout.theme.light': 'Licht thema',
   'layout.theme.dark': 'Donker thema',
@@ -1049,8 +930,6 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'user-menu.trigger.label': 'Gebruikersmenu',
   'user-menu.account-settings': 'Accountinstellingen',
-  'user-menu.api-keys': 'API-sleutels',
-  'user-menu.invitations': 'Uitnodigingen',
   'user-menu.language': 'Taal',
   'user-menu.theme': 'Thema',
   'user-menu.about': 'Over SwyxDrive',

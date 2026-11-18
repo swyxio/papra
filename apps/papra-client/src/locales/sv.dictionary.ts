@@ -30,67 +30,8 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'auth.email-provider.open': 'Öppna {{ provider }}',
 
-  'auth.login.title': 'Logga in på SwyxDrive',
-  'auth.login.description':
-    'Ange din e-postadress eller använd sociala medier-inloggning för att komma åt ditt SwyxDrive-konto.',
-  'auth.login.login-with-provider': 'Logga in med {{ provider }}',
-  'auth.login.no-account': 'Har du inget konto?',
-  'auth.login.register': 'Registrera',
-  'auth.login.form.email.label': 'E-post',
-  'auth.login.form.email.placeholder': 'Exempel: ada@papra.app',
-  'auth.login.form.email.required': 'Ange din e-postadress',
-  'auth.login.form.email.invalid': 'Denna e-postadress är ogiltig',
-  'auth.login.form.password.label': 'Lösenord',
-  'auth.login.form.password.placeholder': 'Ange lösenord',
-  'auth.login.form.password.required': 'Ange ditt lösenord',
-  'auth.login.form.remember-me.label': 'Kom ihåg mig',
-  'auth.login.form.forgot-password.label': 'Glömt ditt lösenord?',
-  'auth.login.form.submit': 'Logga in',
-
-  'auth.login.two-factor.title': 'Tvåfaktorsverifiering',
-  'auth.login.two-factor.description.totp':
-    'Ange den sexsiffriga verifieringskoden från din autentiseringsapp.',
-  'auth.login.two-factor.description.backup-code':
-    'Ange en av dina reservkoder för att komma åt ditt konto.',
-  'auth.login.two-factor.code.label.totp': 'Verifieringskod',
-  'auth.login.two-factor.code.label.backup-code': 'Reservkod',
-  'auth.login.two-factor.code.placeholder.backup-code': 'Skriv in reservkod',
-  'auth.login.two-factor.code.required': 'Ange verifieringskoden',
-  'auth.login.two-factor.trust-device.label': 'Kom ihåg den här enheten i 30 dagar',
-  'auth.login.two-factor.back': 'Tillbaka till inloggning',
-  'auth.login.two-factor.submit': 'Verifiera',
-  'auth.login.two-factor.verification-failed':
-    'Verifieringen misslyckades. Kontrollera din kod och försök igen.',
-  'auth.login.two-factor.use-backup-code': 'Använd reservkod istället',
-  'auth.login.two-factor.use-totp': 'Använd autentiseringsappen istället',
-
-  'auth.register.title': 'Registrera dig på SwyxDrive',
-  'auth.register.description': 'Skapa ett konto för att börja använda SwyxDrive.',
-  'auth.register.register-with-email': 'Registrera med e-postadress',
-  'auth.register.register-with-provider': 'Registrera med {{ provider }}',
   'auth.register.providers.google': 'Google',
   'auth.register.providers.github': 'GitHub',
-  'auth.register.have-account': 'Har redan ett konto?',
-  'auth.register.login': 'Inloggning',
-  'auth.register.registration-disabled.title': 'Registreringen är inaktiverad',
-  'auth.register.registration-disabled.description':
-    'Skapandet av nya konton är för närvarande inaktiverat på denna instans av SwyxDrive. Endast användare med befintliga konton kan logga in. Om du tror att detta är ett misstag, kontakta administratören för denna instans.',
-  'auth.register.form.email.label': 'E-post',
-  'auth.register.form.email.placeholder': 'Exempel: ada@papra.app',
-  'auth.register.form.email.required': 'Ange din e-postadress',
-  'auth.register.form.email.invalid': 'Denna e-postadress är ogiltig',
-  'auth.register.form.password.label': 'Lösenord',
-  'auth.register.form.password.placeholder': 'Ange ett lösenord',
-  'auth.register.form.password.required': 'Ange ditt lösenord',
-  'auth.register.form.password.min-length':
-    'Lösenordet måste bestå av minst {{ minLength }} tecken',
-  'auth.register.form.password.max-length':
-    'Lösenordet måste vara mindre än {{ maxLength }} tecken',
-  'auth.register.form.name.label': 'Namn',
-  'auth.register.form.name.placeholder': 'Exempel: Ada Lovelace',
-  'auth.register.form.name.required': 'Ange ditt namn',
-  'auth.register.form.name.max-length': 'Namnet måste vara mindre än {{ maxLength }} tecken',
-  'auth.register.form.submit': 'Registrera',
 
   'auth.email-validation-required.title': 'Verifiera din e-postadress',
   'auth.email-validation-required.description':
@@ -120,7 +61,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'user.settings.description': 'Hantera dina kontoinställningar här.',
 
   'user.settings.email.title': 'E-postadress',
-  'user.settings.email.description': 'Din e-postadress kan inte ändras.',
   'user.settings.email.label': 'E-postadress',
 
   'user.settings.name.title': 'Fullständigt namn',
@@ -194,10 +134,6 @@ export const translations: Partial<TranslationsDictionary> = {
 
   // Organizations
 
-  'organizations.list.title': 'Dina organisationer',
-  'organizations.list.description':
-    'Organisationer är ett sätt att gruppera dina dokument och hantera åtkomst till dem. Du kan skapa flera organisationer och bjuda in dina teammedlemmar att samarbeta.',
-  'organizations.list.create-new': 'Skapa ny organisation',
   'organizations.list.back': 'Tillbaka till organisationer',
   'organizations.list.deleted.title': 'Raderade organisationer',
   'organizations.list.deleted.description':
@@ -235,38 +171,12 @@ export const translations: Partial<TranslationsDictionary> = {
   'organizations.create.form.name.required': 'Ange organisationsnamn',
   'organizations.create.form.submit': 'Skapa organisation',
   'organizations.create.success': 'Organisationen har skapats',
-  'organizations.switcher.create': 'Skapa ny organisation',
 
   'organizations.create-first.title': 'Skapa din organisation',
   'organizations.create-first.description':
     'Dina dokument kommer att grupperas efter organisation. Du kan skapa flera organisationer för att separera dina dokument, till exempel för personliga dokument och arbetsdokument.',
   'organizations.create-first.default-name': 'Min organisation',
   'organizations.create-first.user-name': '{{ name }}s organisation',
-
-  'organization.settings.page.title': 'Organisationsinställningar',
-  'organization.settings.page.description': 'Hantera dina organisationsinställningar här.',
-  'organization.settings.name.title': 'Organisationsnamn',
-  'organization.settings.name.update': 'Uppdatera namn',
-  'organization.settings.name.placeholder': 'T.ex. Acme AB',
-  'organization.settings.name.updated': 'Organisationsnamnet har uppdaterats',
-  'organization.settings.subscription.title': 'Prenumeration',
-  'organization.settings.subscription.description':
-    'Hantera fakturering, kvitton och betalningsmetoder.',
-  'organization.settings.subscription.manage': 'Hantera prenumeration',
-  'organization.settings.subscription.error': 'Det gick inte att hämta kundportalens URL',
-  'organization.settings.delete.title': 'Radera organisation',
-  'organization.settings.delete.description':
-    'Om du tar bort den här organisationen tas all data som är kopplad till den permanent bort.',
-  'organization.settings.delete.confirm.title': 'Radera organisation',
-  'organization.settings.delete.confirm.message':
-    'Är du säker på att du vill ta bort den här organisationen? Organisationen kommer att markeras för radering och tas bort permanent efter {{ days }} dagar. Under denna period kan du återställa den från din organisationslista. Alla dokument och data kommer att raderas permanent efter denna fördröjning.',
-  'organization.settings.delete.confirm.confirm-button': 'Radera organisation',
-  'organization.settings.delete.confirm.cancel-button': 'Avbryt',
-  'organization.settings.delete.success': 'Organisation raderad',
-  'organization.settings.delete.only-owner':
-    'Endast organisationens ägare kan ta bort denna organisation.',
-  'organization.settings.delete.has-active-subscription':
-    'Det går inte att ta bort en organisation med en aktiv prenumeration. Vänligen avsluta prenumerationen ovan först.',
 
   'organization.usage.page.title': 'Användning',
   'organization.usage.page.description': 'Visa din organisations användning och gränser.',
@@ -279,21 +189,10 @@ export const translations: Partial<TranslationsDictionary> = {
   'organization.usage.unlimited': 'Obegränsad',
 
   'organizations.members.title': 'Medlemmar',
-  'organizations.members.description': 'Hantera dina organisationsmedlemmar',
-  'organizations.members.invite-member': 'Bjud in medlem',
-  'organizations.members.invite-member-disabled-tooltip':
-    'Endast administratörer eller ägare kan bjuda in medlemmar till organisationen',
-  'organizations.members.remove-from-organization': 'Ta bort från organisation',
   'organizations.members.role': 'Roll',
   'organizations.members.roles.owner': 'Ägare',
   'organizations.members.roles.admin': 'Admin',
   'organizations.members.roles.member': 'Medlem',
-  'organizations.members.delete.confirm.title': 'Ta bort medlem',
-  'organizations.members.delete.confirm.message':
-    'Är du säker på att du vill ta bort den här medlemmen från organisationen?',
-  'organizations.members.delete.confirm.confirm-button': 'Ta bort',
-  'organizations.members.delete.confirm.cancel-button': 'Avbryt',
-  'organizations.members.delete.success': 'Medlem borttagen från organisationen',
   'organizations.members.update-role.success': 'Medlemsroll uppdaterad',
   'organizations.members.table.headers.name': 'Namn',
   'organizations.members.table.headers.email': 'E-post',
@@ -415,7 +314,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'documents.info.type': 'Typ',
   'documents.info.size': 'Storlek',
   'documents.info.created-at': 'Skapad',
-  'documents.info.updated-at': 'Uppdaterad',
   'documents.info.never': 'Aldrig',
   'documents.info.document-date': 'Datum',
   'documents.list.table.headers.document-date': 'Datum',
@@ -430,9 +328,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'documents.management.details': 'Dokumentinformation',
   'documents.management.rename': 'Byt namn på dokument',
   'documents.management.delete': 'Radera dokument',
-
-  'documents.import.drop-area.title': 'Släpp filer här',
-  'documents.import.drop-area.description': 'Dra och släpp filer här för att importera dem',
 
   'documents.list.select.all': 'Markera alla rader på denna sida',
   'documents.list.select.row': 'Markera rad',
@@ -517,7 +412,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'documents.rename.success': 'Dokumentet har bytt namn',
   'documents.rename.cancel': 'Avbryt',
 
-  'import-documents.title.error': '{{ count }} dokument misslyckades',
   'import-documents.title.success': '{{ count }} dokument importerades',
   'import-documents.title.pending': '{{ count }} / {{ total }} dokument importerade',
   'import-documents.title.none': 'Importera dokument',
@@ -632,7 +526,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'document-share-links.create.expiration.pick-date': 'Välj ett datum',
   'document-share-links.create.cancel': 'Avbryt',
   'document-share-links.create.submit': 'Skapa länk',
-  'document-share-links.create.error': 'Det gick inte att skapa delningslänken',
   'document-share-links.created.title': 'Delningslänk skapad',
   'document-share-links.created.description': 'Din delningslänk är klar — kopiera och dela den.',
   'document-share-links.created.done': 'Klar',
@@ -1006,22 +899,10 @@ export const translations: Partial<TranslationsDictionary> = {
   'layout.menu.documents': 'Dokument',
   'layout.menu.tags': 'Taggar',
   'layout.menu.custom-properties': 'Anpassade egenskaper',
-  'layout.menu.tagging-rules': 'Taggningsregler',
-  'layout.menu.share-links': 'Delningslänkar',
   'layout.menu.deleted-documents': 'Raderade dokument',
   'layout.menu.organization-settings': 'Inställningar',
-  'layout.menu.api-keys': 'API-nycklar',
-  'layout.menu.usage': 'Användning',
-  'layout.menu.intake-emails': 'Inmatningsadresser',
-  'layout.menu.webhooks': 'Webhooks',
   'layout.menu.members': 'Medlemmar',
   'layout.menu.document-views': 'Vyer',
-  'layout.menu.invitations': 'Inbjudningar',
-  'layout.menu.admin': 'Admin',
-
-  'layout.upgrade-cta.title': 'Behöver du mer utrymme?',
-  'layout.upgrade-cta.description': 'Få 10x mer utrymme + teamsamarbete',
-  'layout.upgrade-cta.button': 'Uppgradera nu',
 
   'layout.theme.light': 'Ljust läge',
   'layout.theme.dark': 'Mörkt läge',
@@ -1035,8 +916,6 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'user-menu.trigger.label': 'Användarmeny',
   'user-menu.account-settings': 'Kontoinställningar',
-  'user-menu.api-keys': 'API-nycklar',
-  'user-menu.invitations': 'Inbjudningar',
   'user-menu.language': 'Språk',
   'user-menu.theme': 'Tema',
   'user-menu.about': 'Om SwyxDrive',

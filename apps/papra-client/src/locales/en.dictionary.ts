@@ -27,65 +27,8 @@ export const translations = {
 
   'auth.email-provider.open': 'Open {{ provider }}',
 
-  'auth.login.title': 'Login to SwyxDrive',
-  'auth.login.description':
-    'Enter your email or use social login to access your SwyxDrive account.',
-  'auth.login.login-with-provider': 'Login with {{ provider }}',
-  'auth.login.no-account': "Don't have an account?",
-  'auth.login.register': 'Register',
-  'auth.login.form.email.label': 'Email',
-  'auth.login.form.email.placeholder': 'Example: ada@papra.app',
-  'auth.login.form.email.required': 'Please enter your email address',
-  'auth.login.form.email.invalid': 'This email address is invalid',
-  'auth.login.form.password.label': 'Password',
-  'auth.login.form.password.placeholder': 'Set a password',
-  'auth.login.form.password.required': 'Please enter your password',
-  'auth.login.form.remember-me.label': 'Remember me',
-  'auth.login.form.forgot-password.label': 'Forgot password?',
-  'auth.login.form.submit': 'Login',
-
-  'auth.login.two-factor.title': 'Two-Factor Verification',
-  'auth.login.two-factor.description.totp':
-    'Enter the 6-digit verification code from your authenticator app.',
-  'auth.login.two-factor.description.backup-code':
-    'Enter one of your backup codes to access your account.',
-  'auth.login.two-factor.code.label.totp': 'Authenticator code',
-  'auth.login.two-factor.code.label.backup-code': 'Backup code',
-  'auth.login.two-factor.code.placeholder.backup-code': 'Enter backup code',
-  'auth.login.two-factor.code.required': 'Please enter the verification code',
-  'auth.login.two-factor.trust-device.label': 'Trust this device for 30 days',
-  'auth.login.two-factor.back': 'Back to login',
-  'auth.login.two-factor.submit': 'Verify',
-  'auth.login.two-factor.verification-failed':
-    'Verification failed. Please check your code and try again.',
-  'auth.login.two-factor.use-backup-code': 'Use backup code instead',
-  'auth.login.two-factor.use-totp': 'Use authenticator app instead',
-
-  'auth.register.title': 'Register to SwyxDrive',
-  'auth.register.description': 'Create an account to start using SwyxDrive.',
-  'auth.register.register-with-email': 'Register with email',
-  'auth.register.register-with-provider': 'Register with {{ provider }}',
   'auth.register.providers.google': 'Google',
   'auth.register.providers.github': 'GitHub',
-  'auth.register.have-account': 'Already have an account?',
-  'auth.register.login': 'Login',
-  'auth.register.registration-disabled.title': 'Registration is disabled',
-  'auth.register.registration-disabled.description':
-    'The creation of new accounts is currently disabled on this instance of SwyxDrive. Only users with existing accounts can log in. If you think this is a mistake, please contact the administrator of this instance.',
-  'auth.register.form.email.label': 'Email',
-  'auth.register.form.email.placeholder': 'Example: ada@papra.app',
-  'auth.register.form.email.required': 'Please enter your email address',
-  'auth.register.form.email.invalid': 'This email address is invalid',
-  'auth.register.form.password.label': 'Password',
-  'auth.register.form.password.placeholder': 'Set a password',
-  'auth.register.form.password.required': 'Please enter your password',
-  'auth.register.form.password.min-length': 'Password must be at least {{ minLength }} characters',
-  'auth.register.form.password.max-length': 'Password must be less than {{ maxLength }} characters',
-  'auth.register.form.name.label': 'Name',
-  'auth.register.form.name.placeholder': 'Example: Ada Lovelace',
-  'auth.register.form.name.required': 'Please enter your name',
-  'auth.register.form.name.max-length': 'Name must be less than {{ maxLength }} characters',
-  'auth.register.form.submit': 'Register',
 
   'auth.email-validation-required.title': 'Verify your email',
   'auth.email-validation-required.description':
@@ -115,7 +58,6 @@ export const translations = {
   'user.settings.description': 'Manage your account settings here.',
 
   'user.settings.email.title': 'Email address',
-  'user.settings.email.description': 'Your email address cannot be changed.',
   'user.settings.email.label': 'Email address',
 
   'user.settings.name.title': 'Full name',
@@ -188,10 +130,6 @@ export const translations = {
 
   // Organizations
 
-  'organizations.list.title': 'Your organizations',
-  'organizations.list.description':
-    'Organizations are a way to group your documents and manage access to them. You can create multiple organizations and invite your team members to collaborate.',
-  'organizations.list.create-new': 'Create new organization',
   'organizations.list.back': 'Back to organizations',
   'organizations.list.deleted.title': 'Deleted organizations',
   'organizations.list.deleted.description':
@@ -229,38 +167,12 @@ export const translations = {
   'organizations.create.form.name.required': 'Please enter an organization name',
   'organizations.create.form.submit': 'Create organization',
   'organizations.create.success': 'Organization created successfully',
-  'organizations.switcher.create': 'Create new organization',
 
   'organizations.create-first.title': 'Create your organization',
   'organizations.create-first.description':
     'Your documents will be grouped by organization. You can create multiple organizations to separate your documents, for example, for personal and work documents.',
   'organizations.create-first.default-name': 'My organization',
   'organizations.create-first.user-name': "{{ name }}'s organization",
-
-  'organization.settings.page.title': 'Organization settings',
-  'organization.settings.page.description': 'Manage your organization settings here.',
-  'organization.settings.name.title': 'Organization name',
-  'organization.settings.name.update': 'Update name',
-  'organization.settings.name.placeholder': 'Eg. Acme Inc.',
-  'organization.settings.name.updated': 'Organization name updated',
-  'organization.settings.subscription.title': 'Subscription',
-  'organization.settings.subscription.description':
-    'Manage your billing, invoices and payment methods.',
-  'organization.settings.subscription.manage': 'Manage subscription',
-  'organization.settings.subscription.error': 'Failed to get customer portal URL',
-  'organization.settings.delete.title': 'Delete organization',
-  'organization.settings.delete.description':
-    'Deleting this organization will permanently remove all data associated with it.',
-  'organization.settings.delete.confirm.title': 'Delete organization',
-  'organization.settings.delete.confirm.message':
-    'Are you sure you want to delete this organization? The organization will be marked for deletion and permanently removed after {{ days }} days. During this period, you can restore it from your organizations list. All documents and data will be permanently deleted after this delay.',
-  'organization.settings.delete.confirm.confirm-button': 'Delete organization',
-  'organization.settings.delete.confirm.cancel-button': 'Cancel',
-  'organization.settings.delete.success': 'Organization deleted',
-  'organization.settings.delete.only-owner':
-    'Only the organization owner can delete this organization.',
-  'organization.settings.delete.has-active-subscription':
-    'Cannot delete organization with an active subscription, please cancel your subscription above first.',
 
   'organization.settings.auto-tagging.page.title': 'Auto Tagging Settings',
   'organization.settings.auto-tagging.page.description':
@@ -290,21 +202,10 @@ export const translations = {
   'organization.usage.unlimited': 'Unlimited',
 
   'organizations.members.title': 'Members',
-  'organizations.members.description': 'Manage your organization members',
-  'organizations.members.invite-member': 'Invite member',
-  'organizations.members.invite-member-disabled-tooltip':
-    'Only admins or owners can invite members to the organization',
-  'organizations.members.remove-from-organization': 'Remove from organization',
   'organizations.members.role': 'Role',
   'organizations.members.roles.owner': 'Owner',
   'organizations.members.roles.admin': 'Admin',
   'organizations.members.roles.member': 'Member',
-  'organizations.members.delete.confirm.title': 'Remove member',
-  'organizations.members.delete.confirm.message':
-    'Are you sure you want to remove this member from the organization?',
-  'organizations.members.delete.confirm.confirm-button': 'Remove',
-  'organizations.members.delete.confirm.cancel-button': 'Cancel',
-  'organizations.members.delete.success': 'Member removed from organization',
   'organizations.members.update-role.success': 'Member role updated',
   'organizations.members.table.headers.name': 'Name',
   'organizations.members.table.headers.email': 'Email',
@@ -427,7 +328,6 @@ export const translations = {
   'documents.info.type': 'Type',
   'documents.info.size': 'Size',
   'documents.info.created-at': 'Created',
-  'documents.info.updated-at': 'Updated',
   'documents.info.never': 'Never',
   'documents.info.document-date': 'Date',
   'documents.info.no-date': 'No date',
@@ -441,9 +341,6 @@ export const translations = {
   'documents.management.details': 'Document details',
   'documents.management.rename': 'Rename document',
   'documents.management.delete': 'Move to trash',
-
-  'documents.import.drop-area.title': 'Drop files here',
-  'documents.import.drop-area.description': 'Drag and drop files here to import them',
 
   'documents.list.select.all': 'Select all rows on this page',
   'documents.list.select.row': 'Select row',
@@ -527,7 +424,6 @@ export const translations = {
   'documents.rename.success': 'Document renamed successfully',
   'documents.rename.cancel': 'Cancel',
 
-  'import-documents.title.error': '{{ count }} documents failed',
   'import-documents.title.success': '{{ count }} documents imported',
   'import-documents.title.pending': '{{ count }} / {{ total }} documents imported',
   'import-documents.title.none': 'Import documents',
@@ -645,7 +541,6 @@ export const translations = {
   'document-share-links.create.expiration.pick-date': 'Pick a date',
   'document-share-links.create.cancel': 'Cancel',
   'document-share-links.create.submit': 'Create link',
-  'document-share-links.create.error': 'Failed to create the share link',
   'document-share-links.created.title': 'Share link created',
   'document-share-links.created.description': 'Your share link is ready — copy it and share it.',
   'document-share-links.created.done': 'Done',
@@ -1026,23 +921,10 @@ export const translations = {
   'layout.menu.documents': 'Documents',
   'layout.menu.tags': 'Tags',
   'layout.menu.custom-properties': 'Custom Properties',
-  'layout.menu.tagging-rules': 'Tagging rules',
-  'layout.menu.share-links': 'Share links',
   'layout.menu.deleted-documents': 'Trash',
   'layout.menu.organization-settings': 'Settings',
-  'layout.menu.api-keys': 'API keys',
-  'layout.menu.auto-tagging': 'Auto tagging',
-  'layout.menu.usage': 'Usage',
-  'layout.menu.intake-emails': 'Intake emails',
-  'layout.menu.webhooks': 'Webhooks',
   'layout.menu.members': 'Members',
   'layout.menu.document-views': 'Views',
-  'layout.menu.invitations': 'Invitations',
-  'layout.menu.admin': 'Admin',
-
-  'layout.upgrade-cta.title': 'Need more space?',
-  'layout.upgrade-cta.description': 'Get 10x more storage + team collaboration',
-  'layout.upgrade-cta.button': 'Upgrade now',
 
   'layout.theme.light': 'Light mode',
   'layout.theme.dark': 'Dark mode',
@@ -1056,8 +938,6 @@ export const translations = {
 
   'user-menu.trigger.label': 'User menu',
   'user-menu.account-settings': 'Account settings',
-  'user-menu.api-keys': 'API keys',
-  'user-menu.invitations': 'Invitations',
   'user-menu.language': 'Language',
   'user-menu.theme': 'Theme',
   'user-menu.about': 'About SwyxDrive',
