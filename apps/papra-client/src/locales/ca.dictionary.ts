@@ -31,67 +31,8 @@ export const translations = {
 
   'auth.email-provider.open': 'Obre {{ provider }}',
 
-  'auth.login.title': 'Inicia la sessió a SwyxDrive',
-  'auth.login.description':
-    "Introdueix el teu correu electrònic o utilitza l'inici de sessió social per accedir al teu compte de SwyxDrive.",
-  'auth.login.login-with-provider': 'Inicia la sessió amb {{ provider }}',
-  'auth.login.no-account': 'No tens un compte?',
-  'auth.login.register': "Registra't",
-  'auth.login.form.email.label': 'Correu electrònic',
-  'auth.login.form.email.placeholder': 'Exemple: ada@papra.app',
-  'auth.login.form.email.required': 'Si us plau, introdueix la teva adreça de correu electrònic',
-  'auth.login.form.email.invalid': 'Aquesta adreça de correu electrònic no és vàlida',
-  'auth.login.form.password.label': 'Contrasenya',
-  'auth.login.form.password.placeholder': 'Estableix una contrasenya',
-  'auth.login.form.password.required': 'Si us plau, introdueix la teva contrasenya',
-  'auth.login.form.remember-me.label': "Recorda'm",
-  'auth.login.form.forgot-password.label': 'Has oblidat la contrasenya?',
-  'auth.login.form.submit': 'Inicia la sessió',
-
-  'auth.login.two-factor.title': 'Autenticació de doble factor',
-  'auth.login.two-factor.description.totp':
-    "Introdueix el codi de verificació de 6 dígits de la teva aplicació d'autenticació.",
-  'auth.login.two-factor.description.backup-code':
-    'Introdueix un dels teus codis de recuperació per accedir al teu compte.',
-  'auth.login.two-factor.code.label.totp': "Codi d'autenticació",
-  'auth.login.two-factor.code.label.backup-code': 'Codi de recuperació',
-  'auth.login.two-factor.code.placeholder.backup-code': 'Introdueix el codi de recuperació',
-  'auth.login.two-factor.code.required': 'Si us plau, introdueix el codi de verificació',
-  'auth.login.two-factor.trust-device.label': 'Confia en aquest dispositiu durant 30 dies',
-  'auth.login.two-factor.back': "Torna a l'inici de sessió",
-  'auth.login.two-factor.submit': 'Verifica',
-  'auth.login.two-factor.verification-failed':
-    'La verificació ha fallat. Si us plau, comprova el teu codi i torna-ho a provar.',
-  'auth.login.two-factor.use-backup-code': 'Utilitza el codi de recuperació',
-  'auth.login.two-factor.use-totp': "Utilitza l'aplicació d'autenticació",
-
-  'auth.register.title': "Registra't a SwyxDrive",
-  'auth.register.description': 'Crea un compte per començar a utilitzar SwyxDrive.',
-  'auth.register.register-with-email': "Registra't amb el correu electrònic",
-  'auth.register.register-with-provider': "Registra't amb {{ provider }}",
   'auth.register.providers.google': 'Google',
   'auth.register.providers.github': 'GitHub',
-  'auth.register.have-account': 'Ja tens un compte?',
-  'auth.register.login': 'Inicia la sessió',
-  'auth.register.registration-disabled.title': 'El registre està deshabilitat',
-  'auth.register.registration-disabled.description':
-    "La creació de nous comptes està actualment deshabilitada en aquesta instància de SwyxDrive. Només els usuaris amb comptes existents poden iniciar sessió. Si creus que es tracta d'un error, posa't en contacte amb l'administrador d'aquesta instància.",
-  'auth.register.form.email.label': 'Correu electrònic',
-  'auth.register.form.email.placeholder': 'Exemple: ada@papra.app',
-  'auth.register.form.email.required': 'Si us plau, introdueix la teva adreça de correu electrònic',
-  'auth.register.form.email.invalid': 'Aquesta adreça de correu electrònic no és vàlida',
-  'auth.register.form.password.label': 'Contrasenya',
-  'auth.register.form.password.placeholder': 'Estableix una contrasenya',
-  'auth.register.form.password.required': 'Si us plau, introdueix la teva contrasenya',
-  'auth.register.form.password.min-length':
-    'La contrasenya ha de tenir almenys {{ minLength }} caràcters',
-  'auth.register.form.password.max-length':
-    'La contrasenya ha de tenir menys de {{ maxLength }} caràcters',
-  'auth.register.form.name.label': 'Nom',
-  'auth.register.form.name.placeholder': 'Exemple: Ada Lovelace',
-  'auth.register.form.name.required': 'Si us plau, introdueix el teu nom',
-  'auth.register.form.name.max-length': 'El nom ha de tenir menys de {{ maxLength }} caràcters',
-  'auth.register.form.submit': "Registra't",
 
   'auth.email-validation-required.title': 'Verifica el teu correu electrònic',
   'auth.email-validation-required.description':
@@ -121,7 +62,6 @@ export const translations = {
   'user.settings.description': 'Gestiona la configuració del teu compte aquí.',
 
   'user.settings.email.title': 'Correu electrònic',
-  'user.settings.email.description': 'El teu correu electrònic no es pot canviar.',
   'user.settings.email.label': 'Correu electrònic',
 
   'user.settings.name.title': 'Nom complet',
@@ -202,10 +142,6 @@ export const translations = {
 
   // Organizations
 
-  'organizations.list.title': 'Les teves organitzacions',
-  'organizations.list.description':
-    "Les organitzacions són una manera d'agrupar els teus documents i gestionar-ne l'accés. Pots crear múltiples organitzacions i convidar els membres del teu equip a col·laborar.",
-  'organizations.list.create-new': 'Crea una organització nova',
   'organizations.list.back': 'Torna a les organitzacions',
   'organizations.list.deleted.title': 'Organitzacions suprimides',
   'organizations.list.deleted.description':
@@ -243,39 +179,12 @@ export const translations = {
   'organizations.create.form.name.required': "Si us plau, introdueix el nom de l'organització",
   'organizations.create.form.submit': "Crea l'organització",
   'organizations.create.success': 'Organització creada correctament',
-  'organizations.switcher.create': 'Crea una organització nova',
 
   'organizations.create-first.title': 'Crea la teva organització',
   'organizations.create-first.description':
     "Els teus documents s'agruparan per organització. Pots crear múltiples organitzacions per separar els teus documents, per exemple, per a documents personals i de treball.",
   'organizations.create-first.default-name': 'La meva organització',
   'organizations.create-first.user-name': "L'organització de {{ name }}",
-
-  'organization.settings.page.title': "Configuració de l'organització",
-  'organization.settings.page.description':
-    'Gestiona la configuració de la teva organització aquí.',
-  'organization.settings.name.title': "Nom de l'organització",
-  'organization.settings.name.update': 'Actualitza el nom',
-  'organization.settings.name.placeholder': 'Ex. Acme Inc.',
-  'organization.settings.name.updated': "Nom de l'organització actualitzat",
-  'organization.settings.subscription.title': 'Subscripció',
-  'organization.settings.subscription.description':
-    'Gestiona la teva facturació, factures i mètodes de pagament.',
-  'organization.settings.subscription.manage': 'Gestiona la subscripció',
-  'organization.settings.subscription.error': "No s'ha pogut obtenir l'URL del portal del client",
-  'organization.settings.delete.title': "Suprimeix l'organització",
-  'organization.settings.delete.description':
-    'Suprimir aquesta organització eliminarà permanentment totes les dades associades.',
-  'organization.settings.delete.confirm.title': "Suprimeix l'organització",
-  'organization.settings.delete.confirm.message':
-    "Estàs segur que vols suprimir aquesta organització? L'organització es marcarà per a suprimir i s'eliminarà permanentment després de {{ days }} dies. Durant aquest període, pots restaurar-la des de la teva llista d'organitzacions. Tots els documents i dades s'eliminaran permanentment després d'aquest termini.",
-  'organization.settings.delete.confirm.confirm-button': "Suprimeix l'organització",
-  'organization.settings.delete.confirm.cancel-button': 'Cancel·la',
-  'organization.settings.delete.success': 'Organització suprimida',
-  'organization.settings.delete.only-owner':
-    "Només el propietari de l'organització pot suprimir-la.",
-  'organization.settings.delete.has-active-subscription':
-    "No es pot suprimir l'organització amb una subscripció activa; si us plau, primer cancel·la la teva subscripció.",
 
   'organization.settings.auto-tagging.page.title': "Configuració de l'etiquetatge automàtic",
   'organization.settings.auto-tagging.page.description':
@@ -304,21 +213,10 @@ export const translations = {
   'organization.usage.unlimited': 'Il·limitat',
 
   'organizations.members.title': 'Membres',
-  'organizations.members.description': 'Gestiona els membres de la teva organització',
-  'organizations.members.invite-member': 'Convida un membre',
-  'organizations.members.invite-member-disabled-tooltip':
-    "Només els administradors o propietaris poden convidar membres a l'organització",
-  'organizations.members.remove-from-organization': "Elimina de l'organització",
   'organizations.members.role': 'Rol',
   'organizations.members.roles.owner': 'Propietari',
   'organizations.members.roles.admin': 'Administrador',
   'organizations.members.roles.member': 'Membre',
-  'organizations.members.delete.confirm.title': 'Elimina el membre',
-  'organizations.members.delete.confirm.message':
-    "Estàs segur que vols eliminar aquest membre de l'organització?",
-  'organizations.members.delete.confirm.confirm-button': 'Elimina',
-  'organizations.members.delete.confirm.cancel-button': 'Cancel·la',
-  'organizations.members.delete.success': "Membre eliminat de l'organització",
   'organizations.members.update-role.success': "S'ha actualitzat el rol del membre",
   'organizations.members.table.headers.name': 'Nom',
   'organizations.members.table.headers.email': 'Correu electrònic',
@@ -445,7 +343,6 @@ export const translations = {
   'documents.info.type': 'Tipus',
   'documents.info.size': 'Mida',
   'documents.info.created-at': 'Creat',
-  'documents.info.updated-at': 'Actualitzat',
   'documents.info.never': 'Mai',
   'documents.info.document-date': 'Data',
   'documents.info.no-date': 'Sense data',
@@ -459,10 +356,6 @@ export const translations = {
   'documents.management.details': 'Detalls del document',
   'documents.management.rename': 'Canvia el nom del document',
   'documents.management.delete': 'Suprimeix el document',
-
-  'documents.import.drop-area.title': 'Deixa anar els fitxers aquí',
-  'documents.import.drop-area.description':
-    'Arrossega i deixa anar els fitxers aquí per importar-los',
 
   'documents.list.select.all': 'Selecciona totes les files en aquesta pàgina',
   'documents.list.select.row': 'Selecciona la fila',
@@ -551,8 +444,6 @@ export const translations = {
   'documents.rename.success': 'Document reanomenat correctament',
   'documents.rename.cancel': 'Cancel·la',
 
-  'import-documents.title.error':
-    '{{ count }} {{ count, =1:document ha fallat, documents han fallat }}',
   'import-documents.title.success':
     '{{ count }} {{ count, =1:document importat, documents importats }}',
   'import-documents.title.pending':
@@ -673,7 +564,6 @@ export const translations = {
   'document-share-links.create.expiration.pick-date': 'Tria una data',
   'document-share-links.create.cancel': 'Cancel·la',
   'document-share-links.create.submit': "Crea l'enllaç",
-  'document-share-links.create.error': "No s'ha pogut crear l'enllaç compartit",
   'document-share-links.created.title': 'Enllaç compartit creat',
   'document-share-links.created.description':
     "El teu enllaç compartit està llest — copia'l i comparteix-lo.",
@@ -1061,23 +951,10 @@ export const translations = {
   'layout.menu.documents': 'Documents',
   'layout.menu.tags': 'Etiquetes',
   'layout.menu.custom-properties': 'Propietats personalitzades',
-  'layout.menu.tagging-rules': "Regles d'etiquetatge",
-  'layout.menu.share-links': 'Enllaços compartits',
   'layout.menu.deleted-documents': 'Documents suprimits',
   'layout.menu.organization-settings': 'Configuració',
-  'layout.menu.api-keys': 'Claus API',
-  'layout.menu.auto-tagging': 'Etiquetatge automàtic',
-  'layout.menu.usage': 'Ús',
-  'layout.menu.intake-emails': "Correus electrònics d'entrada",
-  'layout.menu.webhooks': 'Webhooks',
   'layout.menu.members': 'Membres',
   'layout.menu.document-views': 'Vistes',
-  'layout.menu.invitations': 'Invitacions',
-  'layout.menu.admin': 'Administració',
-
-  'layout.upgrade-cta.title': 'Necessites més espai?',
-  'layout.upgrade-cta.description': "Obté 10x més emmagatzematge + col·laboració d'equip",
-  'layout.upgrade-cta.button': 'Actualitza ara',
 
   'layout.theme.light': 'Mode clar',
   'layout.theme.dark': 'Mode fosc',
@@ -1091,8 +968,6 @@ export const translations = {
 
   'user-menu.trigger.label': "Menú d'usuari",
   'user-menu.account-settings': 'Configuració del compte',
-  'user-menu.api-keys': 'Claus API',
-  'user-menu.invitations': 'Invitacions',
   'user-menu.language': 'Idioma',
   'user-menu.theme': 'Tema',
   'user-menu.about': 'Quant a SwyxDrive',

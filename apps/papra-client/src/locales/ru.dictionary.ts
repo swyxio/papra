@@ -29,65 +29,8 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'auth.email-provider.open': 'Открыть {{ provider }}',
 
-  'auth.login.title': 'Войти в SwyxDrive',
-  'auth.login.description':
-    'Введите email или войдите через соцсети, чтобы получить доступ к аккаунту SwyxDrive.',
-  'auth.login.login-with-provider': 'Войти с помощью {{ provider }}',
-  'auth.login.no-account': 'Нет учётной записи?',
-  'auth.login.register': 'Зарегистрируйтесь',
-  'auth.login.form.email.label': 'Электронная почта',
-  'auth.login.form.email.placeholder': 'Пример: ada@papra.app',
-  'auth.login.form.email.required': 'Введите адрес электронной почты',
-  'auth.login.form.email.invalid': 'Неверный адрес электронной почты',
-  'auth.login.form.password.label': 'Пароль',
-  'auth.login.form.password.placeholder': 'Установите пароль',
-  'auth.login.form.password.required': 'Введите пароль',
-  'auth.login.form.remember-me.label': 'Запомнить меня',
-  'auth.login.form.forgot-password.label': 'Забыли пароль?',
-  'auth.login.form.submit': 'Войти',
-
-  'auth.login.two-factor.title': 'Проверка второго фактора',
-  'auth.login.two-factor.description.totp':
-    'Введите 6-значный код из вашего приложения-аутентификатора.',
-  'auth.login.two-factor.description.backup-code':
-    'Введите один из резервных кодов для доступа к учётной записи.',
-  'auth.login.two-factor.code.label.totp': 'Код из приложения',
-  'auth.login.two-factor.code.label.backup-code': 'Резервный код',
-  'auth.login.two-factor.code.placeholder.backup-code': 'Введите резервный код',
-  'auth.login.two-factor.code.required': 'Введите код',
-  'auth.login.two-factor.trust-device.label': 'Доверять этому устройству 30 дней',
-  'auth.login.two-factor.back': 'Назад к авторизации',
-  'auth.login.two-factor.submit': 'Подтвердить',
-  'auth.login.two-factor.verification-failed':
-    'Неверный код. Пожалуйста, проверьте его и повторите попытку.',
-  'auth.login.two-factor.use-backup-code': 'Использовать резервный код',
-  'auth.login.two-factor.use-totp': 'Использовать приложение-аутентификатор',
-
-  'auth.register.title': 'Регистрация в SwyxDrive',
-  'auth.register.description': 'Создайте аккаунт, чтобы начать использовать SwyxDrive.',
-  'auth.register.register-with-email': 'Зарегистрироваться через email',
-  'auth.register.register-with-provider': 'Зарегистрироваться через {{ provider }}',
   'auth.register.providers.google': 'Google',
   'auth.register.providers.github': 'GitHub',
-  'auth.register.have-account': 'Уже есть аккаунт?',
-  'auth.register.login': 'Войти',
-  'auth.register.registration-disabled.title': 'Регистрация отключена',
-  'auth.register.registration-disabled.description':
-    'Регистрация новых аккаунтов на этом сервере SwyxDrive временно закрыта. Войти могут только зарегистрированные пользователи. Если вы считаете, что это ошибка, пожалуйста, свяжитесь с администратором.',
-  'auth.register.form.email.label': 'Электронная почта',
-  'auth.register.form.email.placeholder': 'Пример: ada@papra.app',
-  'auth.register.form.email.required': 'Введите адрес электронной почты',
-  'auth.register.form.email.invalid': 'Неверный адрес электронной почты',
-  'auth.register.form.password.label': 'Пароль',
-  'auth.register.form.password.placeholder': 'Введите пароль',
-  'auth.register.form.password.required': 'Введите пароль',
-  'auth.register.form.password.min-length': 'Пароль должен быть не короче {{ minLength }} символов',
-  'auth.register.form.password.max-length': 'Пароль должен быть короче {{ maxLength }} символов',
-  'auth.register.form.name.label': 'Имя',
-  'auth.register.form.name.placeholder': 'Пример: Ада Лавлейс',
-  'auth.register.form.name.required': 'Имя не может быть пустым',
-  'auth.register.form.name.max-length': 'Имя должно быть короче {{ maxLength }} символов',
-  'auth.register.form.submit': 'Зарегистрироваться',
 
   'auth.email-validation-required.title': 'Подтвердите почту',
   'auth.email-validation-required.description':
@@ -117,7 +60,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'user.settings.description': 'Здесь вы можете управлять настройками аккаунта.',
 
   'user.settings.email.title': 'Адрес электронной почты',
-  'user.settings.email.description': 'Ваш адрес электронной почты не может быть изменён.',
   'user.settings.email.label': 'Адрес электронной почты',
 
   'user.settings.name.title': 'Полное имя',
@@ -191,10 +133,6 @@ export const translations: Partial<TranslationsDictionary> = {
 
   // Organizations
 
-  'organizations.list.title': 'Ваши организации',
-  'organizations.list.description':
-    'Организации — это способ группировки ваших документов и управления доступом к ним. Вы можете создать несколько организаций и пригласить членов команды для совместной работы.',
-  'organizations.list.create-new': 'Создать новую организацию',
   'organizations.list.back': 'Назад к организациям',
   'organizations.list.deleted.title': 'Удалённые организации',
   'organizations.list.deleted.description':
@@ -232,37 +170,12 @@ export const translations: Partial<TranslationsDictionary> = {
   'organizations.create.form.name.required': 'Введите название организации',
   'organizations.create.form.submit': 'Создать организацию',
   'organizations.create.success': 'Организация успешно создана',
-  'organizations.switcher.create': 'Создать новую организацию',
 
   'organizations.create-first.title': 'Создать организацию',
   'organizations.create-first.description':
     'Ваши документы будут группироваться по организациям. Вы можете создать несколько организаций для разделения документов, например, для личных и рабочих документов.',
   'organizations.create-first.default-name': 'Моя организация',
   'organizations.create-first.user-name': 'Организация {{ name }}',
-
-  'organization.settings.page.title': 'Настройки организации',
-  'organization.settings.page.description': 'Управляйте настройками вашей организации здесь.',
-  'organization.settings.name.title': 'Название организации',
-  'organization.settings.name.update': 'Обновить название',
-  'organization.settings.name.placeholder': 'Например: ООО «Рога и Копыта»',
-  'organization.settings.name.updated': 'Название организации обновлено',
-  'organization.settings.subscription.title': 'Подписка',
-  'organization.settings.subscription.description':
-    'Управляйте счетами, платежами и способами оплаты.',
-  'organization.settings.subscription.manage': 'Управление подпиской',
-  'organization.settings.subscription.error': 'Не удалось получить URL портала клиента',
-  'organization.settings.delete.title': 'Удаление организации',
-  'organization.settings.delete.description':
-    'Удаление этой организации навсегда удалит все связанные с ней данные.',
-  'organization.settings.delete.confirm.title': 'Удаление организации',
-  'organization.settings.delete.confirm.message':
-    'Вы уверены, что хотите удалить эту организацию? Организация будет помечена для удаления и окончательно удалена через {{ days }} дней. В течение этого периода вы можете восстановить её из списка организаций. Все документы и данные будут окончательно удалены по истечении этого срока.',
-  'organization.settings.delete.confirm.confirm-button': 'Удалить организацию',
-  'organization.settings.delete.confirm.cancel-button': 'Отмена',
-  'organization.settings.delete.success': 'Организация удалена',
-  'organization.settings.delete.only-owner': 'Только владелец может удалить организацию.',
-  'organization.settings.delete.has-active-subscription':
-    'Невозможно удалить организацию с активной подпиской, пожалуйста, сначала отмените подписку выше.',
 
   'organization.usage.page.title': 'Статистика использования',
   'organization.usage.page.description':
@@ -276,21 +189,10 @@ export const translations: Partial<TranslationsDictionary> = {
   'organization.usage.unlimited': 'Неограничено',
 
   'organizations.members.title': 'Участники',
-  'organizations.members.description': 'Управление участниками вашей организации',
-  'organizations.members.invite-member': 'Пригласить участника',
-  'organizations.members.invite-member-disabled-tooltip':
-    'Только администраторы или владельцы могут приглашать участников в организацию',
-  'organizations.members.remove-from-organization': 'Удалить из организации',
   'organizations.members.role': 'Роль',
   'organizations.members.roles.owner': 'Владелец',
   'organizations.members.roles.admin': 'Администратор',
   'organizations.members.roles.member': 'Участник',
-  'organizations.members.delete.confirm.title': 'Удалить участника',
-  'organizations.members.delete.confirm.message':
-    'Вы уверены, что хотите удалить этого участника из организации?',
-  'organizations.members.delete.confirm.confirm-button': 'Удалить',
-  'organizations.members.delete.confirm.cancel-button': 'Отмена',
-  'organizations.members.delete.success': 'Участник удалён из организации',
   'organizations.members.update-role.success': 'Роль участника обновлена',
   'organizations.members.table.headers.name': 'Имя',
   'organizations.members.table.headers.email': 'Email',
@@ -413,7 +315,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'documents.info.type': 'Тип',
   'documents.info.size': 'Размер',
   'documents.info.created-at': 'Создан',
-  'documents.info.updated-at': 'Обновлён',
   'documents.info.never': 'Никогда',
   'documents.info.document-date': 'Дата',
   'documents.list.table.headers.document-date': 'Дата',
@@ -428,9 +329,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'documents.management.details': 'Сведения о документе',
   'documents.management.rename': 'Переименовать документ',
   'documents.management.delete': 'Удалить документ',
-
-  'documents.import.drop-area.title': 'Перетащите файлы сюда',
-  'documents.import.drop-area.description': 'Перетащите файлы сюда, чтобы импортировать их',
 
   'documents.list.select.all': 'Выбрать все строки на этой странице',
   'documents.list.select.row': 'Выбрать строку',
@@ -516,8 +414,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'documents.rename.success': 'Документ успешно переименован',
   'documents.rename.cancel': 'Отмена',
 
-  'import-documents.title.error':
-    '{{ count }} {{ count, =1:документ, [2-4]:документа, документов }} не удалось импортировать',
   'import-documents.title.success':
     '{{ count }} {{ count, =1:документ, [2-4]:документа, документов }} импортировано',
   'import-documents.title.pending': '{{ count }} / {{ total }} документов импортировано',
@@ -634,7 +530,6 @@ export const translations: Partial<TranslationsDictionary> = {
   'document-share-links.create.expiration.pick-date': 'Выберите дату',
   'document-share-links.create.cancel': 'Отмена',
   'document-share-links.create.submit': 'Создать ссылку',
-  'document-share-links.create.error': 'Не удалось создать ссылку для общего доступа',
   'document-share-links.created.title': 'Ссылка для общего доступа создана',
   'document-share-links.created.description':
     'Ваша ссылка для общего доступа готова — скопируйте и поделитесь ею.',
@@ -1017,23 +912,10 @@ export const translations: Partial<TranslationsDictionary> = {
   'layout.menu.documents': 'Документы',
   'layout.menu.tags': 'Теги',
   'layout.menu.custom-properties': 'Пользовательские свойства',
-  'layout.menu.tagging-rules': 'Правила тегирования',
-  'layout.menu.share-links': 'Ссылки для общего доступа',
   'layout.menu.deleted-documents': 'Удалённые документы',
   'layout.menu.organization-settings': 'Настройки',
-  'layout.menu.api-keys': 'API ключи',
-  'layout.menu.usage': 'Использование',
-  'layout.menu.intake-emails': 'Email для импорта',
-  'layout.menu.webhooks': 'Webhooks',
   'layout.menu.members': 'Участники',
   'layout.menu.document-views': 'Представления',
-  'layout.menu.invitations': 'Приглашения',
-  'layout.menu.admin': 'Админка',
-
-  'layout.upgrade-cta.title': 'Нужно больше места?',
-  'layout.upgrade-cta.description':
-    'Получите в 10 раз больше хранилища + возможности командной работы',
-  'layout.upgrade-cta.button': 'Обновить сейчас',
 
   'layout.theme.light': 'Светлая',
   'layout.theme.dark': 'Тёмная',
@@ -1047,8 +929,6 @@ export const translations: Partial<TranslationsDictionary> = {
 
   'user-menu.trigger.label': 'Меню пользователя',
   'user-menu.account-settings': 'Настройки аккаунта',
-  'user-menu.api-keys': 'API ключи',
-  'user-menu.invitations': 'Приглашения',
   'user-menu.language': 'Язык',
   'user-menu.theme': 'Тема',
   'user-menu.about': 'Информация',

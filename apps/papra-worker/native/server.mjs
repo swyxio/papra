@@ -282,10 +282,12 @@ export async function thumbnail(source, destination, signal, seek = 0, metadata 
     signal,
   );
   // FFmpeg can successfully seek past the final decoded frame without creating an image.
-  const image = await stat(destination).catch((error) => {
-    if (error.code === 'ENOENT') return null;
-    throw error;
-  });
+  const image = await stat(destination).catch(
+    /** @param {unknown} error */ (error) => {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return null;
+      throw error;
+    },
+  );
   if (!image?.size) throw new ProcessingError('native_frame_unavailable');
 }
 async function ocr(image, signal) {

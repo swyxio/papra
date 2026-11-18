@@ -89,7 +89,13 @@ async function fixture() {
         body: body ? JSON.stringify(body) : undefined,
       },
       env,
-      { waitUntil: (task: Promise<unknown>) => { background.push(task); }, passThroughOnException: () => {}, props: {} },
+      {
+        waitUntil: (task: Promise<unknown>) => {
+          background.push(task);
+        },
+        passThroughOnException: () => {},
+        props: {},
+      },
     );
     // Keep the test database and fetch mocks alive until request work finishes.
     await Promise.all(background);

@@ -9,7 +9,5 @@ client_check=$!
 wait "$worker_check"
 wait "$client_check"
 pnpm --filter @papra/worker test
-# The inherited unused-translation lint fails on retained upstream strings;
-# keep all behavioral and translation validity tests in the release gate.
-pnpm --filter @papra/app-client exec vitest run -t '^(?!.*all keys in en dictionary must be used)'
+pnpm --filter @papra/app-client exec vitest run
 VITE_GIT_COMMIT="$(git rev-parse HEAD)" pnpm --filter @papra/app-client build

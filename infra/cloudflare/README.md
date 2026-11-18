@@ -96,9 +96,7 @@ Preview builds are disabled so feature branches cannot publish the production bi
 - Deploy command: `node infra/cloudflare/scripts/deploy.mjs`
 
 The build installs the frozen lockfile, checks both application types, runs Worker
-and client tests, then builds the client. The inherited unused-English-translation
-lint is excluded from this release gate because retained upstream strings currently
-fail it; translation validity tests still run. Upstream CI retains that lint.
+and client tests, then builds the client.
 
 Deployment preserves live variables/secrets and records the complete Git SHA.
 It compares native source/config with the currently deployed revision and rebuilds
