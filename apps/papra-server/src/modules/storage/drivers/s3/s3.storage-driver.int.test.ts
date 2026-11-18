@@ -1,37 +1,35 @@
 import { LocalstackContainer } from '@testcontainers/localstack';
-import { describe } from 'vitest';
+import { beforeAll, describe } from 'vitest';
 import { TEST_CONTAINER_IMAGES } from '../../../../../test/containers/images';
 import { runDriverTestSuites } from '../drivers.test-suite';
 import { s3StorageDriverFactory } from './s3.storage-driver';
 
 describe('s3 storage-driver', () => {
-  describe('s3StorageDriver', () => {
-    runDriverTestSuites({
-      // In the ci it take more than 30 seconds to pull images
-      timeout: 40_000,
-      retry: 3,
-      createDriver: async () => {
-        const localstackContainer = await new LocalstackContainer(
-          TEST_CONTAINER_IMAGES.LOCALSTACK,
-        ).start();
-        const driver = s3StorageDriverFactory({
-          accessKeyId: 'test',
-          secretAccessKey: 'test',
-          bucketName: 'test-bucket',
-          region: 'eu-central-1',
-          endpoint: localstackContainer.getConnectionUri(),
-          forcePathStyle: true,
-        });
+  let driver: ReturnType<typeof s3StorageDriverFactory>;
 
-        await driver.getClient().createBucket();
+  beforeAll(async () => {
+    const container = await new LocalstackContainer(TEST_CONTAINER_IMAGES.LOCALSTACK).start();
+    try {
+      driver = s3StorageDriverFactory({
+        accessKeyId: 'test',
+        secretAccessKey: 'test',
+        bucketName: 'test-bucket',
+        region: 'eu-central-1',
+        endpoint: container.getConnectionUri(),
+        forcePathStyle: true,
+      });
+      await driver.getClient().createBucket();
+    } catch (error) {
+      await container.stop();
+      throw error;
+    }
+    return async () => {
+      await container.stop();
+    };
+  }, 120_000);
 
-        return {
-          driver,
-          [Symbol.asyncDispose]: async () => {
-            await localstackContainer.stop();
-          },
-        };
-      },
-    });
+  runDriverTestSuites({
+    // Each test uses a unique object key in the suite's bucket.
+    createDriver: async () => ({ driver, [Symbol.asyncDispose]: async () => {} }),
   });
 });
