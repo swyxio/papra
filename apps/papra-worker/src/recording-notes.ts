@@ -77,22 +77,28 @@ export function validateRecordingNotes(value: unknown, source: Passage[]): Recor
   return {
     sections: sections.map(({ title, summary, first, witness, quote }, index) => {
       const end = sections[index + 1]?.first ?? source.length;
-      if (!Number.isInteger(witness) || witness < first || witness >= end) throw invalid();
+      if (!Number.isInteger(witness) || witness < 0 || witness >= source.length) throw invalid();
 
-      const passage = source[witness]!;
-      const text = passage.text.trim().replace(/\s+/g, ' ');
-      const candidate = typeof quote === 'string' ? quote.trim().replace(/\s+/g, ' ') : '';
-      const excerpt =
-        text.length > 300
+      // A quote can land in a neighboring section even when the section starts are valid.
+      const normalize = (text: string) => text.trim().replace(/\s+/g, ' ');
+      const candidate = typeof quote === 'string' ? normalize(quote) : '';
+      const preferred = source[witness >= first && witness < end ? witness : first]!;
+      const match =
+        candidate.length >= 5 && candidate.length <= 300
+          ? [preferred, ...source.slice(first, end)].find((passage) =>
+              normalize(passage.text).includes(candidate),
+            )
+          : undefined;
+      const passage = match ?? preferred;
+      const text = normalize(passage.text);
+      const evidence = match
+        ? candidate
+        : text.length > 300
           ? text
               .slice(0, 301)
               .replace(/\s+\S*$/, '')
               .slice(0, 300)
           : text;
-      const evidence =
-        candidate.length >= 5 && candidate.length <= 300 && text.includes(candidate)
-          ? candidate
-          : excerpt;
       return {
         title,
         summary,
