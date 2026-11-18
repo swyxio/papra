@@ -248,6 +248,10 @@ describe('D1 collaboration authorization and actual routes', () => {
       shortcutsCount: 1,
       lastActivityAt: new Date(1).toISOString(),
     });
+    expect(folders.folders.find((o: any) => o.id === f.home)).toMatchObject({
+      documentsCount: 1,
+      documentsSize: 1024,
+    });
     const readableFolders = (await (
       await f.request(`${f.base}/folders`, 'GET', undefined, 'reader')
     ).json()) as any;
@@ -256,14 +260,30 @@ describe('D1 collaboration authorization and actual routes', () => {
       documentsSize: 0,
       lastActivityAt: new Date(200).toISOString(),
     });
+    expect(readableFolders.folders.find((o: any) => o.id === f.home)).toMatchObject({
+      documentsCount: 1,
+      documentsSize: 3072,
+    });
+    expect(readableFolders.folders.find((o: any) => o.id === f.secret)).toMatchObject({
+      documentsCount: 1,
+      documentsSize: 2048,
+    });
     expect(readableFolders.folders.find((o: any) => o.id === f.deep)).toMatchObject({
       effectiveRestricted: true,
+      documentsSize: 1024,
     });
     await f.DB.prepare('UPDATE documents SET is_deleted=1 WHERE id=?').bind('doc_secret').run();
     const afterDelete = (await (
       await f.request('/api/organizations', 'GET', undefined, 'reader')
     ).json()) as any;
     expect(afterDelete.organizations.find((o: any) => o.id === f.team).documentsCount).toBe(2);
+    const afterDeleteFolders = (await (
+      await f.request(`${f.base}/folders`, 'GET', undefined, 'reader')
+    ).json()) as any;
+    expect(afterDeleteFolders.folders.find((o: any) => o.id === f.secret)).toMatchObject({
+      documentsCount: 0,
+      documentsSize: 1024,
+    });
   });
 
   test('overview summaries honor current membership and folder-scoped service grants', async () => {
@@ -279,6 +299,7 @@ describe('D1 collaboration authorization and actual routes', () => {
     const folders = (await (await f.request(`${f.base}/folders`)).json()) as any;
     expect(folders.folders.map((o: any) => o.id).sort()).toEqual([f.secret, f.deep].sort());
     expect(folders.folders.every((o: any) => o.effectiveRestricted && !o.canWrite)).toBe(true);
+    expect(folders.folders.find((o: any) => o.id === f.secret).documentsSize).toBe(2048);
     f.identities.owner!.serviceScope.permissions = ['write'];
     expect((await f.request('/api/organizations')).status).toBe(403);
     delete f.identities.owner!.serviceScope;

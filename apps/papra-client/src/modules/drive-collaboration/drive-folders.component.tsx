@@ -548,7 +548,7 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
                 {' '}
                 · {folder().shortcutsCount} shortcuts
               </Show>{' '}
-              · {formatBytes({ bytes: folder().documentsSize })} in this folder
+              · {formatBytes({ bytes: folder().documentsSize })} including subfolders
             </p>
           )}
         </Show>
@@ -588,7 +588,7 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
                         {' '}
                         · {folder.shortcutsCount} shortcuts
                       </Show>{' '}
-                      · {formatBytes({ bytes: folder.documentsSize })} in this folder ·{' '}
+                      · {formatBytes({ bytes: folder.documentsSize })} including subfolders ·{' '}
                       {accessLabel(folder.effectiveRestricted)}
                     </span>
                   </div>
