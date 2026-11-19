@@ -1,3 +1,5 @@
+import type { DriveFolder } from '@/modules/drive-collaboration/drive-collaboration.services';
+
 // Each URL identifies an immutable version. Resume inside the current ZIP entry so that
 // completed entries and bytes already handed to the ZIP writer are kept.
 export function fetchExportStream(url: string, size: number, request: typeof fetch = fetch) {
@@ -70,4 +72,45 @@ export function fetchExportStream(url: string, size: number, request: typeof fet
       await chunks.return();
     },
   });
+}
+
+export function zipSafeName(name: string, fallback: string) {
+  // ZIP entry names must exclude path separators and control characters.
+  // eslint-disable-next-line no-control-regex
+  const cleaned = name.replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').trim();
+  return cleaned && cleaned !== '.' && cleaned !== '..' ? cleaned : fallback;
+}
+
+export function createZipEntryNamer(reserved: string[] = []) {
+  const used = new Set(reserved.map((path) => path.replace(/\/$/, '').toLowerCase()));
+  return (directory: string, name: string) => {
+    const dot = name.lastIndexOf('.');
+    const [stem, extension] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ''];
+    let candidate = `${directory}${name}`;
+    for (let copy = 2; used.has(candidate.toLowerCase()); copy++)
+      candidate = `${directory}${stem} (${copy})${extension}`;
+    used.add(candidate.toLowerCase());
+    return candidate;
+  };
+}
+
+export function folderTree(rootId: string, folders: DriveFolder[]) {
+  const result: { folder: DriveFolder; directory: string }[] = [];
+  const root = folders.find((folder) => folder.id === rootId);
+  if (!root) return result;
+  const queue = [{ folder: root, directory: '' }];
+  const visited = new Set<string>();
+  while (queue.length) {
+    const entry = queue.shift()!;
+    if (visited.has(entry.folder.id)) continue;
+    visited.add(entry.folder.id);
+    result.push(entry);
+    const names = createZipEntryNamer();
+    for (const child of folders.filter((folder) => folder.parentId === entry.folder.id))
+      queue.push({
+        folder: child,
+        directory: `${names(entry.directory, zipSafeName(child.name, child.id))}/`,
+      });
+  }
+  return result;
 }

@@ -2,6 +2,10 @@ import { DriveSpaceCapabilities } from '@/modules/drive-capabilities';
 import { fetchFolders } from '@/modules/drive-collaboration/drive-collaboration.services';
 import { DriveFolders } from '@/modules/drive-collaboration/drive-folders.component';
 import { DriveExport } from '../components/drive-export.component';
+import { saveDocumentsZip } from '../components/drive-zip-download';
+import { useDownloadDocument } from '../documents.composables';
+import { apiClient } from '@/modules/shared/http/api-client';
+import { getHttpErrorMessage } from '@/modules/shared/http/http-errors';
 import type { RowSelectionState, SortingState } from '@tanstack/solid-table';
 import type { Component, Setter } from 'solid-js';
 import type { Document } from '../documents.types';
@@ -327,6 +331,77 @@ export const DocumentsPage: Component = () => {
     },
   }));
 
+  const { downloadDocument } = useDownloadDocument();
+  const [downloadStatus, setDownloadStatus] = createSignal('');
+  async function handleBatchDownload() {
+    const filter = getBatchFilter();
+    if (!filter || downloadStatus()) return;
+    const pageDocuments = documentsQuery.data?.documents ?? [];
+    const ids = 'documentIds' in filter ? filter.documentIds : undefined;
+    if (ids?.length === 1) {
+      const document = pageDocuments.find((doc) => doc.id === ids[0]);
+      if (document) {
+        await downloadDocument({
+          organizationId: params.organizationId,
+          documentId: document.id,
+          fileName: document.name,
+          size: document.originalSize,
+        });
+        return;
+      }
+    }
+    const folderName = allFiles()
+      ? undefined
+      : foldersQuery.data?.folders.find((folder) => folder.id === queryFolderId())?.name;
+    setDownloadStatus('Preparing download…');
+    try {
+      const result = await saveDocumentsZip({
+        organizationId: params.organizationId,
+        fileName: `${folderName || 'files'}.zip`,
+        onProgress: ({ done, current }) => {
+          if (current) setDownloadStatus(`Downloading ${done + 1} of ${getEffectiveCount()}…`);
+        },
+        collect: async (add) => {
+          if (ids) {
+            for (const id of ids) {
+              const document =
+                pageDocuments.find((doc) => doc.id === id) ??
+                (
+                  await apiClient<{ document: Document }>({
+                    path: `/api/organizations/${params.organizationId}/documents/${id}`,
+                  })
+                ).document;
+              await add(document);
+            }
+            return;
+          }
+          for (let pageIndex = 0; ; pageIndex++) {
+            const page = await fetchOrganizationDocuments({
+              organizationId: params.organizationId,
+              searchQuery: debouncedSearchQuery(),
+              folderId: queryFolderId(),
+              sortField: getSortField(),
+              sortOrder: getSortOrder(),
+              pageIndex,
+              pageSize: 100,
+            });
+            for (const document of page.documents) await add(document);
+            if (!page.documents.length || (pageIndex + 1) * 100 >= page.documentsCount) return;
+          }
+        },
+      });
+      createToast({
+        type: 'success',
+        message: `Downloaded ${result.done} ${result.done === 1 ? 'file' : 'files'}${result.skipped ? ` (${result.skipped} without a stored file skipped)` : ''}.`,
+      });
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === 'AbortError'))
+        createToast({ type: 'error', message: `Download failed: ${getHttpErrorMessage(error)}` });
+    } finally {
+      setDownloadStatus('');
+    }
+  }
+
   const showToolbar = () => getSelectedIds().length > 0 || getSelectAllMatchingQuery();
 
   async function handleBatchTrash() {
@@ -626,6 +701,21 @@ export const DocumentsPage: Component = () => {
                 </Show>
 
                 <div class="flex items-center gap-2 ml-auto">
+                  <Show when={downloadStatus()}>
+                    <span role="status" class="text-xs text-muted-foreground">
+                      {downloadStatus()}
+                    </span>
+                  </Show>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleBatchDownload()}
+                    isLoading={Boolean(downloadStatus())}
+                    title="Download the selected files (more than one downloads as a ZIP)"
+                  >
+                    <div class="i-tabler-download size-4 mr-2" />
+                    Download
+                  </Button>
                   <Button
                     variant="outline"
                     size="sm"
