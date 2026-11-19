@@ -5,6 +5,36 @@ export const MAX_SIMULTANEOUS_UPLOADS = 10;
 // request budget prevents ten large files from creating twenty simultaneous PUTs.
 export const PARTS_PER_UPLOAD = 2;
 export const limitUploadTransfer = pLimit(MAX_SIMULTANEOUS_UPLOADS);
+// R2's S3 endpoint only speaks HTTP/1.1, and browsers cap HTTP/1.1 at six connections per host
+// shared by every tab. Without a cross-tab budget, one tab's queued PUTs sit at 0 B/s behind another's.
+export const SHARED_UPLOAD_SLOTS = 6;
+export const UPLOAD_STALL_MS = 60_000;
+export async function withUploadSlot<T>(
+  run: () => Promise<T>,
+  locks = globalThis.navigator?.locks,
+) {
+  if (!locks) return run();
+  const name = (slot: number) => `drive-upload-slot:${slot}`;
+  for (let slot = 0; slot < SHARED_UPLOAD_SLOTS; slot++) {
+    let acquired = false;
+    const result = await locks.request(name(slot), { ifAvailable: true }, async (lock) => {
+      if (!lock) return undefined;
+      acquired = true;
+      return run();
+    });
+    if (acquired) return result as T;
+  }
+  return locks.request(name(Math.floor(Math.random() * SHARED_UPLOAD_SLOTS)), run);
+}
+export const AUTO_RETRY_DELAYS_MS = [5_000, 15_000, 45_000];
+export function isTransientUploadError(error: unknown) {
+  const status = (error as { status?: unknown } | null)?.status;
+  if (typeof status === 'number') return status >= 500 || status === 429;
+  const message = error instanceof Error ? error.message : String(error);
+  return /Transfer interrupted|Upload failed \(5\d\d\)|Failed to fetch|NetworkError|Load failed/.test(
+    message,
+  );
+}
 export const createUploadScheduler = () => pLimit(MAX_SIMULTANEOUS_UPLOADS);
 
 export function prioritizeUploadTasks<T extends { status: string }>(

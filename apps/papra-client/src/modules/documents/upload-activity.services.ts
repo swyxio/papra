@@ -1,6 +1,7 @@
 // Tabs of the same browser share this heartbeat so an upload transferring in
 // another tab is not reported as interrupted.
-const prefix = 'drive-upload-active:';
+export const UPLOAD_ACTIVITY_PREFIX = 'drive-upload-active:';
+const prefix = UPLOAD_ACTIVITY_PREFIX;
 export const UPLOAD_HEARTBEAT_MS = 5000;
 export const UPLOAD_ACTIVE_MAX_AGE_MS = 4 * UPLOAD_HEARTBEAT_MS;
 

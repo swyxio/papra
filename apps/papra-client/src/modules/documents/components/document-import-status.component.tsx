@@ -2,6 +2,8 @@ import {
   createUploadScheduler,
   groupUploadTasks,
   uploadFolderPaths,
+  AUTO_RETRY_DELAYS_MS,
+  isTransientUploadError,
 } from '../upload-scheduling.services';
 import { createShareLink } from '@/modules/document-share-links/document-share-links.services';
 import { TranscriptionProgress } from './transcription-progress.component';
@@ -13,7 +15,16 @@ import { safely } from '@corentinth/chisels';
 import { A, useSearchParams } from '@solidjs/router';
 import { useQuery } from '@tanstack/solid-query';
 import pLimit from 'p-limit';
-import { createContext, createSignal, Index, Match, Show, Switch, useContext } from 'solid-js';
+import {
+  createContext,
+  createSignal,
+  Index,
+  Match,
+  onCleanup,
+  Show,
+  Switch,
+  useContext,
+} from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { createPersistedSignal } from '@/modules/shared/signals/persistence/persistence.signals';
 import { useI18n } from '@/modules/i18n/i18n.provider';
@@ -24,7 +35,7 @@ import { throttle } from '@/modules/shared/utils/timing';
 import { fetchOrganizationSubscription } from '@/modules/subscriptions/subscriptions.services';
 import { getHttpErrorMessage, isHttpErrorWithStatusCode } from '@/modules/shared/http/http-errors';
 import { getUploadErrorFallback } from '../upload-errors';
-import { isUploadActiveElsewhere } from '../upload-activity.services';
+import { isUploadActiveElsewhere, UPLOAD_ACTIVITY_PREFIX } from '../upload-activity.services';
 import { ReportProblem } from '@/modules/feedback/report.component';
 import { errorObservation, errorProof } from '@/modules/feedback/feedback.services';
 import { Button } from '@/modules/ui/components/button';
@@ -182,6 +193,13 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
     },
     refetchOnWindowFocus: true,
   }));
+  // Another tab finishing an upload clears its heartbeat; refresh so it no longer looks interrupted.
+  const refreshInterrupted = (event: StorageEvent) => {
+    if (event.key?.startsWith(UPLOAD_ACTIVITY_PREFIX) && event.newValue === null)
+      void interruptedQuery.refetch();
+  };
+  window.addEventListener('storage', refreshInterrupted);
+  onCleanup(() => window.removeEventListener('storage', refreshInterrupted));
 
   const UploadShareLink = (props: { task: () => Task }) => {
     const task = props.task;
@@ -411,9 +429,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
         }
 
         const transfer = async () => {
-          updateTaskStatus({ file, status: 'uploading' });
-
-          const [result, error] = await safely(
+          const upload = async () =>
             uploadDocument({
               file,
               organizationId,
@@ -433,13 +449,25 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
                 setTasks((tasks) =>
                   tasks.map((task) => (task.file === file ? { ...task, progress } : task)),
                 ),
-            }),
-          );
+            });
+          // Only active attempts hold a file slot, so a file waiting to retry never blocks the queue.
+          const attempt = async () =>
+            uploadLimit(async () => {
+              updateTaskStatus({ file, status: 'uploading' });
+              return safely(upload());
+            });
+          let [result, error] = await attempt();
+          // Network drops and stalled sockets resume on their own; acknowledged parts are not resent.
+          for (const delay of AUTO_RETRY_DELAYS_MS) {
+            if (!error || !isTransientUploadError(error)) break;
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            [result, error] = await attempt();
+          }
 
           if (error) {
             updateTaskStatus({ file, status: 'error', error });
           } else {
-            const { document } = result;
+            const { document } = result!;
 
             updateTaskStatus({ file, status: 'success', document });
             if (!getTasks().find((task) => task.file === file)?.shareUrl)
@@ -448,7 +476,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
 
           throttledInvalidateOrganizationDocumentsQuery({ organizationId });
         };
-        await uploadLimit(transfer);
+        await transfer();
       }),
     );
     void interruptedQuery.refetch();
