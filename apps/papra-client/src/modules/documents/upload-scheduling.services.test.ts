@@ -122,6 +122,18 @@ describe('isTransientUploadError', () => {
     ).toBe(true);
     expect(isTransientUploadError(new Error('Upload failed (503)'))).toBe(true);
     expect(isTransientUploadError(new TypeError('Failed to fetch'))).toBe(true);
+    expect(
+      isTransientUploadError(Object.assign(new Error('[POST] /uploads'), { status: 502 })),
+    ).toBe(true);
+    expect(
+      isTransientUploadError(Object.assign(new Error('[POST] /uploads'), { status: 429 })),
+    ).toBe(true);
+    expect(
+      isTransientUploadError(Object.assign(new Error('[POST] /uploads'), { status: 400 })),
+    ).toBe(false);
+    expect(
+      isTransientUploadError(new Error('[POST] "/api/uploads": <no response> Failed to fetch')),
+    ).toBe(true);
     expect(isTransientUploadError(new Error('Upload failed (403)'))).toBe(false);
     expect(
       isTransientUploadError(

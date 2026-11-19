@@ -28,8 +28,10 @@ export async function withUploadSlot<T>(
 }
 export const AUTO_RETRY_DELAYS_MS = [5_000, 15_000, 45_000];
 export function isTransientUploadError(error: unknown) {
+  const status = (error as { status?: unknown } | null)?.status;
+  if (typeof status === 'number') return status >= 500 || status === 429;
   const message = error instanceof Error ? error.message : String(error);
-  return /Transfer interrupted|Upload failed \(5\d\d\)|^Failed to fetch|NetworkError|^Load failed/.test(
+  return /Transfer interrupted|Upload failed \(5\d\d\)|Failed to fetch|NetworkError|Load failed/.test(
     message,
   );
 }
