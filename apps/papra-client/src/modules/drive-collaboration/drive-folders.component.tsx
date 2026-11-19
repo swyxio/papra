@@ -16,6 +16,12 @@ import {
 } from './drive-collaboration.services';
 import { DocumentMoveDialog } from '../documents/components/document-move-dialog.component';
 import { DriveInbox } from './drive-inbox.component';
+import {
+  folderTree,
+  listFolderDocuments,
+  saveDocumentsZip,
+} from '../documents/components/drive-zip-download';
+import { getHttpErrorMessage } from '../shared/http/http-errors';
 
 export const DocumentFolderPicker: Component<{ organizationId: string; documentId: string }> = (
   props,
@@ -392,6 +398,38 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
       folders.data?.folders.filter((candidate) => candidate.parentId === folder.id).length ?? 0;
     return `${folder.documentsCount} ${folder.documentsCount === 1 ? 'file' : 'files'} · ${subfolders} ${subfolders === 1 ? 'subfolder' : 'subfolders'}`;
   };
+  const [downloading, setDownloading] = createSignal<{ id: string; status: string }>();
+  const downloadFolder = async (folder: DriveFolder) => {
+    if (downloading()) return;
+    setDownloading({ id: folder.id, status: 'Preparing download…' });
+    try {
+      const result = await saveDocumentsZip({
+        organizationId: props.organizationId,
+        fileName: `${folder.name}.zip`,
+        onProgress: ({ done, current }) => {
+          if (current)
+            setDownloading({ id: folder.id, status: `Downloading file ${done + 1}: ${current}` });
+        },
+        collect: async (add) => {
+          for (const { folder: entry, directory } of folderTree(
+            folder.id,
+            folders.data?.folders ?? [],
+          ))
+            for await (const document of listFolderDocuments(props.organizationId, entry.id))
+              await add(document, directory);
+        },
+      });
+      createToast({
+        type: 'success',
+        message: `Downloaded ${folder.name} (${result.done} ${result.done === 1 ? 'file' : 'files'}${result.skipped ? `, ${result.skipped} without a stored file skipped` : ''}).`,
+      });
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === 'AbortError'))
+        createToast({ type: 'error', message: `Download failed: ${getHttpErrorMessage(error)}` });
+    } finally {
+      setDownloading(undefined);
+    }
+  };
   const openFolder = (id: string) =>
     setParams({ folder: id, scope: undefined, query: undefined, page: undefined });
   const accessLabel = (restricted: boolean) =>
@@ -427,6 +465,21 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
             </For>
           </nav>
           <div class="flex items-center gap-2 flex-wrap justify-end">
+            <Show when={current()}>
+              {(folder) => (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  isLoading={downloading()?.id === folder().id}
+                  disabled={Boolean(downloading())}
+                  onClick={() => void downloadFolder(folder())}
+                  title="Download this folder and its subfolders as a ZIP"
+                >
+                  <div class="i-tabler-download size-4 mr-1.5" />
+                  Download folder
+                </Button>
+              )}
+            </Show>
             <Show when={current()?.canWrite}>
               <Button variant="outline" size="sm" onClick={() => setShowCreate(!showCreate())}>
                 New folder
@@ -542,6 +595,13 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
           onOpenChange={setMoveFilesOpen}
           destinationFolderId={folderId()}
         />
+        <Show when={downloading()}>
+          {(state) => (
+            <p role="status" class="truncate text-xs text-muted-foreground">
+              {state().status}
+            </p>
+          )}
+        </Show>
         <Show when={current()}>
           {(folder) => (
             <p class="text-xs text-muted-foreground">
@@ -571,36 +631,52 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
           <div class="divide-y rounded-lg border">
             <For each={children()}>
               {(folder) => (
-                <button
-                  class="flex w-full items-center gap-3 px-3 py-3 text-left hover:bg-muted/40 focus-visible:outline"
-                  onClick={() => openFolder(folder.id)}
-                >
-                  <span
-                    class={
-                      folder.effectiveRestricted
-                        ? 'i-tabler-folder-lock size-5 shrink-0 text-muted-foreground'
-                        : 'i-tabler-folder size-5 shrink-0 text-muted-foreground'
-                    }
-                  />
-                  <div class="min-w-0 flex-1">
-                    <span class="block truncate text-sm font-medium">{folder.name}</span>
-                    <span class="block text-xs text-muted-foreground">
-                      {contentsLabel(folder)}
-                      <Show when={folder.shortcutsCount > 0}>
-                        {' '}
-                        · {folder.shortcutsCount} shortcuts
-                      </Show>{' '}
-                      · {formatBytes({ bytes: folder.documentsSize })} including subfolders ·{' '}
-                      {accessLabel(folder.effectiveRestricted)}
-                    </span>
-                  </div>
-                  <Show when={folder.lastActivityAt}>
-                    <span class="hidden sm:block shrink-0 text-xs text-muted-foreground">
-                      {new Date(folder.lastActivityAt!).toLocaleDateString()}
-                    </span>
-                  </Show>
-                  <span class="i-tabler-chevron-right size-4 shrink-0 text-muted-foreground" />
-                </button>
+                <div class="flex items-center hover:bg-muted/40">
+                  <button
+                    class="flex min-w-0 flex-1 items-center gap-3 px-3 py-3 text-left focus-visible:outline"
+                    onClick={() => openFolder(folder.id)}
+                  >
+                    <span
+                      class={
+                        folder.effectiveRestricted
+                          ? 'i-tabler-folder-lock size-5 shrink-0 text-muted-foreground'
+                          : 'i-tabler-folder size-5 shrink-0 text-muted-foreground'
+                      }
+                    />
+                    <div class="min-w-0 flex-1">
+                      <span class="block truncate text-sm font-medium">{folder.name}</span>
+                      <span class="block text-xs text-muted-foreground">
+                        {contentsLabel(folder)}
+                        <Show when={folder.shortcutsCount > 0}>
+                          {' '}
+                          · {folder.shortcutsCount} shortcuts
+                        </Show>{' '}
+                        · {formatBytes({ bytes: folder.documentsSize })} including subfolders ·{' '}
+                        {accessLabel(folder.effectiveRestricted)}
+                      </span>
+                    </div>
+                    <Show when={folder.lastActivityAt}>
+                      <span class="hidden sm:block shrink-0 text-xs text-muted-foreground">
+                        {new Date(folder.lastActivityAt!).toLocaleDateString()}
+                      </span>
+                    </Show>
+                    <span class="i-tabler-chevron-right size-4 shrink-0 text-muted-foreground" />
+                  </button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    class="mr-2 size-8 shrink-0"
+                    isLoading={downloading()?.id === folder.id}
+                    disabled={Boolean(downloading())}
+                    onClick={() => void downloadFolder(folder)}
+                    aria-label={`Download ${folder.name}`}
+                    title={`Download ${folder.name} as a ZIP`}
+                  >
+                    <Show when={downloading()?.id !== folder.id}>
+                      <div class="i-tabler-download size-4" />
+                    </Show>
+                  </Button>
+                </div>
               )}
             </For>
           </div>
