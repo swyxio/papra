@@ -323,15 +323,16 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
   };
   const create = useMutation(() => ({
     mutationFn: async () =>
-      apiClient({
+      apiClient<{ folder: { id: string } }>({
         method: 'POST',
         path: `${driveBase(props.organizationId)}/folders`,
         body: { name: name(), parentId: folderId() },
       }),
-    onSuccess: () => {
+    onSuccess: async (result) => {
       setName('');
       setShowCreate(false);
-      invalidate();
+      await client.invalidateQueries({ queryKey: key() });
+      openFolder(result.folder.id);
     },
     onError: () =>
       createToast({
