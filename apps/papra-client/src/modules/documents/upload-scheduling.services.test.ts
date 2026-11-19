@@ -1,10 +1,13 @@
-import { expect, test } from 'vitest';
+import { describe, expect, test } from 'vitest';
 import {
   createUploadScheduler,
   groupUploadTasks,
   MAX_SIMULTANEOUS_UPLOADS,
   prioritizeUploadTasks,
   uploadFolderPaths,
+  isTransientUploadError,
+  SHARED_UPLOAD_SLOTS,
+  withUploadSlot,
 } from './upload-scheduling.services';
 
 test('ten files start immediately and the rest queue until a slot is released', async () => {
@@ -82,4 +85,50 @@ test('files from one dropped folder collapse into a single folder entry at its m
     { kind: 'task', task: tasks[0] },
   ]);
   expect(groupUploadTasks(tasks, true)).toEqual([]);
+});
+
+describe('withUploadSlot', () => {
+  test('runs directly without the Web Locks API', async () => {
+    expect(await withUploadSlot(async () => 'done', undefined)).toBe('done');
+  });
+
+  test('takes the first free shared slot, and waits on one when all are busy', async () => {
+    const held = new Set<string>();
+    const waited: string[] = [];
+    const locks = {
+      request: async (name: string, ...args: unknown[]) => {
+        const callback = args.at(-1) as (lock: unknown) => Promise<unknown>;
+        const ifAvailable = args.length === 2 && (args[0] as { ifAvailable?: boolean }).ifAvailable;
+        if (ifAvailable) return callback(held.has(name) ? null : { name });
+        waited.push(name);
+        return callback({ name });
+      },
+    } as unknown as LockManager;
+    held.add('drive-upload-slot:0');
+    expect(await withUploadSlot(async () => 'slot-1', locks)).toBe('slot-1');
+    expect(waited).toEqual([]);
+    for (let slot = 1; slot < SHARED_UPLOAD_SLOTS; slot++) held.add(`drive-upload-slot:${slot}`);
+    expect(await withUploadSlot(async () => 'queued', locks)).toBe('queued');
+    expect(waited).toHaveLength(1);
+  });
+});
+
+describe('isTransientUploadError', () => {
+  test('retries dropped connections and server errors, not mismatched files or 4xx', () => {
+    expect(
+      isTransientUploadError(
+        new Error('Transfer interrupted. Reload and reselect this file to resume.'),
+      ),
+    ).toBe(true);
+    expect(isTransientUploadError(new Error('Upload failed (503)'))).toBe(true);
+    expect(isTransientUploadError(new TypeError('Failed to fetch'))).toBe(true);
+    expect(isTransientUploadError(new Error('Upload failed (403)'))).toBe(false);
+    expect(
+      isTransientUploadError(
+        new Error(
+          'Reselected file does not match the interrupted upload. Choose the original file.',
+        ),
+      ),
+    ).toBe(false);
+  });
 });

@@ -2,6 +2,8 @@ import {
   createUploadScheduler,
   groupUploadTasks,
   uploadFolderPaths,
+  AUTO_RETRY_DELAYS_MS,
+  isTransientUploadError,
 } from '../upload-scheduling.services';
 import { createShareLink } from '@/modules/document-share-links/document-share-links.services';
 import { TranscriptionProgress } from './transcription-progress.component';
@@ -413,7 +415,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
         const transfer = async () => {
           updateTaskStatus({ file, status: 'uploading' });
 
-          const [result, error] = await safely(
+          const upload = async () =>
             uploadDocument({
               file,
               organizationId,
@@ -433,13 +435,19 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
                 setTasks((tasks) =>
                   tasks.map((task) => (task.file === file ? { ...task, progress } : task)),
                 ),
-            }),
-          );
+            });
+          let [result, error] = await safely(upload());
+          // Network drops and stalled sockets resume on their own; acknowledged parts are not resent.
+          for (const delay of AUTO_RETRY_DELAYS_MS) {
+            if (!error || !isTransientUploadError(error)) break;
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            [result, error] = await safely(upload());
+          }
 
           if (error) {
             updateTaskStatus({ file, status: 'error', error });
           } else {
-            const { document } = result;
+            const { document } = result!;
 
             updateTaskStatus({ file, status: 'success', document });
             if (!getTasks().find((task) => task.file === file)?.shareUrl)

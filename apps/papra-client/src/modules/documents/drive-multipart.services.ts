@@ -1,4 +1,9 @@
-import { limitUploadTransfer, PARTS_PER_UPLOAD } from './upload-scheduling.services';
+import {
+  limitUploadTransfer,
+  PARTS_PER_UPLOAD,
+  UPLOAD_STALL_MS,
+  withUploadSlot,
+} from './upload-scheduling.services';
 import type { Document } from './documents.types';
 import type { AsDto } from '../shared/http/http-client.types';
 import { apiClient } from '../shared/http/api-client';
@@ -218,36 +223,48 @@ async function transfer(
   let stopped = false;
   const controllers = new Set<XMLHttpRequest>();
   const send = async (url: string, blob: Blob, n: number, headers: Record<string, string> = {}) =>
-    limitUploadTransfer(
-      async () =>
-        new Promise<void>((resolve, reject) => {
-          if (stopped) {
-            reject(new Error('Transfer interrupted. Reselect the file to resume.'));
-            return;
-          }
-          const xhr = new XMLHttpRequest();
-          controllers.add(xhr);
-          xhr.open('PUT', url);
-          for (const [name, value] of Object.entries(headers)) xhr.setRequestHeader(name, value);
-          xhr.timeout = 15 * 60 * 1000;
-          xhr.upload.onprogress = (e) => {
-            active.set(n, e.loaded);
-            report();
-          };
-          xhr.onload = () => {
-            controllers.delete(xhr);
-            if (xhr.status >= 200 && xhr.status < 300) resolve();
-            else reject(new Error(`Upload failed (${xhr.status})`));
-          };
-          xhr.onerror =
-            xhr.ontimeout =
-            xhr.onabort =
-              () => {
-                controllers.delete(xhr);
-                reject(new Error('Transfer interrupted. Reload and reselect this file to resume.'));
-              };
-          xhr.send(blob);
-        }),
+    limitUploadTransfer(async () =>
+      withUploadSlot(
+        async () =>
+          new Promise<void>((resolve, reject) => {
+            if (stopped) {
+              reject(new Error('Transfer interrupted. Reselect the file to resume.'));
+              return;
+            }
+            const xhr = new XMLHttpRequest();
+            controllers.add(xhr);
+            xhr.open('PUT', url);
+            for (const [name, value] of Object.entries(headers)) xhr.setRequestHeader(name, value);
+            xhr.timeout = 15 * 60 * 1000;
+            // A dead connection never fires progress; abort it so the part is retried on a fresh one.
+            let lastProgress = Date.now();
+            const watchdog = setInterval(() => {
+              if (Date.now() - lastProgress > UPLOAD_STALL_MS) xhr.abort();
+            }, 5000);
+            xhr.upload.onprogress = (e) => {
+              lastProgress = Date.now();
+              active.set(n, e.loaded);
+              report();
+            };
+            xhr.onload = () => {
+              controllers.delete(xhr);
+              clearInterval(watchdog);
+              if (xhr.status >= 200 && xhr.status < 300) resolve();
+              else reject(new Error(`Upload failed (${xhr.status})`));
+            };
+            xhr.onerror =
+              xhr.ontimeout =
+              xhr.onabort =
+                () => {
+                  controllers.delete(xhr);
+                  clearInterval(watchdog);
+                  reject(
+                    new Error('Transfer interrupted. Reload and reselect this file to resume.'),
+                  );
+                };
+            xhr.send(blob);
+          }),
+      ),
     );
   // Sign eight adjacent parts once; transfer workers share the request.
   const signedBatches = new Map<
