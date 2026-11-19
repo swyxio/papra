@@ -81,8 +81,8 @@ export function zipSafeName(name: string, fallback: string) {
   return cleaned && cleaned !== '.' && cleaned !== '..' ? cleaned : fallback;
 }
 
-export function createZipEntryNamer() {
-  const used = new Set<string>();
+export function createZipEntryNamer(reserved: string[] = []) {
+  const used = new Set(reserved.map((path) => path.replace(/\/$/, '').toLowerCase()));
   return (directory: string, name: string) => {
     const dot = name.lastIndexOf('.');
     const [stem, extension] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ''];

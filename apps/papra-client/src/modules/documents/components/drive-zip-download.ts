@@ -36,11 +36,13 @@ export type ZipProgress = { done: number; skipped: number; current?: string };
 export async function saveDocumentsZip({
   organizationId,
   fileName,
+  directories = [],
   collect,
   onProgress,
 }: {
   organizationId: string;
   fileName: string;
+  directories?: string[];
   collect: (add: (document: ZipDocument, directory?: string) => Promise<void>) => Promise<void>;
   onProgress?: (progress: ZipProgress) => void;
 }) {
@@ -59,9 +61,11 @@ export async function saveDocumentsZip({
     : new ZipWriter(blobWriter!, { zip64: true });
   const progress: ZipProgress = { done: 0, skipped: 0 };
   const seen = new Set<string>();
-  const names = createZipEntryNamer();
+  const names = createZipEntryNamer(directories);
   let bytes = 0;
   try {
+    for (const directory of directories)
+      await writer.add(directory, undefined, { directory: true });
     await collect(async (document, directory = '') => {
       if (seen.has(document.id)) return;
       seen.add(document.id);

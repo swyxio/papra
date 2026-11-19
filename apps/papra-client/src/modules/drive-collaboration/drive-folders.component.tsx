@@ -402,19 +402,18 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
   const downloadFolder = async (folder: DriveFolder) => {
     if (downloading()) return;
     setDownloading({ id: folder.id, status: 'Preparing download…' });
+    const tree = folderTree(folder.id, folders.data?.folders ?? []);
     try {
       const result = await saveDocumentsZip({
         organizationId: props.organizationId,
         fileName: `${folder.name}.zip`,
+        directories: tree.map((entry) => entry.directory).filter(Boolean),
         onProgress: ({ done, current }) => {
           if (current)
             setDownloading({ id: folder.id, status: `Downloading file ${done + 1}: ${current}` });
         },
         collect: async (add) => {
-          for (const { folder: entry, directory } of folderTree(
-            folder.id,
-            folders.data?.folders ?? [],
-          ))
+          for (const { folder: entry, directory } of tree)
             for await (const document of listFolderDocuments(props.organizationId, entry.id))
               await add(document, directory);
         },
