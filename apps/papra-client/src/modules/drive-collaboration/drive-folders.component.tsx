@@ -13,6 +13,8 @@ import {
   fetchFolders,
   folderIsDescendant,
   folderPath,
+  isPendingFolderId,
+  pendingFolderPrefix,
 } from './drive-collaboration.services';
 import { DocumentMoveDialog } from '../documents/components/document-move-dialog.component';
 import { DriveInbox } from './drive-inbox.component';
@@ -300,8 +302,6 @@ const FolderAccessPanel: Component<{ organizationId: string; folderId: string }>
   );
 };
 
-export const pendingFolderPrefix = 'pending_';
-
 export const DriveFolders: Component<{ organizationId: string }> = (props) => {
   const client = useQueryClient();
   const [params, setParams] = useSearchParams();
@@ -339,7 +339,6 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
     id: string;
     refresh: boolean;
   }>();
-  const isPendingFolder = (id: string | undefined) => !!id?.startsWith(pendingFolderPrefix);
   const create = useMutation(() => ({
     mutationFn: async (draft: { pendingId: string; name: string; parentId: string }) =>
       apiClient<{ folder: { id: string } }>({
@@ -530,7 +529,7 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
             </For>
           </nav>
           <div class="flex items-center gap-2 flex-wrap justify-end">
-            <Show when={!isPendingFolder(folderId()) && current()}>
+            <Show when={!isPendingFolderId(folderId()) && current()}>
               {(folder) => (
                 <Button
                   variant="outline"
@@ -556,7 +555,7 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
             </Show>
             <Show
               when={
-                !isPendingFolder(folderId()) &&
+                !isPendingFolderId(folderId()) &&
                 !current()?.isHome &&
                 (current()?.canWrite || folders.data?.canManageAccess)
               }
