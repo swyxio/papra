@@ -335,6 +335,10 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
       key(),
       (data) => data && { ...data, folders: edit(data.folders) },
     );
+  const [settledPlaceholder, setSettledPlaceholder] = createSignal<{
+    id: string;
+    refresh: boolean;
+  }>();
   const isPendingFolder = (id: string | undefined) => !!id?.startsWith(pendingFolderPrefix);
   const create = useMutation(() => ({
     mutationFn: async (draft: { pendingId: string; name: string; parentId: string }) =>
@@ -370,7 +374,6 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
       openFolder(draft.pendingId);
     },
     onSuccess: (result, draft) => {
-      // Add the real folder before dropping the placeholder so the missing-folder guard never fires.
       editFolders((list) => [
         ...list,
         ...list
@@ -379,12 +382,11 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
       ]);
       if (folderId() === draft.pendingId)
         setParams({ folder: result.folder.id }, { replace: true });
-      editFolders((list) => list.filter((folder) => folder.id !== draft.pendingId));
-      invalidate();
+      setSettledPlaceholder({ id: draft.pendingId, refresh: true });
     },
     onError: (error, draft) => {
       if (folderId() === draft.pendingId) setParams({ folder: draft.parentId }, { replace: true });
-      editFolders((list) => list.filter((folder) => folder.id !== draft.pendingId));
+      setSettledPlaceholder({ id: draft.pendingId, refresh: false });
       setName(draft.name);
       setShowCreate(true);
       createToast({
@@ -393,6 +395,15 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
       });
     },
   }));
+  // Router navigation lands asynchronously; drop the placeholder only once the URL has left it,
+  // otherwise the missing-folder guard sends the user Home.
+  createEffect(() => {
+    const settled = settledPlaceholder();
+    if (!settled || folderId() === settled.id) return;
+    setSettledPlaceholder(undefined);
+    editFolders((list) => list.filter((folder) => folder.id !== settled.id));
+    if (settled.refresh) invalidate();
+  });
   const submitCreate = () => {
     const parentId = folderId();
     if (!name().trim() || !parentId || create.isPending) return;
