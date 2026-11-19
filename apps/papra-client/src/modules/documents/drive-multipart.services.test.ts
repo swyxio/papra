@@ -375,3 +375,59 @@ test('same-name files in separate folders retain independent resume sessions', a
   expect(store.size).toBe(1);
   expect(Array.from(store.keys())[0]).toContain(':folder-a:');
 });
+test('a PUT with no upload progress for the stall window is aborted and resent', async () => {
+  const store = new Map<string, string>();
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => store.get(key) || null,
+    setItem: (key: string, value: string) => store.set(key, value),
+    removeItem: (key: string) => store.delete(key),
+  });
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+  const session = {
+    id: 'stall',
+    mode: 'single',
+    partSize: 32 * 1024 ** 2,
+    documentId: 'doc',
+    uploadUrl: 'https://s3.invalid/single',
+    status: 'uploading',
+  };
+  api.mockImplementation(async ({ method, path }) => {
+    if (method === 'POST' && path.endsWith('/uploads')) return { session };
+    if (method === 'GET') return { session, parts: [] };
+    if (path.endsWith('/complete'))
+      return { document: { id: 'doc', organizationId: 'org', createdAt: 0, updatedAt: 0 } };
+    throw new Error('Unexpected request');
+  });
+  let sends = 0;
+  let aborts = 0;
+  class Xhr {
+    upload: { onprogress?: Function } = {};
+    status = 200;
+    onload?: Function;
+    onabort?: Function;
+    open() {}
+    setRequestHeader() {}
+    abort() {
+      aborts++;
+      this.onabort?.();
+    }
+    send(blob: Blob) {
+      // The first connection is dead: it never reports progress or completes.
+      if (++sends === 1) return;
+      queueMicrotask(() => {
+        this.upload.onprogress?.({ loaded: blob.size });
+        this.onload?.();
+      });
+    }
+  }
+  vi.stubGlobal('XMLHttpRequest', Xhr);
+  const upload = multipartUpload(new File(['hello'], 'stall.txt', { lastModified: 5 }), 'org');
+  while (sends < 1) await new Promise((resolve) => setTimeout(resolve, 1));
+  vi.advanceTimersByTime(55_000);
+  expect(aborts).toBe(0);
+  vi.advanceTimersByTime(10_000);
+  expect(aborts).toBe(1);
+  const { document } = await upload;
+  expect(document.id).toBe('doc');
+  expect(sends).toBe(2);
+});
