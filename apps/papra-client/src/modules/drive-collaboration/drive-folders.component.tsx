@@ -317,7 +317,9 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
   const folderId = () => (typeof params.folder === 'string' ? params.folder : homeId());
   const current = () => folders.data?.folders.find((folder) => folder.id === folderId());
   const children = () =>
-    folders.data?.folders.filter((folder) => folder.parentId === folderId()) ?? [];
+    folders.data?.folders.filter(
+      (folder) => folder.parentId === folderId() && !isPendingFolderId(folder.id),
+    ) ?? [];
   createEffect(() => {
     if (folders.data && folderId() && !current()) setParams({ folder: undefined });
   });
