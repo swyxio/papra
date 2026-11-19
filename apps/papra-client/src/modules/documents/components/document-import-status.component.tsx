@@ -29,7 +29,7 @@ import { ReportProblem } from '@/modules/feedback/report.component';
 import { errorObservation, errorProof } from '@/modules/feedback/feedback.services';
 import { Button } from '@/modules/ui/components/button';
 import { createToast } from '@/modules/ui/components/sonner';
-import { isPendingFolderId } from '@/modules/drive-collaboration/drive-collaboration.services';
+import { isPendingFolderId } from '@/modules/drive-collaboration/drive-folders.models';
 import { invalidateOrganizationDocumentsQuery } from '../documents.composables';
 import { uploadDocument } from '../documents.services';
 import { createUploadCompleter } from '../upload-completion.services';

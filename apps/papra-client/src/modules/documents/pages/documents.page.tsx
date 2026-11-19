@@ -1,8 +1,6 @@
 import { DriveSpaceCapabilities } from '@/modules/drive-capabilities';
-import {
-  fetchFolders,
-  isPendingFolderId,
-} from '@/modules/drive-collaboration/drive-collaboration.services';
+import { fetchFolders } from '@/modules/drive-collaboration/drive-collaboration.services';
+import { isPendingFolderId } from '@/modules/drive-collaboration/drive-folders.models';
 import { DriveFolders } from '@/modules/drive-collaboration/drive-folders.component';
 import { DriveExport } from '../components/drive-export.component';
 import { saveDocumentsZip } from '../components/drive-zip-download';

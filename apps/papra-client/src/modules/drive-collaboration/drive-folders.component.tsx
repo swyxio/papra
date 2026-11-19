@@ -13,9 +13,8 @@ import {
   fetchFolders,
   folderIsDescendant,
   folderPath,
-  isPendingFolderId,
-  pendingFolderPrefix,
 } from './drive-collaboration.services';
+import { isPendingFolderId, pendingFolderPrefix } from './drive-folders.models';
 import { DocumentMoveDialog } from '../documents/components/document-move-dialog.component';
 import { DriveInbox } from './drive-inbox.component';
 import {
