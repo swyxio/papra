@@ -332,7 +332,8 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
       setName('');
       setShowCreate(false);
       await client.invalidateQueries({ queryKey: key() });
-      openFolder(result.folder.id);
+      if (folders.data?.folders.some((folder) => folder.id === result.folder.id))
+        openFolder(result.folder.id);
     },
     onError: () =>
       createToast({
