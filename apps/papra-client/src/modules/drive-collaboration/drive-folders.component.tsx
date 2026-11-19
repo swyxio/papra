@@ -14,6 +14,7 @@ import {
   folderIsDescendant,
   folderPath,
 } from './drive-collaboration.services';
+import { isPendingFolderId, pendingFolderPrefix } from './drive-folders.models';
 import { DocumentMoveDialog } from '../documents/components/document-move-dialog.component';
 import { DriveInbox } from './drive-inbox.component';
 import {
@@ -316,7 +317,9 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
   const folderId = () => (typeof params.folder === 'string' ? params.folder : homeId());
   const current = () => folders.data?.folders.find((folder) => folder.id === folderId());
   const children = () =>
-    folders.data?.folders.filter((folder) => folder.parentId === folderId()) ?? [];
+    folders.data?.folders.filter(
+      (folder) => folder.parentId === folderId() && !isPendingFolderId(folder.id),
+    ) ?? [];
   createEffect(() => {
     if (folders.data && folderId() && !current()) setParams({ folder: undefined });
   });
@@ -327,26 +330,89 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
     });
     void client.invalidateQueries({ queryKey: ['organizations', props.organizationId, 'folders'] });
   };
+  type FolderList = NonNullable<typeof folders.data>;
+  const editFolders = (edit: (list: DriveFolder[]) => DriveFolder[]) =>
+    client.setQueryData<FolderList>(
+      key(),
+      (data) => data && { ...data, folders: edit(data.folders) },
+    );
+  const [settledPlaceholder, setSettledPlaceholder] = createSignal<{
+    id: string;
+    refresh: boolean;
+  }>();
   const create = useMutation(() => ({
-    mutationFn: async () =>
+    mutationFn: async (draft: { pendingId: string; name: string; parentId: string }) =>
       apiClient<{ folder: { id: string } }>({
         method: 'POST',
         path: `${driveBase(props.organizationId)}/folders`,
-        body: { name: name(), parentId: folderId() },
+        body: { name: draft.name, parentId: draft.parentId },
       }),
-    onSuccess: async (result) => {
+    onMutate: async (draft) => {
+      await client.cancelQueries({ queryKey: key() });
+      const parent = folders.data?.folders.find((folder) => folder.id === draft.parentId);
+      const timestamp = new Date().toISOString();
+      editFolders((list) => [
+        ...list,
+        {
+          id: draft.pendingId,
+          parentId: draft.parentId,
+          name: draft.name,
+          isHome: false,
+          isRestricted: false,
+          canWrite: false,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          documentsCount: 0,
+          documentsSize: 0,
+          shortcutsCount: 0,
+          lastActivityAt: null,
+          effectiveRestricted: parent?.effectiveRestricted ?? false,
+        },
+      ]);
       setName('');
       setShowCreate(false);
-      await client.invalidateQueries({ queryKey: key() });
-      if (folders.data?.folders.some((folder) => folder.id === result.folder.id))
-        openFolder(result.folder.id);
+      openFolder(draft.pendingId);
     },
-    onError: () =>
+    onSuccess: (result, draft) => {
+      editFolders((list) => [
+        ...list,
+        ...list
+          .filter((folder) => folder.id === draft.pendingId)
+          .map((folder) => ({ ...folder, id: result.folder.id, canWrite: true })),
+      ]);
+      if (folderId() === draft.pendingId)
+        setParams({ folder: result.folder.id }, { replace: true });
+      setSettledPlaceholder({ id: draft.pendingId, refresh: true });
+    },
+    onError: (error, draft) => {
+      if (folderId() === draft.pendingId) setParams({ folder: draft.parentId }, { replace: true });
+      setSettledPlaceholder({ id: draft.pendingId, refresh: false });
+      setName(draft.name);
+      setShowCreate(true);
       createToast({
         type: 'error',
-        message: 'Could not create folder. Check your access and duplicate names.',
-      }),
+        message: `Could not create folder: ${getHttpErrorMessage(error)}`,
+      });
+    },
   }));
+  // Router navigation lands asynchronously; drop the placeholder only once the URL has left it,
+  // otherwise the missing-folder guard sends the user Home.
+  createEffect(() => {
+    const settled = settledPlaceholder();
+    if (!settled || folderId() === settled.id) return;
+    setSettledPlaceholder(undefined);
+    editFolders((list) => list.filter((folder) => folder.id !== settled.id));
+    if (settled.refresh) invalidate();
+  });
+  const submitCreate = () => {
+    const parentId = folderId();
+    if (!name().trim() || !parentId || create.isPending) return;
+    create.mutate({
+      pendingId: `${pendingFolderPrefix}${crypto.randomUUID()}`,
+      name: name().trim(),
+      parentId,
+    });
+  };
   const update = useMutation(() => ({
     mutationFn: async (changes: { name?: string; parentId?: string }) =>
       apiClient({
@@ -464,7 +530,7 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
             </For>
           </nav>
           <div class="flex items-center gap-2 flex-wrap justify-end">
-            <Show when={current()}>
+            <Show when={!isPendingFolderId(folderId()) && current()}>
               {(folder) => (
                 <Button
                   variant="outline"
@@ -480,7 +546,8 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
               )}
             </Show>
             <Show when={current()?.canWrite}>
-              <Button variant="outline" size="sm" onClick={() => setShowCreate(!showCreate())}>
+              <Button size="sm" onClick={() => setShowCreate(!showCreate())}>
+                <div class="i-tabler-folder-plus size-4 mr-1.5" />
                 New folder
               </Button>
               <Button variant="outline" size="sm" onClick={() => setMoveFilesOpen(true)}>
@@ -488,7 +555,11 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
               </Button>
             </Show>
             <Show
-              when={!current()?.isHome && (current()?.canWrite || folders.data?.canManageAccess)}
+              when={
+                !isPendingFolderId(folderId()) &&
+                !current()?.isHome &&
+                (current()?.canWrite || folders.data?.canManageAccess)
+              }
             >
               <details class="relative shrink-0 text-sm">
                 <summary class="cursor-pointer rounded-md border px-3 py-2">Manage folder</summary>
@@ -572,7 +643,7 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
             class="flex gap-2"
             onSubmit={(event) => {
               event.preventDefault();
-              if (name().trim()) create.mutate();
+              submitCreate();
             }}
           >
             <input

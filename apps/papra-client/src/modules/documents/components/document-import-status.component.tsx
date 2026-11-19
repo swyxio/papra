@@ -28,6 +28,8 @@ import { isUploadActiveElsewhere } from '../upload-activity.services';
 import { ReportProblem } from '@/modules/feedback/report.component';
 import { errorObservation, errorProof } from '@/modules/feedback/feedback.services';
 import { Button } from '@/modules/ui/components/button';
+import { createToast } from '@/modules/ui/components/sonner';
+import { isPendingFolderId } from '@/modules/drive-collaboration/drive-folders.models';
 import { invalidateOrganizationDocumentsQuery } from '../documents.composables';
 import { uploadDocument } from '../documents.services';
 import { createUploadCompleter } from '../upload-completion.services';
@@ -272,6 +274,13 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
   }) => {
     if (!retry && folderId === undefined)
       folderId = typeof searchParams.folder === 'string' ? searchParams.folder : undefined;
+    if (isPendingFolderId(folderId)) {
+      createToast({
+        type: 'error',
+        message: 'This folder is still being created. Try again in a moment.',
+      });
+      return;
+    }
     const organizationId = props.organizationId;
     const completeUpload = createUploadCompleter(organizationId);
     if (retry) {

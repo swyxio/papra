@@ -1,5 +1,6 @@
 import { DriveSpaceCapabilities } from '@/modules/drive-capabilities';
 import { fetchFolders } from '@/modules/drive-collaboration/drive-collaboration.services';
+import { isPendingFolderId } from '@/modules/drive-collaboration/drive-folders.models';
 import { DriveFolders } from '@/modules/drive-collaboration/drive-folders.component';
 import { DriveExport } from '../components/drive-export.component';
 import { saveDocumentsZip } from '../components/drive-zip-download';
@@ -164,7 +165,7 @@ export const DocumentsPage: Component = () => {
   };
 
   const documentsQuery = useQuery(() => ({
-    enabled: allFiles() || Boolean(queryFolderId()),
+    enabled: allFiles() || (Boolean(queryFolderId()) && !isPendingFolderId(queryFolderId())),
     queryKey: [
       'organizations',
       params.organizationId,
