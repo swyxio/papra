@@ -520,19 +520,36 @@ export function registerCollaborationRoutes(app: App) {
         fail(403, 'You need edit access to every folder inside to delete it');
       }
     }
+    // Re-check inside the batch: a restricted folder moved in after validation must block it.
+    const unrestricted =
+      'NOT EXISTS (SELECT 1 FROM subtree s JOIN folders r ON r.id=s.id WHERE r.is_restricted=1)';
+    const { results: rehomed } = await context.env.DB.prepare(
+      `${subtreeCte} SELECT current_version_id FROM documents WHERE organization_id=? AND current_version_id IS NOT NULL AND home_folder_id IN (SELECT id FROM subtree)`,
+    )
+      .bind(folder.id, org)
+      .all<{ current_version_id: string }>();
     const now = Date.now();
-    const [trashed] = await context.env.DB.batch([
+    const results = await context.env.DB.batch([
       context.env.DB.prepare(
-        `${subtreeCte} UPDATE documents SET is_deleted=1,deleted_at=?,deleted_by=?,updated_at=?,home_folder_id=? WHERE organization_id=? AND is_deleted=0 AND home_folder_id IN (SELECT id FROM subtree)`,
+        `${subtreeCte} UPDATE documents SET is_deleted=1,deleted_at=?,deleted_by=?,updated_at=?,home_folder_id=? WHERE organization_id=? AND is_deleted=0 AND home_folder_id IN (SELECT id FROM subtree) AND ${unrestricted}`,
       ).bind(folder.id, now, identity.userId, now, folder.parent_id, org),
       context.env.DB.prepare(
-        `${subtreeCte} UPDATE documents SET home_folder_id=? WHERE organization_id=? AND home_folder_id IN (SELECT id FROM subtree)`,
+        `${subtreeCte} UPDATE documents SET home_folder_id=? WHERE organization_id=? AND home_folder_id IN (SELECT id FROM subtree) AND ${unrestricted}`,
+      ).bind(folder.id, folder.parent_id, org),
+      // Unfinished uploads follow their files to the parent so they can still finish or be removed.
+      context.env.DB.prepare(
+        `${subtreeCte} UPDATE uploads SET folder_id=? WHERE organization_id=? AND status='uploading' AND folder_id IN (SELECT id FROM subtree) AND ${unrestricted}`,
       ).bind(folder.id, folder.parent_id, org),
       context.env.DB.prepare(
-        `${subtreeCte} DELETE FROM folders WHERE id IN (SELECT id FROM subtree)`,
+        `${subtreeCte} DELETE FROM folders WHERE id IN (SELECT id FROM subtree) AND ${unrestricted}`,
       ).bind(folder.id),
     ]);
-    return context.json({ success: true, trashedDocuments: trashed?.meta.changes ?? 0 });
+    if (!results.at(-1)?.meta.changes)
+      fail(409, 'Restricted folders inside must be emptied before deleting this folder');
+    // Search namespaces follow the home folder; reindex so restored files stay searchable.
+    for (const { current_version_id } of rehomed)
+      await enqueueVersion(context.env, current_version_id, 'index').catch(() => {});
+    return context.json({ success: true, trashedDocuments: results[0]?.meta.changes ?? 0 });
   });
   app.get(`${base}/folders/:folderId/permissions`, async (context) => {
     const identity = context.get('identity');
