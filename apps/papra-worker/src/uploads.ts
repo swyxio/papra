@@ -178,7 +178,7 @@ export function registerUploadRoutes(app: App) {
       org,
     );
     const access = new Map<string, Promise<boolean>>();
-    const readable = (folderId: string) => {
+    const readable = async (folderId: string) => {
       if (!access.has(folderId))
         access.set(
           folderId,
@@ -190,8 +190,8 @@ export function registerUploadRoutes(app: App) {
       return access.get(folderId)!;
     };
     const writable = new Map<string, Promise<boolean>>();
-    const canRemove = (row: { user_id: string; folder_id: string }) => {
-      if (row.user_id === identity.userId) return Promise.resolve(true);
+    const canRemove = async (row: { user_id: string; folder_id: string }) => {
+      if (row.user_id === identity.userId) return true;
       if (!writable.has(row.folder_id))
         writable.set(
           row.folder_id,
