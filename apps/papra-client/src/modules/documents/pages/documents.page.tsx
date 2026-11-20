@@ -42,6 +42,10 @@ import {
 } from '../components/documents-list.component';
 import { batchTrashDocuments, batchUpdateDocumentTags } from '../documents-batch.services';
 import {
+  DocumentRenameSuggestionsDialog,
+  MAX_RENAME_SUGGESTIONS,
+} from '../components/document-rename-suggestions-dialog.component';
+import {
   DEFAULT_DOCUMENT_SEARCH_SORT_FIELD,
   DEFAULT_DOCUMENT_SEARCH_SORT_ORDER,
   DOCUMENT_SEARCH_SORT_FIELDS,
@@ -49,6 +53,9 @@ import {
 } from '../documents.constants';
 import { fetchCustomPropertyDefinitions } from '@/modules/custom-properties/custom-properties.services';
 import { fetchOrganizationDocuments } from '../documents.services';
+
+const searchTips =
+  'Search filenames, document text, notes and property values. Filters: tag:Contract · created:>=2026-01-01 · uploadedBy:"Vibhu" · modifiedBy:name@example.com · has:date';
 
 export const DocumentsPage: Component = () => {
   const params = useParams();
@@ -77,6 +84,12 @@ export const DocumentsPage: Component = () => {
   const [getSelectAllMatchingQuery, setSelectAllMatchingQuery] = createSignal(false);
   const [getTagDialogOpen, setTagDialogOpen] = createSignal(false);
   const [moveOpen, setMoveOpen] = createSignal(false);
+  const [renameOpen, setRenameOpen] = createSignal(false);
+  const [getFolderSelection, setFolderSelection] = createSignal<Record<string, boolean>>({});
+  const getSelectedFolderIds = createMemo(() => {
+    const selection = getFolderSelection();
+    return Object.keys(selection).filter((id) => selection[id]);
+  });
 
   const [getSortField] = createParamSynchronizedSignal<DocumentSearchSortField>({
     paramKey: 'sortField',
@@ -116,6 +129,7 @@ export const DocumentsPage: Component = () => {
     return next;
   };
 
+  const [searchFocused, setSearchFocused] = createSignal(false);
   const [personField, setPersonField] = createSignal('uploadedBy');
   const [personValue, setPersonValue] = createSignal('');
   const applyPersonFilter = () => {
@@ -248,6 +262,7 @@ export const DocumentsPage: Component = () => {
   function clearSelection() {
     setRowSelection({});
     setSelectAllMatchingQuery(false);
+    setFolderSelection({});
   }
 
   const getListingScope = createMemo(() =>
@@ -425,7 +440,20 @@ export const DocumentsPage: Component = () => {
     }
   }
 
-  const showToolbar = () => getSelectedIds().length > 0 || getSelectAllMatchingQuery();
+  const showToolbar = () =>
+    getSelectedIds().length > 0 || getSelectAllMatchingQuery() || getSelectedFolderIds().length > 0;
+  const hasFileSelection = () => getSelectedIds().length > 0 || getSelectAllMatchingQuery();
+  const mixedSelectionLabel = () => {
+    const files = getEffectiveCount();
+    const folders = getSelectedFolderIds().length;
+    return [
+      files && `${files} ${files === 1 ? 'file' : 'files'}`,
+      `${folders} ${folders === 1 ? 'folder' : 'folders'}`,
+    ]
+      .filter(Boolean)
+      .join(' and ')
+      .concat(' selected');
+  };
 
   async function handleBatchTrash() {
     const isConfirmed = await confirm({
@@ -469,40 +497,51 @@ export const DocumentsPage: Component = () => {
         </div>
       </div>
       <Show when={!allFiles()}>
-        <DriveFolders organizationId={params.organizationId} />
+        <DriveFolders
+          organizationId={params.organizationId}
+          getFolderSelection={getFolderSelection}
+          setFolderSelection={setFolderSelection}
+        />
       </Show>
       <Show when={allFiles()}>
         <p class="mb-4 text-xs text-muted-foreground">
           All files you can access in this space, across folders.
         </p>
       </Show>
-      <div class="flex flex-wrap gap-3 mb-3">
-        <Button
-          as={A}
-          variant="outline"
-          href={`/organizations/${params.organizationId}/documents/new`}
-        >
-          Create doc from template
-        </Button>
-        <Button
-          as={A}
-          variant="outline"
-          href={`/orgs/${params.organizationId}/documents/new?template=sponsorship-order`}
-        >
-          Create sponsorship order
-        </Button>
-        <div title="Export all accessible files in this space">
-          <DriveExport organizationId={params.organizationId} />
-        </div>
+      <div class="my-4 flex flex-wrap items-start gap-4 text-sm text-muted-foreground">
+        <details class="relative">
+          <summary class="cursor-pointer hover:text-foreground">Create or export</summary>
+          <div class="absolute z-20 mt-2 flex w-64 flex-col gap-2 rounded-lg border bg-background p-3 shadow-lg">
+            <Button
+              as={A}
+              variant="outline"
+              size="sm"
+              href={`/organizations/${params.organizationId}/documents/new`}
+            >
+              Create doc from template
+            </Button>
+            <Button
+              as={A}
+              variant="outline"
+              size="sm"
+              href={`/orgs/${params.organizationId}/documents/new?template=sponsorship-order`}
+            >
+              Create sponsorship order
+            </Button>
+            <div title="Export all accessible files in this space">
+              <DriveExport organizationId={params.organizationId} />
+            </div>
+          </div>
+        </details>
+        <details class="flex-1">
+          <summary class="cursor-pointer hover:text-foreground">
+            Semantic search, document answers and automation
+          </summary>
+          <div class="mt-4 text-foreground">
+            <DriveSpaceCapabilities organizationId={params.organizationId} />
+          </div>
+        </details>
       </div>
-      <details class="my-4">
-        <summary class="cursor-pointer text-sm font-medium">
-          Semantic search, document answers and automation
-        </summary>
-        <div class="mt-4">
-          <DriveSpaceCapabilities organizationId={params.organizationId} />
-        </div>
-      </details>
       <Suspense>
         <>
           <div class="flex flex-wrap items-center gap-4">
@@ -512,7 +551,10 @@ export const DocumentsPage: Component = () => {
                   type="search"
                   name="search"
                   placeholder="Search all files in this space…"
+                  title={searchTips}
                   value={getSearchQuery()}
+                  onFocus={() => setSearchFocused(true)}
+                  onBlur={() => setSearchFocused(false)}
                   onInput={(e) => {
                     setSearchQuery(e.currentTarget.value);
                     setPagination((current) => ({ ...current, pageIndex: 0 }));
@@ -559,122 +601,135 @@ export const DocumentsPage: Component = () => {
             </Show>
           </div>
 
-          <p class="mt-2 text-xs text-muted-foreground">
-            Search filenames, document text, notes and property values. Filters: tag:Contract ·
-            created:&gt;=2026-01-01 · uploadedBy:"Vibhu" · modifiedBy:name@example.com · has:date
-          </p>
-          <div class="mt-3 flex flex-wrap items-end gap-2">
-            <label class="space-y-1 text-sm">
-              <span class="block">Filter by person</span>
-              <select
-                class="rounded-md border bg-background p-2"
-                value={personField()}
-                onChange={(e) => setPersonField(e.currentTarget.value)}
-              >
-                <option value="uploadedBy">Uploaded by</option>
-                <option value="modifiedBy">Last modified by</option>
-              </select>
-            </label>
-            <label class="space-y-1 text-sm">
-              <span class="block">Name or email</span>
-              <input
-                class="rounded-md border bg-background p-2"
-                placeholder="e.g. Vibhu"
-                value={personValue()}
-                onInput={(e) => setPersonValue(e.currentTarget.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && personValue().trim()) applyPersonFilter();
-                }}
-              />
-            </label>
-            <Button variant="outline" disabled={!personValue().trim()} onClick={applyPersonFilter}>
-              Apply person filter
-            </Button>
-            <label class="space-y-1 text-sm">
-              <span class="block">Sort files</span>
-              <select
-                class="rounded-md border bg-background p-2"
-                value={`${getSortField()}:${getSortOrder()}`}
-                onChange={(e) => {
-                  const [field, order] = e.currentTarget.value.split(':');
-                  setSearchParams({ sortField: field, sortOrder: order, page: undefined });
-                }}
-              >
-                <For
-                  each={[
-                    ['createdAt', 'Upload date'],
-                    ['modifiedAt', 'Last modified'],
-                    ['originalSize', 'Size'],
-                    ['name', 'File name'],
-                    ['uploadedBy', 'Uploader'],
-                    ['modifiedBy', 'Last modifier'],
-                    ['documentDate', 'Document date'],
-                    ['updatedAt', 'Last updated (including processing)'],
-                  ]}
-                >
-                  {([field, label]) => (
-                    <>
-                      <option value={`${field}:asc`}>
-                        {label} ·{' '}
-                        {['name', 'uploadedBy', 'modifiedBy'].includes(field)
-                          ? 'A–Z'
-                          : field === 'originalSize'
-                            ? 'Smallest first'
-                            : 'Oldest first'}
-                      </option>
-                      <option value={`${field}:desc`}>
-                        {label} ·{' '}
-                        {['name', 'uploadedBy', 'modifiedBy'].includes(field)
-                          ? 'Z–A'
-                          : field === 'originalSize'
-                            ? 'Largest first'
-                            : 'Newest first'}
-                      </option>
-                    </>
-                  )}
-                </For>
-              </select>
-            </label>
-          </div>
-          <Show when={propertiesQuery.data?.propertyDefinitions.length}>
-            <div class="mt-3 flex flex-wrap items-end gap-2 rounded-lg border p-3">
+          <Show when={searchFocused()}>
+            <p class="mt-2 text-xs text-muted-foreground">{searchTips}</p>
+          </Show>
+          <details class="mt-3">
+            <summary class="cursor-pointer text-sm text-muted-foreground hover:text-foreground">
+              Filter and sort
+            </summary>
+            <div class="mt-3 flex flex-wrap items-end gap-2">
               <label class="space-y-1 text-sm">
-                <span class="block">Filter by property</span>
+                <span class="block">Filter by person</span>
                 <select
                   class="rounded-md border bg-background p-2"
-                  value={propertyId()}
-                  onChange={(event) => setPropertyId(event.currentTarget.value)}
+                  value={personField()}
+                  onChange={(e) => setPersonField(e.currentTarget.value)}
                 >
-                  <option value="">Choose property</option>
-                  <For each={propertiesQuery.data?.propertyDefinitions}>
-                    {(property) => <option value={property.id}>{property.name}</option>}
-                  </For>
+                  <option value="uploadedBy">Uploaded by</option>
+                  <option value="modifiedBy">Last modified by</option>
                 </select>
               </label>
               <label class="space-y-1 text-sm">
-                <span class="block">Value</span>
+                <span class="block">Name or email</span>
                 <input
                   class="rounded-md border bg-background p-2"
-                  placeholder="Exact value (e.g. Approved)"
-                  value={propertyValue()}
-                  onInput={(event) => setPropertyValue(event.currentTarget.value)}
+                  placeholder="e.g. Vibhu"
+                  value={personValue()}
+                  onInput={(e) => setPersonValue(e.currentTarget.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && personValue().trim()) applyPersonFilter();
+                  }}
                 />
               </label>
               <Button
                 variant="outline"
-                disabled={!propertyId() || !propertyValue().trim()}
-                onClick={addPropertyFilter}
+                disabled={!personValue().trim()}
+                onClick={applyPersonFilter}
               >
-                Apply property filter
+                Apply person filter
               </Button>
+              <label class="space-y-1 text-sm">
+                <span class="block">Sort files</span>
+                <select
+                  class="rounded-md border bg-background p-2"
+                  value={`${getSortField()}:${getSortOrder()}`}
+                  onChange={(e) => {
+                    const [field, order] = e.currentTarget.value.split(':');
+                    setSearchParams({ sortField: field, sortOrder: order, page: undefined });
+                  }}
+                >
+                  <For
+                    each={[
+                      ['createdAt', 'Upload date'],
+                      ['modifiedAt', 'Last modified'],
+                      ['originalSize', 'Size'],
+                      ['name', 'File name'],
+                      ['uploadedBy', 'Uploader'],
+                      ['modifiedBy', 'Last modifier'],
+                      ['documentDate', 'Document date'],
+                      ['updatedAt', 'Last updated (including processing)'],
+                    ]}
+                  >
+                    {([field, label]) => (
+                      <>
+                        <option value={`${field}:asc`}>
+                          {label} ·{' '}
+                          {['name', 'uploadedBy', 'modifiedBy'].includes(field)
+                            ? 'A–Z'
+                            : field === 'originalSize'
+                              ? 'Smallest first'
+                              : 'Oldest first'}
+                        </option>
+                        <option value={`${field}:desc`}>
+                          {label} ·{' '}
+                          {['name', 'uploadedBy', 'modifiedBy'].includes(field)
+                            ? 'Z–A'
+                            : field === 'originalSize'
+                              ? 'Largest first'
+                              : 'Newest first'}
+                        </option>
+                      </>
+                    )}
+                  </For>
+                </select>
+              </label>
             </div>
-          </Show>
+            <Show when={propertiesQuery.data?.propertyDefinitions.length}>
+              <div class="mt-3 flex flex-wrap items-end gap-2 rounded-lg border p-3">
+                <label class="space-y-1 text-sm">
+                  <span class="block">Filter by property</span>
+                  <select
+                    class="rounded-md border bg-background p-2"
+                    value={propertyId()}
+                    onChange={(event) => setPropertyId(event.currentTarget.value)}
+                  >
+                    <option value="">Choose property</option>
+                    <For each={propertiesQuery.data?.propertyDefinitions}>
+                      {(property) => <option value={property.id}>{property.name}</option>}
+                    </For>
+                  </select>
+                </label>
+                <label class="space-y-1 text-sm">
+                  <span class="block">Value</span>
+                  <input
+                    class="rounded-md border bg-background p-2"
+                    placeholder="Exact value (e.g. Approved)"
+                    value={propertyValue()}
+                    onInput={(event) => setPropertyValue(event.currentTarget.value)}
+                  />
+                </label>
+                <Button
+                  variant="outline"
+                  disabled={!propertyId() || !propertyValue().trim()}
+                  onClick={addPropertyFilter}
+                >
+                  Apply property filter
+                </Button>
+              </div>
+            </Show>
+          </details>
           <div class="mb-4 mt-2 ml-2 min-h-8 flex items-center">
             <Show
               when={showToolbar()}
               fallback={
                 <span class="text-sm text-muted-foreground">
-                  <Show when={documentsData()}>
+                  <Show
+                    when={
+                      documentsData() &&
+                      (documentsData()!.documentsCount > 0 || debouncedSearchQuery().length > 0)
+                    }
+                  >
                     <Show
                       when={debouncedSearchQuery().length > 0}
                       fallback={t('documents.list.search.total-count-no-query', {
@@ -691,21 +746,23 @@ export const DocumentsPage: Component = () => {
             >
               <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm flex-1">
                 <span class="font-medium">
-                  <Show
-                    when={getSelectAllMatchingQuery()}
-                    fallback={t('documents.list.batch.selected-count', {
-                      count: getEffectiveCount(),
-                    })}
-                  >
+                  <Show when={getSelectedFolderIds().length === 0} fallback={mixedSelectionLabel()}>
                     <Show
-                      when={debouncedSearchQuery().length > 0}
-                      fallback={t('documents.list.batch.all-selected', {
+                      when={getSelectAllMatchingQuery()}
+                      fallback={t('documents.list.batch.selected-count', {
                         count: getEffectiveCount(),
                       })}
                     >
-                      {t('documents.list.batch.all-matching-selected', {
-                        count: getEffectiveCount(),
-                      })}
+                      <Show
+                        when={debouncedSearchQuery().length > 0}
+                        fallback={t('documents.list.batch.all-selected', {
+                          count: getEffectiveCount(),
+                        })}
+                      >
+                        {t('documents.list.batch.all-matching-selected', {
+                          count: getEffectiveCount(),
+                        })}
+                      </Show>
                     </Show>
                   </Show>
                 </span>
@@ -731,16 +788,18 @@ export const DocumentsPage: Component = () => {
                 </Show>
 
                 <div class="flex items-center gap-2 ml-auto">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void handleBatchDownload()}
-                    isLoading={Boolean(downloadStatus())}
-                    title="Download the selected files (more than one downloads as a ZIP)"
-                  >
-                    <div class="i-tabler-download size-4 mr-2" />
-                    Download
-                  </Button>
+                  <Show when={hasFileSelection() && getSelectedFolderIds().length === 0}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void handleBatchDownload()}
+                      isLoading={Boolean(downloadStatus())}
+                      title="Download the selected files (more than one downloads as a ZIP)"
+                    >
+                      <div class="i-tabler-download size-4 mr-2" />
+                      Download
+                    </Button>
+                  </Show>
                   <Button
                     variant="outline"
                     size="sm"
@@ -753,27 +812,42 @@ export const DocumentsPage: Component = () => {
                     <div class="i-tabler-folder-symlink size-4 mr-2" />
                     Move to…
                   </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setTagDialogOpen(true)}
-                    disabled={tagMutation.isPending || trashMutation.isPending}
-                  >
-                    <div class="i-tabler-tag size-4 mr-2" />
-                    {t('documents.list.batch.tag-action')}
-                  </Button>
+                  <Show when={hasFileSelection() && getSelectedFolderIds().length === 0}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setRenameOpen(true)}
+                      disabled={
+                        getSelectAllMatchingQuery() ||
+                        getSelectedIds().length > MAX_RENAME_SUGGESTIONS
+                      }
+                      title={`AI suggests names from each file's text or transcript (up to ${MAX_RENAME_SUGGESTIONS} files)`}
+                    >
+                      <div class="i-tabler-sparkles size-4 mr-2" />
+                      Suggest names
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setTagDialogOpen(true)}
+                      disabled={tagMutation.isPending || trashMutation.isPending}
+                    >
+                      <div class="i-tabler-tag size-4 mr-2" />
+                      {t('documents.list.batch.tag-action')}
+                    </Button>
 
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleBatchTrash}
-                    isLoading={trashMutation.isPending}
-                    disabled={tagMutation.isPending}
-                    class="text-red-500 hover:text-red-600"
-                  >
-                    <div class="i-tabler-trash size-4 mr-2" />
-                    {t('documents.list.batch.trash-action')}
-                  </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleBatchTrash}
+                      isLoading={trashMutation.isPending}
+                      disabled={tagMutation.isPending}
+                      class="text-red-500 hover:text-red-600"
+                    >
+                      <div class="i-tabler-trash size-4 mr-2" />
+                      {t('documents.list.batch.trash-action')}
+                    </Button>
+                  </Show>
 
                   <Button
                     variant="ghost"
@@ -873,7 +947,16 @@ export const DocumentsPage: Component = () => {
             open={moveOpen()}
             onOpenChange={setMoveOpen}
             filter={getBatchFilter()}
+            folderIds={getSelectedFolderIds()}
+            fileCount={getEffectiveCount()}
             onMoved={clearSelection}
+          />
+          <DocumentRenameSuggestionsDialog
+            organizationId={params.organizationId}
+            open={renameOpen()}
+            onOpenChange={setRenameOpen}
+            documentIds={getSelectedIds()}
+            onApplied={clearSelection}
           />
           <DocumentsBatchTagDialog
             open={getTagDialogOpen()}

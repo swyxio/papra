@@ -1,11 +1,15 @@
 import type { Component } from 'solid-js';
 import type { BatchTargetFilter } from '../documents-batch.services';
-import { createEffect, createSignal, For, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, on, Show } from 'solid-js';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/solid-query';
 import {
+  driveBase,
   fetchFolders,
   folderPath,
 } from '@/modules/drive-collaboration/drive-collaboration.services';
+import { blockedMoveTargets } from '@/modules/drive-collaboration/drive-folders.models';
+import { apiClient } from '@/modules/shared/http/api-client';
+import { getHttpErrorMessage } from '@/modules/shared/http/http-errors';
 import { Button } from '@/modules/ui/components/button';
 import {
   Dialog,
@@ -23,6 +27,8 @@ export const DocumentMoveDialog: Component<{
   open: boolean;
   onOpenChange: (open: boolean) => void;
   filter?: BatchTargetFilter;
+  folderIds?: string[];
+  fileCount?: number;
   destinationFolderId?: string;
   onMoved?: () => void;
 }> = (props) => {
@@ -47,13 +53,56 @@ export const DocumentMoveDialog: Component<{
       }),
     enabled: props.open && !props.filter,
   }));
+  const batch = () => Boolean(props.filter || props.folderIds?.length);
+  const blocked = createMemo(() =>
+    blockedMoveTargets(folders.data?.folders ?? [], props.folderIds ?? []),
+  );
+  const [failedFolders, setFailedFolders] = createSignal<string[]>([]);
+  // Items already moved by an earlier, partially failed attempt are not moved again on retry.
+  const [movedFolders, setMovedFolders] = createSignal<string[]>([]);
+  const [movedFiles, setMovedFiles] = createSignal(false);
+  createEffect(
+    on(
+      destination,
+      () => {
+        setMovedFolders([]);
+        setMovedFiles(false);
+      },
+      { defer: true },
+    ),
+  );
   const move = useMutation(() => ({
-    mutationFn: async () =>
-      batchMoveDocuments({
-        organizationId: props.organizationId,
-        filter: props.filter ?? { documentIds: selected() },
-        folderId: props.destinationFolderId ?? destination(),
-      }),
+    mutationFn: async () => {
+      const folderId = props.destinationFolderId ?? destination();
+      if (!movedFiles() && (props.filter || !batch())) {
+        await batchMoveDocuments({
+          organizationId: props.organizationId,
+          filter: props.filter ?? { documentIds: selected() },
+          folderId,
+        });
+        setMovedFiles(true);
+      }
+      const failed: string[] = [];
+      for (const id of props.folderIds ?? []) {
+        if (movedFolders().includes(id)) continue;
+        try {
+          await apiClient({
+            method: 'PATCH',
+            path: `${driveBase(props.organizationId)}/folders/${id}`,
+            body: { parentId: folderId },
+          });
+          setMovedFolders((done) => [...done, id]);
+        } catch (error) {
+          const name = folders.data?.folders.find((folder) => folder.id === id)?.name ?? id;
+          failed.push(`${name}: ${getHttpErrorMessage(error)}`);
+        }
+      }
+      setFailedFolders(failed);
+      if (failed.length) {
+        await client.invalidateQueries({ queryKey: ['organizations', props.organizationId] });
+        throw new Error('Some folders could not be moved');
+      }
+    },
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ['organizations', props.organizationId] });
       props.onMoved?.();
@@ -66,6 +115,9 @@ export const DocumentMoveDialog: Component<{
       setSelected([]);
       setSearch('');
       setPage(0);
+      setFailedFolders([]);
+      setMovedFolders([]);
+      setMovedFiles(false);
       move.reset();
     }
   });
@@ -73,6 +125,16 @@ export const DocumentMoveDialog: Component<{
     folders.data?.folders.find(
       (folder) => folder.id === (props.destinationFolderId ?? destination()),
     );
+  const moveSummary = () => {
+    const folderCount = props.folderIds?.length ?? 0;
+    const fileCount = props.fileCount ?? 0;
+    return [
+      fileCount && `${fileCount} ${fileCount === 1 ? 'file' : 'files'}`,
+      folderCount && `${folderCount} ${folderCount === 1 ? 'folder' : 'folders'}`,
+    ]
+      .filter(Boolean)
+      .join(' and ');
+  };
   return (
     <Dialog
       open={props.open}
@@ -83,7 +145,11 @@ export const DocumentMoveDialog: Component<{
       <DialogContent class="sm:max-w-[560px]">
         <DialogHeader>
           <DialogTitle>
-            {props.destinationFolderId ? 'Move existing files here' : 'Move to folder'}
+            {props.destinationFolderId
+              ? 'Move existing files here'
+              : props.folderIds?.length
+                ? `Move ${moveSummary()}`
+                : 'Move to folder'}
           </DialogTitle>
           <DialogDescription>
             Moves the original files. Permanent links stay the same. Access follows the destination
@@ -109,7 +175,11 @@ export const DocumentMoveDialog: Component<{
               disabled={move.isPending}
             >
               <option value="">Choose a folder…</option>
-              <For each={folders.data?.folders.filter((folder) => folder.canWrite)}>
+              <For
+                each={folders.data?.folders.filter(
+                  (folder) => folder.canWrite && !blocked().has(folder.id),
+                )}
+              >
                 {(folder) => (
                   <option value={folder.id}>
                     {folderPath(folder, folders.data?.folders ?? [])}
@@ -119,7 +189,7 @@ export const DocumentMoveDialog: Component<{
             </select>
           </label>
         </Show>
-        <Show when={!props.filter}>
+        <Show when={!batch()}>
           <input
             aria-label="Search files to move"
             placeholder="Search files across this space…"
@@ -200,13 +270,25 @@ export const DocumentMoveDialog: Component<{
             This folder is restricted. Members without access to it will no longer see these files.
           </p>
         </Show>
-        <Show when={move.isError || folders.isError || files.isError}>
-          <p role="alert" class="text-sm text-red-500">
-            Could not{' '}
-            {move.isError
-              ? 'move files. Check that you can edit every selected file and the destination folder, then retry.'
-              : 'load folders or files. Close this dialog and try again.'}
-          </p>
+        <Show
+          when={failedFolders().length}
+          fallback={
+            <Show when={move.isError || folders.isError || files.isError}>
+              <p role="alert" class="text-sm text-red-500">
+                Could not{' '}
+                {move.isError
+                  ? 'move files. Check that you can edit every selected file and the destination folder, then retry.'
+                  : 'load folders or files. Close this dialog and try again.'}
+              </p>
+            </Show>
+          }
+        >
+          <div role="alert" class="text-sm text-red-500">
+            <p>Everything else moved. These folders could not be moved:</p>
+            <ul class="mt-1 list-disc pl-5 break-words">
+              <For each={failedFolders()}>{(failure) => <li>{failure}</li>}</For>
+            </ul>
+          </div>
         </Show>
         <DialogFooter>
           <Button
@@ -217,13 +299,11 @@ export const DocumentMoveDialog: Component<{
             Cancel
           </Button>
           <Button
-            disabled={
-              !target()?.canWrite || (!props.filter && !selected().length) || move.isPending
-            }
+            disabled={!target()?.canWrite || (!batch() && !selected().length) || move.isPending}
             isLoading={move.isPending}
             onClick={() => move.mutate()}
           >
-            Move files
+            {props.folderIds?.length ? 'Move' : 'Move files'}
           </Button>
         </DialogFooter>
       </DialogContent>

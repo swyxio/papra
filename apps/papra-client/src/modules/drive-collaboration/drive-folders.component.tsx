@@ -1,5 +1,5 @@
 import type { DriveFolder } from './drive-collaboration.services';
-import type { Component } from 'solid-js';
+import type { Accessor, Component, Setter } from 'solid-js';
 import { A, useSearchParams } from '@solidjs/router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/solid-query';
 import { createEffect, createSignal, For, Show } from 'solid-js';
@@ -28,7 +28,8 @@ import {
   folderIsDescendant,
   folderPath,
 } from './drive-collaboration.services';
-import { isPendingFolderId, pendingFolderPrefix } from './drive-folders.models';
+import { isPendingFolderId, pendingFolderPrefix, selectRange } from './drive-folders.models';
+import { Checkbox, CheckboxControl } from '../ui/components/checkbox';
 import { DocumentMoveDialog } from '../documents/components/document-move-dialog.component';
 import { DriveInbox } from './drive-inbox.component';
 import { FolderUploads } from './folder-uploads.component';
@@ -317,7 +318,11 @@ const FolderAccessPanel: Component<{ organizationId: string; folderId: string }>
   );
 };
 
-export const DriveFolders: Component<{ organizationId: string }> = (props) => {
+export const DriveFolders: Component<{
+  organizationId: string;
+  getFolderSelection?: Accessor<Record<string, boolean>>;
+  setFolderSelection?: Setter<Record<string, boolean>>;
+}> = (props) => {
   const client = useQueryClient();
   const [params, setParams] = useSearchParams();
   const [name, setName] = createSignal('');
@@ -564,6 +569,18 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
       setDownloading(undefined);
     }
   };
+  let selectionAnchor: string | undefined;
+  let shiftKey = false;
+  const toggleFolder = (folder: DriveFolder, selected: boolean) => {
+    const anchorId = shiftKey ? selectionAnchor : undefined;
+    selectionAnchor = folder.id;
+    const ids = children()
+      .filter((child) => child.canWrite)
+      .map((child) => child.id);
+    props.setFolderSelection?.((selection) =>
+      selectRange({ ids, anchorId, targetId: folder.id, selected, selection }),
+    );
+  };
   const openFolder = (id: string) =>
     setParams({ folder: id, scope: undefined, query: undefined, page: undefined });
   return (
@@ -596,15 +613,16 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
             <Show when={!isPendingFolderId(folderId()) && current()}>
               {(folder) => (
                 <Button
-                  variant="outline"
-                  size="sm"
+                  variant="ghost"
+                  size="icon"
+                  class="size-8"
                   isLoading={downloading()?.id === folder().id}
                   disabled={Boolean(downloading())}
                   onClick={() => void downloadFolder(folder())}
                   title="Download this folder and its subfolders as a ZIP"
+                  aria-label="Download folder"
                 >
-                  <div class="i-tabler-download size-4 mr-1.5" />
-                  Download folder
+                  <div class="i-tabler-download size-4" />
                 </Button>
               )}
             </Show>
@@ -614,7 +632,7 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
                 New folder
               </Button>
               <Button variant="outline" size="sm" onClick={() => setMoveFilesOpen(true)}>
-                Move existing files here
+                Move files here
               </Button>
             </Show>
             <Show
@@ -768,7 +786,30 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
           <div class="divide-y rounded-lg border">
             <For each={children()}>
               {(folder) => (
-                <div class="flex items-center hover:bg-muted/40">
+                <div
+                  class="flex items-center hover:bg-muted/40"
+                  data-state={props.getFolderSelection?.()[folder.id] ? 'selected' : undefined}
+                  classList={{ 'bg-muted/60': Boolean(props.getFolderSelection?.()[folder.id]) }}
+                >
+                  <Show when={props.setFolderSelection}>
+                    <div class="flex w-10 shrink-0 justify-center pl-1">
+                      <Show when={folder.canWrite}>
+                        <Checkbox
+                          checked={Boolean(props.getFolderSelection?.()[folder.id])}
+                          onPointerDown={(event: PointerEvent) => (shiftKey = event.shiftKey)}
+                          onMouseDown={(event: MouseEvent) =>
+                            event.shiftKey && event.preventDefault()
+                          }
+                          onKeyDown={(event: KeyboardEvent) => (shiftKey = event.shiftKey)}
+                          onChange={(value) => toggleFolder(folder, value)}
+                          aria-label={`Select ${folder.name}`}
+                          title="Shift-click to select a range"
+                        >
+                          <CheckboxControl />
+                        </Checkbox>
+                      </Show>
+                    </div>
+                  </Show>
                   <button
                     class="flex min-w-0 flex-1 items-center gap-3 px-3 py-3 text-left focus-visible:outline"
                     onClick={() => openFolder(folder.id)}

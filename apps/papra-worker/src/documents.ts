@@ -16,6 +16,9 @@ import { keywordPredicate } from './keyword';
 import { modifiedBySQL, modifiedAtSQL, actorNameSQL } from './document-attribution';
 import { fetchTranscript } from './transcripts';
 import { canSummarizeTranscript, readRecordingNotes } from './recording-notes';
+import { reserveDocumentAnswer } from './ai-gateway';
+import type { RenameSource } from './rename-suggestions';
+import { MAX_RENAME_BATCH, excerptOf, suggestDocumentNames } from './rename-suggestions';
 
 const base = '/api/organizations/:org/documents';
 const smallFileLimit = 32 * 1024 ** 2;
@@ -552,6 +555,59 @@ export function registerDocumentRoutes(app: App) {
     ]);
     await enqueueVersion(c.env, v.id, 'index');
     return c.json({ document: await formatDocument(c.env, (await getDocument(c.env, d.id))!) });
+  });
+  app.post(`${base}/batch/suggest-names`, async (c) => {
+    const b = await c.req.json(),
+      ids = b?.documentIds;
+    if (!Array.isArray(ids) || !ids.length || ids.some((x) => typeof x !== 'string'))
+      throw error(400, 'Select files to rename');
+    if (ids.length > MAX_RENAME_BATCH)
+      throw error(400, `Select at most ${MAX_RENAME_BATCH} files at a time`);
+    const folders = await all<{ id: string; parent_id: string | null; name: string }>(
+      c.env,
+      'SELECT id,parent_id,name FROM folders WHERE organization_id=?',
+      c.req.param('org'),
+    );
+    const byId = new Map(folders.map((f) => [f.id, f]));
+    const path = (folderId: string | null) => {
+      const names: string[] = [];
+      let f = folderId ? byId.get(folderId) : undefined;
+      while (f && names.length < 20) {
+        names.unshift(f.name);
+        f = f.parent_id ? byId.get(f.parent_id) : undefined;
+      }
+      return names.join(' / ');
+    };
+    const sources: RenameSource[] = [],
+      withNotes = new Set<string>();
+    for (const doc of [...new Set(ids as string[])]) {
+      const d = await document(c.env, c.get('identity'), c.req.param('org'), doc, 'write');
+      if ((d.notes as string | null)?.trim()) withNotes.add(d.id);
+      let text = d.content as string | null;
+      if (!text?.trim() && d.current_version_id)
+        text = (await fetchTranscript(c.env, d.current_version_id))?.text ?? '';
+      sources.push({
+        id: d.id,
+        name: d.name,
+        mimeType: d.mime_type,
+        folder: path(d.home_folder_id),
+        excerpt: excerptOf(text),
+      });
+    }
+    if (!(await reserveDocumentAnswer(c.env, sources.length)))
+      throw error(429, 'Daily AI limit reached');
+    const suggestions = await suggestDocumentNames(c.env, sources);
+    return c.json({
+      suggestions: suggestions.map((s) => {
+        const source = sources.find((x) => x.id === s.documentId)!;
+        return {
+          ...s,
+          currentName: source.name,
+          hasContent: Boolean(source.excerpt),
+          hasNotes: withNotes.has(s.documentId),
+        };
+      }),
+    });
   });
   for (const kind of ['trash', 'tags', 'move'])
     app.post(`${base}/batch/${kind}`, async (c) => {

@@ -49,3 +49,26 @@ export async function batchMoveDocuments({
     body: { filter, folderId },
   });
 }
+
+export type RenameSuggestion = {
+  documentId: string;
+  currentName: string;
+  name: string;
+  description: string;
+  hasContent: boolean;
+  hasNotes: boolean;
+};
+
+export async function suggestDocumentNames({
+  organizationId,
+  documentIds,
+}: {
+  organizationId: string;
+  documentIds: string[];
+}) {
+  return apiClient<{ suggestions: RenameSuggestion[] }>({
+    method: 'POST',
+    path: `/api/organizations/${organizationId}/documents/batch/suggest-names`,
+    body: { documentIds },
+  });
+}

@@ -9,12 +9,12 @@ export const AI_GATEWAY = {
   skipCache: true,
 } satisfies GatewayOptions;
 
-export async function reserveDocumentAnswer(env: Env) {
+export async function reserveDocumentAnswer(env: Env, count = 1) {
   const day = new Date().toISOString().slice(0, 10);
   await run(env, 'INSERT OR IGNORE INTO ai_usage(day) VALUES(?)', day);
   return env.DB.prepare(
-    'UPDATE ai_usage SET chat_requests=chat_requests+1 WHERE day=? AND chat_requests<100 RETURNING day',
+    'UPDATE ai_usage SET chat_requests=chat_requests+? WHERE day=? AND chat_requests+?<=100 RETURNING day',
   )
-    .bind(day)
+    .bind(count, day, count)
     .first();
 }
