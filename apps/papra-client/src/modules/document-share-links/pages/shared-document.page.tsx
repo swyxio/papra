@@ -252,7 +252,7 @@ const SharedDocumentCard: Component<{
           >
             <p>
               {item().handedOff
-                ? 'The download was handed to your browser.'
+                ? 'The download was handed to your browser. Open its Downloads panel for progress, pauses and retries.'
                 : 'The download could not be started.'}
             </p>
             <ReportProblem

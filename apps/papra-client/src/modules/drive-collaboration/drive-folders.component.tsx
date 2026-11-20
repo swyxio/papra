@@ -17,10 +17,12 @@ import {
 import { isPendingFolderId, pendingFolderPrefix } from './drive-folders.models';
 import { DocumentMoveDialog } from '../documents/components/document-move-dialog.component';
 import { DriveInbox } from './drive-inbox.component';
+import { FolderUploads } from './folder-uploads.component';
 import {
   folderTree,
   listFolderDocuments,
   saveDocumentsZip,
+  zipProgressText,
 } from '../documents/components/drive-zip-download';
 import { getHttpErrorMessage } from '../shared/http/http-errors';
 
@@ -474,10 +476,8 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
         organizationId: props.organizationId,
         fileName: `${folder.name}.zip`,
         directories: tree.map((entry) => entry.directory).filter(Boolean),
-        onProgress: ({ done, current }) => {
-          if (current)
-            setDownloading({ id: folder.id, status: `Downloading file ${done + 1}: ${current}` });
-        },
+        onProgress: (progress) =>
+          setDownloading({ id: folder.id, status: zipProgressText(progress) }),
         collect: async (add) => {
           for (const { folder: entry, directory } of tree)
             for await (const document of listFolderDocuments(props.organizationId, entry.id))
@@ -667,7 +667,7 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
         />
         <Show when={downloading()}>
           {(state) => (
-            <p role="status" class="truncate text-xs text-muted-foreground">
+            <p role="status" class="break-words text-xs text-muted-foreground">
               {state().status}
             </p>
           )}
@@ -683,6 +683,9 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
               · {formatBytes({ bytes: folder().documentsSize })} including subfolders
             </p>
           )}
+        </Show>
+        <Show when={current() && !isPendingFolderId(folderId()) && folderId()} keyed>
+          {(id) => <FolderUploads organizationId={props.organizationId} folderId={id} />}
         </Show>
         <Show when={folders.isPending}>
           <p class="text-sm text-muted-foreground" role="status">

@@ -6,7 +6,7 @@ import { Button } from '@/modules/ui/components/button';
 import { apiClient } from '@/modules/shared/http/api-client';
 import type { Document } from '../documents.types';
 import { fetchOrganizationDocuments } from '../documents.services';
-import { fetchExportStream } from './drive-export.services';
+import { downloadProgressText, fetchExportStream } from './drive-export.services';
 
 type SaveWindow = Window & {
   showSaveFilePicker?: (options: Record<string, unknown>) => Promise<{
@@ -61,14 +61,21 @@ export function DriveExport(props: { organizationId: string }) {
             document.id,
             entry.currentVersionId,
           );
-          await writer.add(`files/${name}`, fetchExportStream(url, entry.originalSize), {
-            level: 0,
-          });
+          await writer.add(
+            `files/${name}`,
+            fetchExportStream(url, entry.originalSize, undefined, (progress) =>
+              setStatus(
+                `${done + 1} of ${total} · ${entry.name} · ${downloadProgressText(progress)}`,
+              ),
+            ),
+            { level: 0 },
+          );
           manifest.push(entry);
           done++;
         }
         pageIndex++;
       }
+      setStatus(`Saving ZIP · ${done} files packed`);
       await writer.add(
         'metadata.json',
         new TextReader(

@@ -3,6 +3,7 @@ import type { App, Env, Identity } from './types';
 import { all, first, id, error, formatDocument, getDocument } from './db';
 import {
   ensureDocumentAccess,
+  canReadFolder,
   canWriteFolder,
   ensureOrganizationMember,
   organizationHomeFolderId,
@@ -145,6 +146,48 @@ async function prepareCompletion(env: Env, user: Identity, u: Record<string, any
   return stmts;
 }
 export function registerUploadRoutes(app: App) {
+  app.get('/api/organizations/:org/folders/:folderId/uploads', async (c) => {
+    const identity = c.get('identity');
+    if (identity.serviceScope) throw error(403, 'Upload activity requires a user session');
+    const org = c.req.param('org');
+    await ensureOrganizationMember(c.env, identity, org);
+    const folder = await canReadFolder(c.env, identity, c.req.param('folderId'));
+    if (folder.organization_id !== org) throw error(404, 'Folder not found');
+    const rows = await all<{
+      id: string;
+      file_name: string;
+      size: number;
+      created_at: number;
+      uploader: string | null;
+      bytes: number | null;
+      progress_at: number | null;
+      interrupted: number | null;
+    }>(
+      c.env,
+      `SELECT u.id,u.file_name,u.size,u.created_at,usr.name AS uploader,
+              p.bytes,p.updated_at AS progress_at,p.interrupted
+       FROM uploads u LEFT JOIN users usr ON usr.id=u.user_id
+       LEFT JOIN upload_shares p ON p.upload_id=u.id
+       WHERE u.organization_id=? AND u.folder_id=? AND u.status='uploading' AND u.replacement=0
+       ORDER BY u.created_at DESC,u.id LIMIT 101`,
+      org,
+      folder.id,
+    );
+    c.header('Cache-Control', 'private, no-store');
+    return c.json({
+      uploads: rows.slice(0, 100).map((row) => ({
+        id: row.id,
+        fileName: row.file_name,
+        size: row.size,
+        createdAt: row.created_at,
+        uploader: row.uploader,
+        bytes: row.bytes,
+        updatedAt: row.progress_at,
+        interrupted: row.interrupted === 1,
+      })),
+      hasMore: rows.length > 100,
+    });
+  });
   app.get(base, async (c) => {
     await ensureOrganizationMember(c.env, c.get('identity'), c.req.param('org'));
     const uploads = await all(
