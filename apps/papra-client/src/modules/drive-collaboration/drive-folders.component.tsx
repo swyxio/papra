@@ -6,6 +6,20 @@ import { createEffect, createSignal, For, Show } from 'solid-js';
 import { formatBytes } from '@corentinth/chisels';
 import { apiClient } from '../shared/http/api-client';
 import { Button } from '../ui/components/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../ui/components/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../ui/components/dropdown-menu';
+import { useConfirmModal } from '../shared/confirm';
 import { createToast } from '../ui/components/sonner';
 import {
   documentDriveBase,
@@ -433,21 +447,72 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
           'Could not update folder. Check your access, duplicate names or a move inside itself.',
       }),
   }));
+  const { confirm } = useConfirmModal();
+  const subtreeOf = (root: DriveFolder) => {
+    const all = folders.data?.folders ?? [];
+    const result = [root];
+    for (let index = 0; index < result.length; index++)
+      result.push(...all.filter((folder) => folder.parentId === result[index]!.id));
+    return result;
+  };
   const remove = useMutation(() => ({
-    mutationFn: async () =>
-      apiClient({
+    mutationFn: async (folder: DriveFolder) =>
+      apiClient<{ trashedDocuments: number }>({
         method: 'DELETE',
-        path: `${driveBase(props.organizationId)}/folders/${folderId()}`,
+        path: `${driveBase(props.organizationId)}/folders/${folder.id}?contents=trash`,
       }),
-    onSuccess: () => {
-      setParams({ folder: current()?.parentId ?? undefined });
+    onSuccess: (result, folder) => {
+      if (subtreeOf(folder).some((entry) => entry.id === folderId()))
+        setParams({ folder: folder.parentId ?? undefined });
+      createToast({
+        type: 'success',
+        message: result.trashedDocuments
+          ? `Deleted "${folder.name}". ${result.trashedDocuments} ${result.trashedDocuments === 1 ? 'file is' : 'files are'} in Trash.`
+          : `Deleted "${folder.name}".`,
+      });
       invalidate();
     },
-    onError: () =>
+    onError: (error) =>
       createToast({
         type: 'error',
-        message:
-          'Only empty folders can be deleted. Move files, shortcuts and subfolders out first.',
+        message: `Could not delete folder: ${getHttpErrorMessage(error)}`,
+      }),
+  }));
+  const deleteFolder = async (folder: DriveFolder) => {
+    const subtree = subtreeOf(folder);
+    const files = subtree.reduce((total, entry) => total + entry.documentsCount, 0);
+    const parent = folders.data?.folders.find((entry) => entry.id === folder.parentId);
+    const confirmed = await confirm({
+      title: `Delete "${folder.name}"?`,
+      message:
+        files || subtree.length > 1
+          ? `${files} ${files === 1 ? 'file' : 'files'} will move to Trash and ${subtree.length - 1} ${subtree.length === 2 ? 'subfolder' : 'subfolders'} will be deleted. Files restored from Trash go back to "${parent?.name ?? 'Home'}".`
+          : 'This empty folder will be deleted.',
+      confirmButton: { text: 'Delete folder', variant: 'destructive' },
+      cancelButton: { text: 'Cancel' },
+    });
+    if (confirmed) remove.mutate(folder);
+  };
+  const [folderDialog, setFolderDialog] = createSignal<{
+    kind: 'rename' | 'move';
+    folder: DriveFolder;
+    value: string;
+  }>();
+  const editFolder = useMutation(() => ({
+    mutationFn: async (input: { id: string; changes: { name?: string; parentId?: string } }) =>
+      apiClient({
+        method: 'PATCH',
+        path: `${driveBase(props.organizationId)}/folders/${input.id}`,
+        body: input.changes,
+      }),
+    onSuccess: () => {
+      setFolderDialog(undefined);
+      invalidate();
+    },
+    onError: (error) =>
+      createToast({
+        type: 'error',
+        message: `Could not update folder: ${getHttpErrorMessage(error)}`,
       }),
   }));
   const ancestors = () => {
@@ -609,9 +674,9 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
                       variant="outline"
                       size="sm"
                       disabled={remove.isPending}
-                      onClick={() => remove.mutate()}
+                      onClick={() => void deleteFolder(current()!)}
                     >
-                      Delete empty folder
+                      Delete folder
                     </Button>
                   </Show>
                   <Show
@@ -744,12 +809,138 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
                       <div class="i-tabler-download size-4" />
                     </Show>
                   </Button>
+                  <Show when={folder.canWrite}>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        as={(triggerProps: object) => (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            class="mr-2 size-8 shrink-0"
+                            aria-label={`Actions for ${folder.name}`}
+                            {...triggerProps}
+                          >
+                            <div class="i-tabler-dots-vertical size-4" />
+                          </Button>
+                        )}
+                      />
+                      <DropdownMenuContent class="w-44">
+                        <DropdownMenuItem
+                          class="cursor-pointer"
+                          onSelect={() =>
+                            setFolderDialog({ kind: 'rename', folder, value: folder.name })
+                          }
+                        >
+                          <div class="i-tabler-pencil size-4 mr-2" />
+                          Rename
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          class="cursor-pointer"
+                          onSelect={() =>
+                            setFolderDialog({ kind: 'move', folder, value: folder.parentId ?? '' })
+                          }
+                        >
+                          <div class="i-tabler-folder-symlink size-4 mr-2" />
+                          Move to…
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          class="cursor-pointer text-destructive"
+                          onSelect={() => void deleteFolder(folder)}
+                        >
+                          <div class="i-tabler-trash size-4 mr-2" />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </Show>
                 </div>
               )}
             </For>
           </div>
         </Show>
       </section>
+      <Dialog
+        open={Boolean(folderDialog())}
+        onOpenChange={(open) => !open && setFolderDialog(undefined)}
+      >
+        <DialogContent class="sm:max-w-[420px]">
+          <Show when={folderDialog()}>
+            {(state) => (
+              <form
+                class="space-y-4"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const value = state().value.trim();
+                  if (!value) return;
+                  editFolder.mutate({
+                    id: state().folder.id,
+                    changes: state().kind === 'rename' ? { name: value } : { parentId: value },
+                  });
+                }}
+              >
+                <DialogHeader>
+                  <DialogTitle>
+                    {state().kind === 'rename' ? 'Rename' : 'Move'} "{state().folder.name}"
+                  </DialogTitle>
+                </DialogHeader>
+                <Show
+                  when={state().kind === 'move'}
+                  fallback={
+                    <input
+                      aria-label="Folder name"
+                      class="w-full rounded-md border bg-background p-2 text-sm"
+                      maxLength={200}
+                      value={state().value}
+                      onInput={(event) =>
+                        setFolderDialog({ ...state(), value: event.currentTarget.value })
+                      }
+                    />
+                  }
+                >
+                  <select
+                    aria-label="Destination folder"
+                    class="w-full rounded-md border bg-background p-2 text-sm"
+                    value={state().value}
+                    onChange={(event) =>
+                      setFolderDialog({ ...state(), value: event.currentTarget.value })
+                    }
+                  >
+                    <For
+                      each={folders.data?.folders.filter(
+                        (candidate) =>
+                          candidate.canWrite &&
+                          !folderIsDescendant(
+                            candidate,
+                            state().folder.id,
+                            folders.data?.folders ?? [],
+                          ),
+                      )}
+                    >
+                      {(candidate) => (
+                        <option value={candidate.id}>
+                          {folderPath(candidate, folders.data?.folders ?? [])}
+                        </option>
+                      )}
+                    </For>
+                  </select>
+                </Show>
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setFolderDialog(undefined)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button type="submit" isLoading={editFolder.isPending}>
+                    {state().kind === 'rename' ? 'Rename' : 'Move'}
+                  </Button>
+                </DialogFooter>
+              </form>
+            )}
+          </Show>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };

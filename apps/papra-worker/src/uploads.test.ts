@@ -181,7 +181,9 @@ test('folder members can see unfinished upload reports only in folders they can 
     uploads: [{ id: privateUpload, bytes: 4 }],
   });
   // Readable subfolders are included, labelled with their folder, and readers cannot remove them.
-  expect((await (await f.folderUploads('fld_home_org')).json()).uploads).toContainEqual(
+  expect(
+    ((await (await f.folderUploads('fld_home_org')).json()) as { uploads: unknown[] }).uploads,
+  ).toContainEqual(
     expect.objectContaining({ id: privateUpload, folderId: 'private', canRemove: false }),
   );
   const remove = async (id: string) =>
