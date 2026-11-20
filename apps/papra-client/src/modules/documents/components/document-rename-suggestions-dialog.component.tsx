@@ -1,6 +1,6 @@
 import type { Component } from 'solid-js';
 import type { RenameSuggestion } from '../documents-batch.services';
-import { createEffect, createSignal, For, Show } from 'solid-js';
+import { createEffect, createSignal, Index, Show } from 'solid-js';
 import { useMutation, useQueryClient } from '@tanstack/solid-query';
 import { getHttpErrorMessage } from '@/modules/shared/http/http-errors';
 import { Button } from '@/modules/ui/components/button';
@@ -111,34 +111,34 @@ export const DocumentRenameSuggestionsDialog: Component<{
         </Show>
         <Show when={rows().length > 0}>
           <div class="max-h-[60vh] overflow-y-auto divide-y rounded-md border">
-            <For each={rows()}>
+            <Index each={rows()}>
               {(row) => (
                 <div class="flex gap-3 p-3">
                   <input
                     type="checkbox"
                     class="mt-2 size-4"
-                    aria-label={`Rename ${row.currentName}`}
-                    checked={row.apply}
+                    aria-label={`Rename ${row().currentName}`}
+                    checked={row().apply}
                     onChange={(event) =>
-                      update(row.documentId, { apply: event.currentTarget.checked })
+                      update(row().documentId, { apply: event.currentTarget.checked })
                     }
                   />
                   <div class="min-w-0 flex-1 space-y-1">
-                    <div class="truncate text-xs text-muted-foreground" title={row.currentName}>
-                      {row.currentName}
+                    <div class="truncate text-xs text-muted-foreground" title={row().currentName}>
+                      {row().currentName}
                     </div>
                     <input
-                      aria-label={`New name for ${row.currentName}`}
+                      aria-label={`New name for ${row().currentName}`}
                       class="w-full rounded-md border bg-background px-2 py-1 text-sm font-medium"
-                      value={row.name}
+                      value={row().name}
                       maxLength={512}
                       onInput={(event) =>
-                        update(row.documentId, { name: event.currentTarget.value, apply: true })
+                        update(row().documentId, { name: event.currentTarget.value, apply: true })
                       }
                     />
                     <p class="text-xs text-muted-foreground">
-                      {row.description}
-                      <Show when={!row.hasContent}>
+                      {row().description}
+                      <Show when={!row().hasContent}>
                         <span class="ml-1 italic">
                           (no text or transcript yet; based on metadata)
                         </span>
@@ -147,7 +147,7 @@ export const DocumentRenameSuggestionsDialog: Component<{
                   </div>
                 </div>
               )}
-            </For>
+            </Index>
           </div>
           <label class="flex items-center gap-2 text-sm">
             <input
