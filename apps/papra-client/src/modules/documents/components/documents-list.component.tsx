@@ -38,7 +38,16 @@ import {
   getDocumentNameExtension,
   getDocumentNameWithoutExtension,
 } from '../document.models';
+import { selectRange } from '@/modules/drive-collaboration/drive-folders.models';
+import { useQuery } from '@tanstack/solid-query';
+import {
+  fetchFolders,
+  folderPath,
+} from '@/modules/drive-collaboration/drive-collaboration.services';
 import { DocumentManagementDropdown } from './document-management-dropdown.component';
+
+// Last checkbox clicked per table, the start of a shift-click range.
+const selectionAnchors = new WeakMap<object, string>();
 
 const selectionColumn: ColumnDef<Document> = {
   id: 'select',
@@ -60,12 +69,27 @@ const selectionColumn: ColumnDef<Document> = {
   },
   cell: (props) => {
     const { t } = useI18n();
+    let shiftKey = false;
 
     return (
       <Checkbox
         checked={props.row.getIsSelected()}
-        onChange={(value) => props.row.toggleSelected(value)}
+        onPointerDown={(event: PointerEvent) => (shiftKey = event.shiftKey)}
+        onKeyDown={(event: KeyboardEvent) => (shiftKey = event.shiftKey)}
+        onChange={(value) => {
+          const anchorId = selectionAnchors.get(props.table);
+          selectionAnchors.set(props.table, props.row.id);
+          if (!shiftKey || anchorId === undefined) {
+            props.row.toggleSelected(value);
+            return;
+          }
+          const ids = props.table.getRowModel().rows.map((row) => row.id);
+          props.table.setRowSelection((selection) =>
+            selectRange({ ids, anchorId, targetId: props.row.id, selected: value, selection }),
+          );
+        }}
         aria-label={t('documents.list.select.row')}
+        title="Shift-click to select a range"
       >
         <CheckboxControl />
       </Checkbox>
@@ -96,6 +120,34 @@ export const documentDateColumn: ColumnDef<Document> = {
           {(date) => <RelativeTime date={date()} />}
         </Show>
       </span>
+    );
+  },
+};
+
+export const locationColumn: ColumnDef<Document> = {
+  id: 'location',
+  header: () => <span class="sr-only sm:not-sr-only">Location</span>,
+  enableSorting: false,
+  cell: (data) => {
+    const organizationId = data.row.original.organizationId;
+    const folders = useQuery(() => ({
+      queryKey: ['organizations', organizationId, 'folders'],
+      queryFn: async () => fetchFolders(organizationId),
+    }));
+    const folder = () =>
+      folders.data?.folders.find((item) => item.id === data.row.original.homeFolderId);
+    return (
+      <Show when={folder()}>
+        {(current) => (
+          <A
+            href={`/organizations/${organizationId}/documents?folder=${current().id}`}
+            class="hidden sm:block max-w-56 truncate text-sm text-muted-foreground hover:text-foreground hover:underline"
+            title={folderPath(current(), folders.data?.folders ?? [])}
+          >
+            {folderPath(current(), folders.data?.folders ?? [])}
+          </A>
+        )}
+      </Show>
     );
   },
 };

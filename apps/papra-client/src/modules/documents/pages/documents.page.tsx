@@ -42,6 +42,10 @@ import {
 } from '../components/documents-list.component';
 import { batchTrashDocuments, batchUpdateDocumentTags } from '../documents-batch.services';
 import {
+  DocumentRenameSuggestionsDialog,
+  MAX_RENAME_SUGGESTIONS,
+} from '../components/document-rename-suggestions-dialog.component';
+import {
   DEFAULT_DOCUMENT_SEARCH_SORT_FIELD,
   DEFAULT_DOCUMENT_SEARCH_SORT_ORDER,
   DOCUMENT_SEARCH_SORT_FIELDS,
@@ -77,6 +81,12 @@ export const DocumentsPage: Component = () => {
   const [getSelectAllMatchingQuery, setSelectAllMatchingQuery] = createSignal(false);
   const [getTagDialogOpen, setTagDialogOpen] = createSignal(false);
   const [moveOpen, setMoveOpen] = createSignal(false);
+  const [renameOpen, setRenameOpen] = createSignal(false);
+  const [getFolderSelection, setFolderSelection] = createSignal<Record<string, boolean>>({});
+  const getSelectedFolderIds = createMemo(() => {
+    const selection = getFolderSelection();
+    return Object.keys(selection).filter((id) => selection[id]);
+  });
 
   const [getSortField] = createParamSynchronizedSignal<DocumentSearchSortField>({
     paramKey: 'sortField',
@@ -248,6 +258,7 @@ export const DocumentsPage: Component = () => {
   function clearSelection() {
     setRowSelection({});
     setSelectAllMatchingQuery(false);
+    setFolderSelection({});
   }
 
   const getListingScope = createMemo(() =>
@@ -425,7 +436,20 @@ export const DocumentsPage: Component = () => {
     }
   }
 
-  const showToolbar = () => getSelectedIds().length > 0 || getSelectAllMatchingQuery();
+  const showToolbar = () =>
+    getSelectedIds().length > 0 || getSelectAllMatchingQuery() || getSelectedFolderIds().length > 0;
+  const hasFileSelection = () => getSelectedIds().length > 0 || getSelectAllMatchingQuery();
+  const mixedSelectionLabel = () => {
+    const files = getEffectiveCount();
+    const folders = getSelectedFolderIds().length;
+    return [
+      files && `${files} ${files === 1 ? 'file' : 'files'}`,
+      `${folders} ${folders === 1 ? 'folder' : 'folders'}`,
+    ]
+      .filter(Boolean)
+      .join(' and ')
+      .concat(' selected');
+  };
 
   async function handleBatchTrash() {
     const isConfirmed = await confirm({
@@ -469,7 +493,11 @@ export const DocumentsPage: Component = () => {
         </div>
       </div>
       <Show when={!allFiles()}>
-        <DriveFolders organizationId={params.organizationId} />
+        <DriveFolders
+          organizationId={params.organizationId}
+          getFolderSelection={getFolderSelection}
+          setFolderSelection={setFolderSelection}
+        />
       </Show>
       <Show when={allFiles()}>
         <p class="mb-4 text-xs text-muted-foreground">
@@ -691,21 +719,23 @@ export const DocumentsPage: Component = () => {
             >
               <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm flex-1">
                 <span class="font-medium">
-                  <Show
-                    when={getSelectAllMatchingQuery()}
-                    fallback={t('documents.list.batch.selected-count', {
-                      count: getEffectiveCount(),
-                    })}
-                  >
+                  <Show when={getSelectedFolderIds().length === 0} fallback={mixedSelectionLabel()}>
                     <Show
-                      when={debouncedSearchQuery().length > 0}
-                      fallback={t('documents.list.batch.all-selected', {
+                      when={getSelectAllMatchingQuery()}
+                      fallback={t('documents.list.batch.selected-count', {
                         count: getEffectiveCount(),
                       })}
                     >
-                      {t('documents.list.batch.all-matching-selected', {
-                        count: getEffectiveCount(),
-                      })}
+                      <Show
+                        when={debouncedSearchQuery().length > 0}
+                        fallback={t('documents.list.batch.all-selected', {
+                          count: getEffectiveCount(),
+                        })}
+                      >
+                        {t('documents.list.batch.all-matching-selected', {
+                          count: getEffectiveCount(),
+                        })}
+                      </Show>
                     </Show>
                   </Show>
                 </span>
@@ -731,16 +761,18 @@ export const DocumentsPage: Component = () => {
                 </Show>
 
                 <div class="flex items-center gap-2 ml-auto">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void handleBatchDownload()}
-                    isLoading={Boolean(downloadStatus())}
-                    title="Download the selected files (more than one downloads as a ZIP)"
-                  >
-                    <div class="i-tabler-download size-4 mr-2" />
-                    Download
-                  </Button>
+                  <Show when={hasFileSelection() && getSelectedFolderIds().length === 0}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void handleBatchDownload()}
+                      isLoading={Boolean(downloadStatus())}
+                      title="Download the selected files (more than one downloads as a ZIP)"
+                    >
+                      <div class="i-tabler-download size-4 mr-2" />
+                      Download
+                    </Button>
+                  </Show>
                   <Button
                     variant="outline"
                     size="sm"
@@ -753,27 +785,42 @@ export const DocumentsPage: Component = () => {
                     <div class="i-tabler-folder-symlink size-4 mr-2" />
                     Move to…
                   </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setTagDialogOpen(true)}
-                    disabled={tagMutation.isPending || trashMutation.isPending}
-                  >
-                    <div class="i-tabler-tag size-4 mr-2" />
-                    {t('documents.list.batch.tag-action')}
-                  </Button>
+                  <Show when={hasFileSelection() && getSelectedFolderIds().length === 0}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setRenameOpen(true)}
+                      disabled={
+                        getSelectAllMatchingQuery() ||
+                        getSelectedIds().length > MAX_RENAME_SUGGESTIONS
+                      }
+                      title={`AI suggests names from each file's text or transcript (up to ${MAX_RENAME_SUGGESTIONS} files)`}
+                    >
+                      <div class="i-tabler-sparkles size-4 mr-2" />
+                      Suggest names
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setTagDialogOpen(true)}
+                      disabled={tagMutation.isPending || trashMutation.isPending}
+                    >
+                      <div class="i-tabler-tag size-4 mr-2" />
+                      {t('documents.list.batch.tag-action')}
+                    </Button>
 
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleBatchTrash}
-                    isLoading={trashMutation.isPending}
-                    disabled={tagMutation.isPending}
-                    class="text-red-500 hover:text-red-600"
-                  >
-                    <div class="i-tabler-trash size-4 mr-2" />
-                    {t('documents.list.batch.trash-action')}
-                  </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleBatchTrash}
+                      isLoading={trashMutation.isPending}
+                      disabled={tagMutation.isPending}
+                      class="text-red-500 hover:text-red-600"
+                    >
+                      <div class="i-tabler-trash size-4 mr-2" />
+                      {t('documents.list.batch.trash-action')}
+                    </Button>
+                  </Show>
 
                   <Button
                     variant="ghost"
@@ -873,7 +920,16 @@ export const DocumentsPage: Component = () => {
             open={moveOpen()}
             onOpenChange={setMoveOpen}
             filter={getBatchFilter()}
+            folderIds={getSelectedFolderIds()}
+            fileCount={getEffectiveCount()}
             onMoved={clearSelection}
+          />
+          <DocumentRenameSuggestionsDialog
+            organizationId={params.organizationId}
+            open={renameOpen()}
+            onOpenChange={setRenameOpen}
+            documentIds={getSelectedIds()}
+            onApplied={clearSelection}
           />
           <DocumentsBatchTagDialog
             open={getTagDialogOpen()}
