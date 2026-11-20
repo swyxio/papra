@@ -1,24 +1,10 @@
-import {
-  defineConfig,
-  presetIcons,
-  presetWebFonts,
-  presetWind4,
-  transformerVariantGroup,
-} from 'unocss';
+import { defineConfig, presetIcons, presetWind4, transformerVariantGroup } from 'unocss';
 
 export default defineConfig({
-  presets: [
-    presetWind4(),
-    presetWebFonts({
-      provider: 'bunny',
-      fonts: {
-        sans: 'DM Sans:400,500,700',
-      },
-    }),
-    presetIcons(),
-  ],
+  presets: [presetWind4(), presetIcons()],
   transformers: [transformerVariantGroup()],
   theme: {
+    font: { sans: '"DM Sans", ui-sans-serif, system-ui, sans-serif' },
     colors: {
       'background': '#fbf9f7',
       'foreground': '#1c1917',
