@@ -674,15 +674,17 @@ export const DocumentsPage: Component = () => {
               when={showToolbar()}
               fallback={
                 <span class="text-sm text-muted-foreground">
-                  <Show
-                    when={debouncedSearchQuery().length > 0}
-                    fallback={t('documents.list.search.total-count-no-query', {
-                      count: documentsData()?.documentsCount ?? 0,
-                    })}
-                  >
-                    {t('documents.list.search.total-count-with-query', {
-                      count: documentsData()?.documentsCount ?? 0,
-                    })}
+                  <Show when={documentsData()}>
+                    <Show
+                      when={debouncedSearchQuery().length > 0}
+                      fallback={t('documents.list.search.total-count-no-query', {
+                        count: documentsData()?.documentsCount ?? 0,
+                      })}
+                    >
+                      {t('documents.list.search.total-count-with-query', {
+                        count: documentsData()?.documentsCount ?? 0,
+                      })}
+                    </Show>
                   </Show>
                 </span>
               }
