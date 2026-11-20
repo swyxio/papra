@@ -113,11 +113,74 @@ async function fixture() {
     user,
     objects,
     call,
+    folderUploads: async (folderId: string, organizationId = 'org') =>
+      app.request(`/api/organizations/${organizationId}/folders/${folderId}/uploads`, {}, env),
     publicGet: async (token: string) => app.request(`/api/share-links/${token}/document`, {}, env),
     publicFile: async (token: string) =>
       app.request(`/api/share-links/${token}/document/file`, {}, env),
   };
 }
+test('folder members can see unfinished upload reports only in folders they can read', async () => {
+  const f = await fixture();
+  const begin = async (fileName: string, folderId: string, share: boolean) => {
+    const response = await f.call('', 'POST', {
+      fileName,
+      folderId,
+      share,
+      fingerprint: 'a'.repeat(64),
+      size: 10,
+    });
+    expect(response.status).toBe(201);
+    const { session } = await response.json<{ session: { id: string } }>();
+    return session.id;
+  };
+  const active = await begin('active.mov', 'fld_home_org', true);
+  const unreported = await begin('unreported.mov', 'fld_home_org', false);
+  const privateUpload = await begin('private.mov', 'private', true);
+  expect((await f.call(`/${active}/progress`, 'PUT', { bytes: 6 })).status).toBe(204);
+  expect((await f.call(`/${privateUpload}/progress`, 'PUT', { bytes: 4 })).status).toBe(204);
+
+  f.user.userId = 'other';
+  const result = await f.folderUploads('fld_home_org');
+  expect(result.status).toBe(200);
+  const payload = await result.json();
+  expect(payload).toEqual({
+    hasMore: false,
+    uploads: expect.arrayContaining([
+      {
+        id: active,
+        fileName: 'active.mov',
+        size: 10,
+        createdAt: expect.any(Number),
+        uploader: 'writer',
+        bytes: 6,
+        updatedAt: expect.any(Number),
+        interrupted: false,
+      },
+      {
+        id: unreported,
+        fileName: 'unreported.mov',
+        size: 10,
+        createdAt: expect.any(Number),
+        uploader: 'writer',
+        bytes: null,
+        updatedAt: null,
+        interrupted: false,
+      },
+    ]),
+  });
+  expect(JSON.stringify(payload)).not.toContain('private.mov');
+  expect((await f.folderUploads('private')).status).toBe(404);
+  await f.DB.prepare("INSERT INTO folder_acl VALUES('private','other','reader')").run();
+  expect(await (await f.folderUploads('private')).json()).toMatchObject({
+    uploads: [{ id: privateUpload, bytes: 4 }],
+  });
+  await f.DB.prepare("UPDATE uploads SET status='complete' WHERE id=?").bind(active).run();
+  expect(await (await f.folderUploads('fld_home_org')).json()).toMatchObject({
+    uploads: [{ id: unreported }],
+  });
+});
+
 test('multipart sign/complete strictly validates owner, numbers and provider bytes; completion repairs lost response', async () => {
   const f = await fixture(),
     size = 32 * 1024 ** 2 + 7;

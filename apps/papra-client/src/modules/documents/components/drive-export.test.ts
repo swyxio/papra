@@ -1,6 +1,6 @@
 import { BlobReader, TextReader, TextWriter, ZipReader, ZipWriter } from '@zip.js/zip.js';
 import { expect, test, vi } from 'vitest';
-import { fetchExportStream } from './drive-export.services';
+import { DOWNLOAD_STALL_MS, fetchExportStream } from './drive-export.services';
 
 test('the real ZIP writer releases the file stream before a successful file-system commit', async () => {
   const chunks: Uint8Array[] = [];
@@ -108,3 +108,53 @@ test.each([403, 200, 206])(
     expect(request).toHaveBeenCalledTimes(2);
   },
 );
+
+test('reports stalled and retrying phases, then continues from the last received byte', async () => {
+  vi.useFakeTimers();
+  try {
+    let connection!: ReadableStreamDefaultController<Uint8Array>;
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              connection = controller;
+              controller.enqueue(new Uint8Array([1]));
+            },
+          }),
+          { headers: { 'ETag': '"file"', 'Content-Length': '2' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(new Uint8Array([2]), {
+          status: 206,
+          headers: { 'ETag': '"file"', 'Content-Length': '1', 'Content-Range': 'bytes 1-1/2' },
+        }),
+      );
+    const update = vi.fn();
+    const reader = fetchExportStream('/version/v', 2, request, update).getReader();
+    expect((await reader.read()).value).toEqual(new Uint8Array([1]));
+    const next = reader.read();
+    await vi.advanceTimersByTimeAsync(DOWNLOAD_STALL_MS);
+    expect(update).toHaveBeenLastCalledWith(
+      expect.objectContaining({ phase: 'stalled', bytes: 1, total: 2 }),
+    );
+    connection.error(new Error('connection dropped'));
+    await vi.advanceTimersByTimeAsync(400);
+    expect((await next).value).toEqual(new Uint8Array([2]));
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({ phase: 'retrying', bytes: 1, attempt: 2 }),
+    );
+    expect(request.mock.calls[1]?.[1]?.headers).toEqual({
+      'Range': 'bytes=1-',
+      'If-Range': '"file"',
+    });
+    expect(update).toHaveBeenLastCalledWith(
+      expect.objectContaining({ phase: 'receiving', bytes: 2, total: 2 }),
+    );
+    expect((await reader.read()).done).toBe(true);
+  } finally {
+    vi.useRealTimers();
+  }
+});

@@ -44,7 +44,12 @@ export function useDownloadDocument() {
     }) => {
       try {
         const url = `/api/organizations/${organizationId}/documents/${documentId}/download`;
-        await downloadStoredFile({ url, fileName, size });
+        if ((await downloadStoredFile({ url, fileName, size })) === 'browser') {
+          createToast({
+            type: 'success',
+            message: 'Sent to your browser. Open Downloads for progress, pauses and retries.',
+          });
+        }
       } catch {
         createToast({ type: 'error', message: t('documents.actions.download.error') });
       }

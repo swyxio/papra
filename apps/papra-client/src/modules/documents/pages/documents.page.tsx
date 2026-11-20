@@ -3,7 +3,7 @@ import { fetchFolders } from '@/modules/drive-collaboration/drive-collaboration.
 import { isPendingFolderId } from '@/modules/drive-collaboration/drive-folders.models';
 import { DriveFolders } from '@/modules/drive-collaboration/drive-folders.component';
 import { DriveExport } from '../components/drive-export.component';
-import { saveDocumentsZip } from '../components/drive-zip-download';
+import { saveDocumentsZip, zipProgressText } from '../components/drive-zip-download';
 import { useDownloadDocument } from '../documents.composables';
 import { apiClient } from '@/modules/shared/http/api-client';
 import { getHttpErrorMessage } from '@/modules/shared/http/http-errors';
@@ -359,9 +359,7 @@ export const DocumentsPage: Component = () => {
       const result = await saveDocumentsZip({
         organizationId: params.organizationId,
         fileName: `${folderName || 'files'}.zip`,
-        onProgress: ({ done, current }) => {
-          if (current) setDownloadStatus(`Downloading ${done + 1} of ${getEffectiveCount()}…`);
-        },
+        onProgress: (progress) => setDownloadStatus(zipProgressText(progress)),
         collect: async (add) => {
           if (ids) {
             for (const id of ids) {

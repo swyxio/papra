@@ -11,12 +11,13 @@ export async function downloadStoredFile({
 }) {
   if (size > 32 * 1024 ** 2) {
     downloadFile({ url, fileName });
-    return;
+    return 'browser';
   }
   const blob = await apiClient<Blob, 'blob'>({ path: url, responseType: 'blob', retry: 0 });
   const objectUrl = URL.createObjectURL(blob);
   downloadFile({ url: objectUrl, fileName });
   setTimeout(() => URL.revokeObjectURL(objectUrl), 30000);
+  return 'ready';
 }
 
 export function downloadFile({ url, fileName = 'file' }: { url: string; fileName?: string }) {

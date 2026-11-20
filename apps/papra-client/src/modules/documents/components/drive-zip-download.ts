@@ -1,9 +1,15 @@
 import type { Document } from '../documents.types';
+import type { DownloadProgress } from './drive-export.services';
 import { BlobWriter, ZipWriter } from '@zip.js/zip.js';
 import { versionDownloadHref } from '@/modules/drive-capabilities/drive-capabilities.services';
 import { downloadFile } from '@/modules/shared/files/download';
 import { fetchOrganizationDocuments } from '../documents.services';
-import { createZipEntryNamer, fetchExportStream, zipSafeName } from './drive-export.services';
+import {
+  createZipEntryNamer,
+  downloadProgressText,
+  fetchExportStream,
+  zipSafeName,
+} from './drive-export.services';
 
 export { folderTree } from './drive-export.services';
 
@@ -30,7 +36,18 @@ export async function* listFolderDocuments(organizationId: string, folderId: str
   }
 }
 
-export type ZipProgress = { done: number; skipped: number; current?: string };
+type ZipProgress = { done: number; skipped: number } & (
+  | { phase: 'listing' | 'saving' }
+  | { phase: 'downloading'; current: string; transfer: DownloadProgress }
+);
+
+export function zipProgressText(progress: ZipProgress) {
+  const count = `${progress.done} packed${progress.skipped ? ` · ${progress.skipped} skipped` : ''}`;
+  if (progress.phase === 'downloading') {
+    return `${progress.current} · ${downloadProgressText(progress.transfer)} · ${count}`;
+  }
+  return `${progress.phase === 'saving' ? 'Saving ZIP' : 'Finding files'} · ${count}`;
+}
 
 // Opens the save dialog before any network request so the browser keeps the user gesture.
 export async function saveDocumentsZip({
@@ -59,11 +76,12 @@ export async function saveDocumentsZip({
   const writer = destination
     ? new ZipWriter(destination, { zip64: true, preventClose: true })
     : new ZipWriter(blobWriter!, { zip64: true });
-  const progress: ZipProgress = { done: 0, skipped: 0 };
+  const progress = { done: 0, skipped: 0 };
   const seen = new Set<string>();
   const names = createZipEntryNamer(directories);
   let bytes = 0;
   try {
+    onProgress?.({ ...progress, phase: 'listing' });
     for (const directory of directories)
       await writer.add(directory, undefined, { directory: true });
     await collect(async (document, directory = '') => {
@@ -71,25 +89,29 @@ export async function saveDocumentsZip({
       seen.add(document.id);
       if (!document.currentVersionId) {
         progress.skipped++;
-        onProgress?.({ ...progress });
+        onProgress?.({ ...progress, phase: 'listing' });
         return;
       }
       bytes += document.originalSize;
       if (!destination && bytes > IN_MEMORY_ZIP_LIMIT)
         throw new Error('Use Chrome or Edge to download more than 2 GB at once.');
-      onProgress?.({ ...progress, current: document.name });
       await writer.add(
         names(directory, zipSafeName(document.name, document.id)),
         fetchExportStream(
           versionDownloadHref(organizationId, document.id, document.currentVersionId),
           document.originalSize,
+          undefined,
+          onProgress &&
+            ((transfer) =>
+              onProgress({ ...progress, phase: 'downloading', current: document.name, transfer })),
         ),
         { level: 0 },
       );
       progress.done++;
-      onProgress?.({ ...progress });
+      onProgress?.({ ...progress, phase: 'listing' });
     });
     if (!progress.done) throw new Error('There are no downloadable files here.');
+    onProgress?.({ ...progress, phase: 'saving' });
     const blob = await writer.close();
     if (destination) {
       await destination.close();

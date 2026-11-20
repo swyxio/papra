@@ -1,23 +1,96 @@
 import type { DriveFolder } from '@/modules/drive-collaboration/drive-collaboration.services';
+import { formatBytes } from '@corentinth/chisels';
+
+export const DOWNLOAD_STALL_MS = 15_000;
+type DownloadPhase = 'waiting' | 'receiving' | 'stalled' | 'retrying';
+
+export type DownloadProgress = {
+  bytes: number;
+  total: number;
+  phase: DownloadPhase;
+  attempt: number;
+  lastByteAt?: number;
+  bytesPerSecond?: number;
+};
+
+export function downloadProgressText(progress: DownloadProgress) {
+  const label = {
+    waiting: 'Connecting',
+    receiving: 'Downloading',
+    stalled: 'Stalled · no bytes received for 15 seconds',
+    retrying: `Retrying · attempt ${progress.attempt} of 3`,
+  }[progress.phase];
+  const bytes = `${formatBytes({ bytes: progress.bytes })} of ${formatBytes({ bytes: progress.total })}`;
+  const rate = progress.bytesPerSecond
+    ? ` · ${formatBytes({ bytes: progress.bytesPerSecond })}/s`
+    : '';
+  const last =
+    progress.phase === 'stalled' && progress.lastByteAt !== undefined
+      ? ` · Last bytes at ${new Date(progress.lastByteAt).toLocaleTimeString()}`
+      : '';
+  return `${label} · ${bytes}${rate}${last}`;
+}
 
 // Each URL identifies an immutable version. Resume inside the current ZIP entry so that
 // completed entries and bytes already handed to the ZIP writer are kept.
-export function fetchExportStream(url: string, size: number, request: typeof fetch = fetch) {
+export function fetchExportStream(
+  url: string,
+  size: number,
+  request: typeof fetch = fetch,
+  onProgress?: (progress: DownloadProgress) => void,
+) {
   const abort = new AbortController();
   async function* read() {
     let offset = 0;
     let etag: string | null = null;
+    let lastByteAt: number | undefined;
+    let lastReport = 0;
+    let lastPhase: DownloadPhase | undefined;
+    const startedAt = Date.now();
     for (let attempt = 0; ; attempt++) {
+      const emit = (phase: DownloadPhase) => {
+        const now = Date.now();
+        if (
+          phase === 'receiving' &&
+          lastPhase === phase &&
+          offset !== size &&
+          now - lastReport < 250
+        )
+          return;
+        lastPhase = phase;
+        lastReport = now;
+        const seconds = (now - startedAt) / 1000;
+        onProgress?.({
+          bytes: offset,
+          total: size,
+          phase,
+          attempt: attempt + 1,
+          lastByteAt,
+          bytesPerSecond: phase === 'receiving' && seconds >= 1 ? offset / seconds : undefined,
+        });
+      };
+      // Time only outstanding network operations, so disk/ZIP backpressure is not a stall.
+      const waitForNetwork = async <T>(operation: Promise<T>) => {
+        const timer = onProgress ? setTimeout(() => emit('stalled'), DOWNLOAD_STALL_MS) : undefined;
+        try {
+          return await operation;
+        } finally {
+          clearTimeout(timer);
+        }
+      };
+      emit(attempt ? 'retrying' : 'waiting');
       if (attempt) await new Promise((resolve) => setTimeout(resolve, attempt * 400));
       abort.signal.throwIfAborted();
       let response: Response;
       try {
-        response = await request(url, {
-          credentials: 'include',
-          redirect: 'error',
-          signal: abort.signal,
-          headers: offset ? { 'Range': `bytes=${offset}-`, 'If-Range': etag! } : {},
-        });
+        response = await waitForNetwork(
+          request(url, {
+            credentials: 'include',
+            redirect: 'error',
+            signal: abort.signal,
+            headers: offset ? { 'Range': `bytes=${offset}-`, 'If-Range': etag! } : {},
+          }),
+        );
       } catch (err) {
         if (attempt >= 2 || abort.signal.aborted) throw err;
         continue;
@@ -43,11 +116,15 @@ export function fetchExportStream(url: string, size: number, request: typeof fet
       const reader = response.body.getReader();
       try {
         while (true) {
-          const chunk = await reader.read();
+          const chunk = await waitForNetwork(reader.read());
           if (chunk.done) break;
           if (offset + chunk.value.length > size)
             throw new Error('Export file exceeds its recorded size.');
           offset += chunk.value.length;
+          if (chunk.value.length) {
+            lastByteAt = Date.now();
+            emit('receiving');
+          }
           yield chunk.value;
         }
         if (offset !== size) throw new Error('Export file ended before its recorded size.');
