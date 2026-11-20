@@ -1,6 +1,6 @@
 import type { Component } from 'solid-js';
 import type { BatchTargetFilter } from '../documents-batch.services';
-import { createEffect, createMemo, createSignal, For, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, on, Show } from 'solid-js';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/solid-query';
 import {
   driveBase,
@@ -61,6 +61,16 @@ export const DocumentMoveDialog: Component<{
   // Items already moved by an earlier, partially failed attempt are not moved again on retry.
   const [movedFolders, setMovedFolders] = createSignal<string[]>([]);
   const [movedFiles, setMovedFiles] = createSignal(false);
+  createEffect(
+    on(
+      destination,
+      () => {
+        setMovedFolders([]);
+        setMovedFiles(false);
+      },
+      { defer: true },
+    ),
+  );
   const move = useMutation(() => ({
     mutationFn: async () => {
       const folderId = props.destinationFolderId ?? destination();
