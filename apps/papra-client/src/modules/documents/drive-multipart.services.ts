@@ -9,7 +9,8 @@ import type { AsDto } from '../shared/http/http-client.types';
 import { apiClient } from '../shared/http/api-client';
 import { isHttpErrorWithStatusCode } from '../shared/http/http-errors';
 import { coerceDates } from '../shared/http/http-client.models';
-import { trackUploadActivity } from './upload-activity.services';
+import { createUploadActivity } from './upload-activity.services';
+import type { UploadActivity } from './upload-activity.services';
 
 export type TransferProgress = {
   bytes: number;
@@ -47,6 +48,7 @@ export async function fileFingerprint(file: File) {
   );
 }
 type MultipartOptions = {
+  activity?: UploadActivity;
   folderId?: string;
   documentId?: string;
   fileName?: string;
@@ -60,11 +62,11 @@ export async function multipartUpload(
   onProgress?: (progress: TransferProgress) => void,
   options: MultipartOptions = {},
 ) {
-  const activity = { stop: () => {} };
+  const activity = options.activity ?? createUploadActivity();
   try {
     return await transfer(file, organizationId, onProgress, options, activity);
   } finally {
-    activity.stop();
+    if (!options.activity) activity.stop();
   }
 }
 async function transfer(
@@ -72,7 +74,7 @@ async function transfer(
   organizationId: string,
   onProgress: ((progress: TransferProgress) => void) | undefined,
   options: MultipartOptions,
-  activity: { stop: () => void },
+  activity: UploadActivity,
 ) {
   const fingerprint = await fileFingerprint(file);
   const key = `drive-upload:${organizationId}:${options.documentId || options.folderId || 'home'}:${options.fileName || file.name}:${fingerprint}`;
@@ -83,19 +85,20 @@ async function transfer(
   } catch {
     localStorage.removeItem(key);
   }
-  const { completeUpload, onShareReady, onNameReady, ...uploadOptions } = options;
+  const { completeUpload, onShareReady, onNameReady, folderId, documentId, fileName } = options;
   let created = false;
   if (!saved) {
     const { session } = await apiClient<{ session: Session }>({
       method: 'POST',
       path: base,
       body: {
-        fileName: file.name,
+        fileName: fileName ?? file.name,
         mimeType: file.type || 'application/octet-stream',
         size: file.size,
         fingerprint,
         share: !!onShareReady,
-        ...uploadOptions,
+        folderId,
+        documentId,
       },
     });
     saved = { session, hashes: {} };
@@ -103,6 +106,7 @@ async function transfer(
     localStorage.setItem(key, JSON.stringify(saved));
   }
   const state = saved;
+  activity.track(state.session.id);
   const path = `${base}/${state.session.id}`;
   let status: { session: Session; parts: { partNumber: number; etag: string; size: number }[] };
   try {
@@ -111,7 +115,6 @@ async function transfer(
       : await apiClient({ method: 'GET', path });
     state.session = status.session;
     localStorage.setItem(key, JSON.stringify(state));
-    activity.stop = trackUploadActivity(state.session.id);
   } catch (error) {
     if (isHttpErrorWithStatusCode({ error, statusCode: 410 })) localStorage.removeItem(key);
     throw error;
