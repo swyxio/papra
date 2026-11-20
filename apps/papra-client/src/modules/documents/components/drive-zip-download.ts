@@ -41,8 +41,8 @@ type ZipProgress = { done: number; skipped: number } & (
   | { phase: 'downloading'; current: string; transfer: DownloadProgress }
 );
 
-export function zipProgressText(progress: ZipProgress) {
-  const count = `${progress.done} packed${progress.skipped ? ` · ${progress.skipped} skipped` : ''}`;
+export function zipProgressText(progress: ZipProgress, total?: number) {
+  const count = `${progress.done}${total === undefined ? '' : ` of ${total}`} packed${progress.skipped ? ` · ${progress.skipped} skipped` : ''}`;
   if (progress.phase === 'downloading') {
     return `${progress.current} · ${downloadProgressText(progress.transfer)} · ${count}`;
   }

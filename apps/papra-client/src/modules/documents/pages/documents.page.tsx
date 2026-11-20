@@ -354,12 +354,13 @@ export const DocumentsPage: Component = () => {
     const folderName = allFiles()
       ? undefined
       : foldersQuery.data?.folders.find((folder) => folder.id === queryFolderId())?.name;
+    const total = getEffectiveCount();
     setDownloadStatus('Preparing download…');
     try {
       const result = await saveDocumentsZip({
         organizationId: params.organizationId,
         fileName: `${folderName || 'files'}.zip`,
-        onProgress: (progress) => setDownloadStatus(zipProgressText(progress)),
+        onProgress: (progress) => setDownloadStatus(zipProgressText(progress, total)),
         collect: async (add) => {
           if (ids) {
             for (const id of ids) {
@@ -700,11 +701,6 @@ export const DocumentsPage: Component = () => {
                 </Show>
 
                 <div class="flex items-center gap-2 ml-auto">
-                  <Show when={downloadStatus()}>
-                    <span role="status" class="text-xs text-muted-foreground">
-                      {downloadStatus()}
-                    </span>
-                  </Show>
                   <Button
                     variant="outline"
                     size="sm"
@@ -763,6 +759,11 @@ export const DocumentsPage: Component = () => {
               </div>
             </Show>
           </div>
+          <Show when={downloadStatus()}>
+            <p role="status" class="mb-3 break-words text-xs text-muted-foreground">
+              {downloadStatus()}
+            </p>
+          </Show>
 
           <Show
             when={debouncedSearchQuery().length > 0 && documentsQuery.data?.documents.length === 0}
