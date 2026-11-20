@@ -61,10 +61,13 @@ export function validateRenameSuggestions(value: unknown, sources: RenameSource[
 // One prompt per file, so text from one file (which may be restricted) cannot steer
 // the name or notes suggested for another file with different access.
 export async function suggestDocumentNames(env: Env, sources: RenameSource[]) {
-  const results = await Promise.all(
+  const results = await Promise.allSettled(
     sources.map(async (source) => suggestDocumentName(env, source)),
   );
-  return results.flat();
+  const ok = results.flatMap((result) => (result.status === 'fulfilled' ? result.value : []));
+  const failure = results.find((result) => result.status === 'rejected');
+  if (!ok.length && failure) throw failure.reason;
+  return ok;
 }
 
 async function suggestDocumentName(env: Env, source: RenameSource) {
