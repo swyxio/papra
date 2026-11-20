@@ -613,15 +613,16 @@ export const DriveFolders: Component<{
             <Show when={!isPendingFolderId(folderId()) && current()}>
               {(folder) => (
                 <Button
-                  variant="outline"
-                  size="sm"
+                  variant="ghost"
+                  size="icon"
+                  class="size-8"
                   isLoading={downloading()?.id === folder().id}
                   disabled={Boolean(downloading())}
                   onClick={() => void downloadFolder(folder())}
                   title="Download this folder and its subfolders as a ZIP"
+                  aria-label="Download folder"
                 >
-                  <div class="i-tabler-download size-4 mr-1.5" />
-                  Download folder
+                  <div class="i-tabler-download size-4" />
                 </Button>
               )}
             </Show>
@@ -631,7 +632,7 @@ export const DriveFolders: Component<{
                 New folder
               </Button>
               <Button variant="outline" size="sm" onClick={() => setMoveFilesOpen(true)}>
-                Move existing files here
+                Move files here
               </Button>
             </Show>
             <Show
@@ -796,6 +797,9 @@ export const DriveFolders: Component<{
                         <Checkbox
                           checked={Boolean(props.getFolderSelection?.()[folder.id])}
                           onPointerDown={(event: PointerEvent) => (shiftKey = event.shiftKey)}
+                          onMouseDown={(event: MouseEvent) =>
+                            event.shiftKey && event.preventDefault()
+                          }
                           onKeyDown={(event: KeyboardEvent) => (shiftKey = event.shiftKey)}
                           onChange={(value) => toggleFolder(folder, value)}
                           aria-label={`Select ${folder.name}`}

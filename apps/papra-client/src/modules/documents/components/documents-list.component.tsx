@@ -49,6 +49,13 @@ import { DocumentManagementDropdown } from './document-management-dropdown.compo
 // Last checkbox clicked per table, the start of a shift-click range.
 const selectionAnchors = new WeakMap<object, string>();
 
+// On desktop, row controls stay hidden until the row is hovered or focused, so idle rows stay clean.
+const revealOnHover = 'sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100';
+const revealUntilSelected = (table: {
+  getIsSomeRowsSelected: () => boolean;
+  getIsAllRowsSelected: () => boolean;
+}) => (table.getIsSomeRowsSelected() || table.getIsAllRowsSelected() ? undefined : revealOnHover);
+
 const selectionColumn: ColumnDef<Document> = {
   id: 'select',
   header: (props) => {
@@ -62,6 +69,7 @@ const selectionColumn: ColumnDef<Document> = {
         }
         onChange={(value) => props.table.toggleAllPageRowsSelected(value)}
         aria-label={t('documents.list.select.all')}
+        class={revealUntilSelected(props.table)}
       >
         <CheckboxControl />
       </Checkbox>
@@ -75,6 +83,7 @@ const selectionColumn: ColumnDef<Document> = {
       <Checkbox
         checked={props.row.getIsSelected()}
         onPointerDown={(event: PointerEvent) => (shiftKey = event.shiftKey)}
+        onMouseDown={(event: MouseEvent) => event.shiftKey && event.preventDefault()}
         onKeyDown={(event: KeyboardEvent) => (shiftKey = event.shiftKey)}
         onChange={(value) => {
           const anchorId = selectionAnchors.get(props.table);
@@ -90,6 +99,7 @@ const selectionColumn: ColumnDef<Document> = {
         }}
         aria-label={t('documents.list.select.row')}
         title="Shift-click to select a range"
+        class={revealUntilSelected(props.table)}
       >
         <CheckboxControl />
       </Checkbox>
@@ -113,10 +123,7 @@ export const documentDateColumn: ColumnDef<Document> = {
     const value = data.getValue<Date | null | undefined>();
     return (
       <span class="text-muted-foreground hidden sm:block">
-        <Show
-          when={value}
-          fallback={<span class="text-muted-foreground/50">{t('documents.info.no-date')}</span>}
-        >
+        <Show when={value} fallback={<span class="sr-only">{t('documents.info.no-date')}</span>}>
           {(date) => <RelativeTime date={date()} />}
         </Show>
       </span>
@@ -141,10 +148,13 @@ export const locationColumn: ColumnDef<Document> = {
         {(current) => (
           <A
             href={`/organizations/${organizationId}/documents?folder=${current().id}`}
-            class="hidden sm:block max-w-56 truncate text-sm text-muted-foreground hover:text-foreground hover:underline"
+            class="hidden sm:flex items-center gap-1.5 max-w-56 text-sm text-muted-foreground hover:text-foreground"
             title={folderPath(current(), folders.data?.folders ?? [])}
           >
-            {folderPath(current(), folders.data?.folders ?? [])}
+            <div class="i-tabler-folder size-4 shrink-0" />
+            <span class="truncate">
+              {folderPath(current(), folders.data?.folders ?? []).replace(/^Home \/ /, '')}
+            </span>
           </A>
         )}
       </Show>
@@ -235,16 +245,12 @@ export const deletedAtColumn: ColumnDef<Document> = {
 export const standardActionsColumn: ColumnDef<Document> = {
   header: () => {
     const { t } = useI18n();
-    return (
-      <span class="sr-only sm:not-sr-only sm:block text-right">
-        {t('documents.list.table.headers.actions')}
-      </span>
-    );
+    return <span class="sr-only">{t('documents.list.table.headers.actions')}</span>;
   },
   id: 'actions',
   enableSorting: false,
   cell: (data) => (
-    <div class="flex items-center justify-end">
+    <div class={cn('flex items-center justify-end', revealOnHover)}>
       <DocumentManagementDropdown document={data.row.original} />
     </div>
   ),
@@ -261,7 +267,11 @@ export const tagsColumn: ColumnDef<Document> = {
     <DocumentTagsList
       tags={data.getValue<Tag[]>()}
       tagClass="text-xs text-muted-foreground"
-      triggerClass="size-6"
+      triggerClass={cn(
+        'size-6',
+        data.getValue<Tag[]>().length === 0 && revealOnHover,
+        'focus-visible:opacity-100',
+      )}
       documentId={data.row.original.id}
       organizationId={data.row.original.organizationId}
       asLink
@@ -377,7 +387,7 @@ export const DocumentsPaginatedList: Component<{
             <TableHeader>
               <For each={table.getHeaderGroups()}>
                 {(headerGroup) => (
-                  <TableRow>
+                  <TableRow class="group">
                     <For each={headerGroup.headers}>
                       {(header) => {
                         return (
@@ -427,7 +437,7 @@ export const DocumentsPaginatedList: Component<{
               <Show when={table.getRowModel().rows?.length}>
                 <For each={table.getRowModel().rows}>
                   {(row) => (
-                    <TableRow data-state={row.getIsSelected() && 'selected'}>
+                    <TableRow class="group" data-state={row.getIsSelected() && 'selected'}>
                       <For each={row.getVisibleCells()}>
                         {(cell) => (
                           <TableCell

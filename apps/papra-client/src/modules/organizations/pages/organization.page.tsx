@@ -16,7 +16,6 @@ import { useDocumentUpload } from '@/modules/documents/components/document-impor
 import { UploadDestinationPicker } from '@/modules/documents/components/upload-destination-picker.component';
 import { DocumentUploadArea } from '@/modules/documents/components/document-upload-area.component';
 import {
-  createdAtColumn,
   documentDateColumn,
   DocumentsPaginatedList,
   standardActionsColumn,
@@ -206,13 +205,7 @@ export const OrganizationPage: Component = () => {
               enableBatchSelection
               getRowSelection={getRowSelection}
               setRowSelection={setRowSelection}
-              extraColumns={[
-                locationColumn,
-                tagsColumn,
-                documentDateColumn,
-                createdAtColumn,
-                standardActionsColumn,
-              ]}
+              extraColumns={[locationColumn, tagsColumn, documentDateColumn, standardActionsColumn]}
             />
             <DocumentMoveDialog
               organizationId={params.organizationId}

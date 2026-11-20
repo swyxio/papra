@@ -54,6 +54,9 @@ import {
 import { fetchCustomPropertyDefinitions } from '@/modules/custom-properties/custom-properties.services';
 import { fetchOrganizationDocuments } from '../documents.services';
 
+const searchTips =
+  'Search filenames, document text, notes and property values. Filters: tag:Contract · created:>=2026-01-01 · uploadedBy:"Vibhu" · modifiedBy:name@example.com · has:date';
+
 export const DocumentsPage: Component = () => {
   const params = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -126,6 +129,7 @@ export const DocumentsPage: Component = () => {
     return next;
   };
 
+  const [searchFocused, setSearchFocused] = createSignal(false);
   const [personField, setPersonField] = createSignal('uploadedBy');
   const [personValue, setPersonValue] = createSignal('');
   const applyPersonFilter = () => {
@@ -504,33 +508,40 @@ export const DocumentsPage: Component = () => {
           All files you can access in this space, across folders.
         </p>
       </Show>
-      <div class="flex flex-wrap gap-3 mb-3">
-        <Button
-          as={A}
-          variant="outline"
-          href={`/organizations/${params.organizationId}/documents/new`}
-        >
-          Create doc from template
-        </Button>
-        <Button
-          as={A}
-          variant="outline"
-          href={`/orgs/${params.organizationId}/documents/new?template=sponsorship-order`}
-        >
-          Create sponsorship order
-        </Button>
-        <div title="Export all accessible files in this space">
-          <DriveExport organizationId={params.organizationId} />
-        </div>
+      <div class="my-4 flex flex-wrap items-start gap-4 text-sm text-muted-foreground">
+        <details class="relative">
+          <summary class="cursor-pointer hover:text-foreground">Create or export</summary>
+          <div class="absolute z-20 mt-2 flex w-64 flex-col gap-2 rounded-lg border bg-background p-3 shadow-lg">
+            <Button
+              as={A}
+              variant="outline"
+              size="sm"
+              href={`/organizations/${params.organizationId}/documents/new`}
+            >
+              Create doc from template
+            </Button>
+            <Button
+              as={A}
+              variant="outline"
+              size="sm"
+              href={`/orgs/${params.organizationId}/documents/new?template=sponsorship-order`}
+            >
+              Create sponsorship order
+            </Button>
+            <div title="Export all accessible files in this space">
+              <DriveExport organizationId={params.organizationId} />
+            </div>
+          </div>
+        </details>
+        <details class="flex-1">
+          <summary class="cursor-pointer hover:text-foreground">
+            Semantic search, document answers and automation
+          </summary>
+          <div class="mt-4 text-foreground">
+            <DriveSpaceCapabilities organizationId={params.organizationId} />
+          </div>
+        </details>
       </div>
-      <details class="my-4">
-        <summary class="cursor-pointer text-sm font-medium">
-          Semantic search, document answers and automation
-        </summary>
-        <div class="mt-4">
-          <DriveSpaceCapabilities organizationId={params.organizationId} />
-        </div>
-      </details>
       <Suspense>
         <>
           <div class="flex flex-wrap items-center gap-4">
@@ -540,7 +551,10 @@ export const DocumentsPage: Component = () => {
                   type="search"
                   name="search"
                   placeholder="Search all files in this space…"
+                  title={searchTips}
                   value={getSearchQuery()}
+                  onFocus={() => setSearchFocused(true)}
+                  onBlur={() => setSearchFocused(false)}
                   onInput={(e) => {
                     setSearchQuery(e.currentTarget.value);
                     setPagination((current) => ({ ...current, pageIndex: 0 }));
@@ -587,122 +601,135 @@ export const DocumentsPage: Component = () => {
             </Show>
           </div>
 
-          <p class="mt-2 text-xs text-muted-foreground">
-            Search filenames, document text, notes and property values. Filters: tag:Contract ·
-            created:&gt;=2026-01-01 · uploadedBy:"Vibhu" · modifiedBy:name@example.com · has:date
-          </p>
-          <div class="mt-3 flex flex-wrap items-end gap-2">
-            <label class="space-y-1 text-sm">
-              <span class="block">Filter by person</span>
-              <select
-                class="rounded-md border bg-background p-2"
-                value={personField()}
-                onChange={(e) => setPersonField(e.currentTarget.value)}
-              >
-                <option value="uploadedBy">Uploaded by</option>
-                <option value="modifiedBy">Last modified by</option>
-              </select>
-            </label>
-            <label class="space-y-1 text-sm">
-              <span class="block">Name or email</span>
-              <input
-                class="rounded-md border bg-background p-2"
-                placeholder="e.g. Vibhu"
-                value={personValue()}
-                onInput={(e) => setPersonValue(e.currentTarget.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && personValue().trim()) applyPersonFilter();
-                }}
-              />
-            </label>
-            <Button variant="outline" disabled={!personValue().trim()} onClick={applyPersonFilter}>
-              Apply person filter
-            </Button>
-            <label class="space-y-1 text-sm">
-              <span class="block">Sort files</span>
-              <select
-                class="rounded-md border bg-background p-2"
-                value={`${getSortField()}:${getSortOrder()}`}
-                onChange={(e) => {
-                  const [field, order] = e.currentTarget.value.split(':');
-                  setSearchParams({ sortField: field, sortOrder: order, page: undefined });
-                }}
-              >
-                <For
-                  each={[
-                    ['createdAt', 'Upload date'],
-                    ['modifiedAt', 'Last modified'],
-                    ['originalSize', 'Size'],
-                    ['name', 'File name'],
-                    ['uploadedBy', 'Uploader'],
-                    ['modifiedBy', 'Last modifier'],
-                    ['documentDate', 'Document date'],
-                    ['updatedAt', 'Last updated (including processing)'],
-                  ]}
-                >
-                  {([field, label]) => (
-                    <>
-                      <option value={`${field}:asc`}>
-                        {label} ·{' '}
-                        {['name', 'uploadedBy', 'modifiedBy'].includes(field)
-                          ? 'A–Z'
-                          : field === 'originalSize'
-                            ? 'Smallest first'
-                            : 'Oldest first'}
-                      </option>
-                      <option value={`${field}:desc`}>
-                        {label} ·{' '}
-                        {['name', 'uploadedBy', 'modifiedBy'].includes(field)
-                          ? 'Z–A'
-                          : field === 'originalSize'
-                            ? 'Largest first'
-                            : 'Newest first'}
-                      </option>
-                    </>
-                  )}
-                </For>
-              </select>
-            </label>
-          </div>
-          <Show when={propertiesQuery.data?.propertyDefinitions.length}>
-            <div class="mt-3 flex flex-wrap items-end gap-2 rounded-lg border p-3">
+          <Show when={searchFocused()}>
+            <p class="mt-2 text-xs text-muted-foreground">{searchTips}</p>
+          </Show>
+          <details class="mt-3">
+            <summary class="cursor-pointer text-sm text-muted-foreground hover:text-foreground">
+              Filter and sort
+            </summary>
+            <div class="mt-3 flex flex-wrap items-end gap-2">
               <label class="space-y-1 text-sm">
-                <span class="block">Filter by property</span>
+                <span class="block">Filter by person</span>
                 <select
                   class="rounded-md border bg-background p-2"
-                  value={propertyId()}
-                  onChange={(event) => setPropertyId(event.currentTarget.value)}
+                  value={personField()}
+                  onChange={(e) => setPersonField(e.currentTarget.value)}
                 >
-                  <option value="">Choose property</option>
-                  <For each={propertiesQuery.data?.propertyDefinitions}>
-                    {(property) => <option value={property.id}>{property.name}</option>}
-                  </For>
+                  <option value="uploadedBy">Uploaded by</option>
+                  <option value="modifiedBy">Last modified by</option>
                 </select>
               </label>
               <label class="space-y-1 text-sm">
-                <span class="block">Value</span>
+                <span class="block">Name or email</span>
                 <input
                   class="rounded-md border bg-background p-2"
-                  placeholder="Exact value (e.g. Approved)"
-                  value={propertyValue()}
-                  onInput={(event) => setPropertyValue(event.currentTarget.value)}
+                  placeholder="e.g. Vibhu"
+                  value={personValue()}
+                  onInput={(e) => setPersonValue(e.currentTarget.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && personValue().trim()) applyPersonFilter();
+                  }}
                 />
               </label>
               <Button
                 variant="outline"
-                disabled={!propertyId() || !propertyValue().trim()}
-                onClick={addPropertyFilter}
+                disabled={!personValue().trim()}
+                onClick={applyPersonFilter}
               >
-                Apply property filter
+                Apply person filter
               </Button>
+              <label class="space-y-1 text-sm">
+                <span class="block">Sort files</span>
+                <select
+                  class="rounded-md border bg-background p-2"
+                  value={`${getSortField()}:${getSortOrder()}`}
+                  onChange={(e) => {
+                    const [field, order] = e.currentTarget.value.split(':');
+                    setSearchParams({ sortField: field, sortOrder: order, page: undefined });
+                  }}
+                >
+                  <For
+                    each={[
+                      ['createdAt', 'Upload date'],
+                      ['modifiedAt', 'Last modified'],
+                      ['originalSize', 'Size'],
+                      ['name', 'File name'],
+                      ['uploadedBy', 'Uploader'],
+                      ['modifiedBy', 'Last modifier'],
+                      ['documentDate', 'Document date'],
+                      ['updatedAt', 'Last updated (including processing)'],
+                    ]}
+                  >
+                    {([field, label]) => (
+                      <>
+                        <option value={`${field}:asc`}>
+                          {label} ·{' '}
+                          {['name', 'uploadedBy', 'modifiedBy'].includes(field)
+                            ? 'A–Z'
+                            : field === 'originalSize'
+                              ? 'Smallest first'
+                              : 'Oldest first'}
+                        </option>
+                        <option value={`${field}:desc`}>
+                          {label} ·{' '}
+                          {['name', 'uploadedBy', 'modifiedBy'].includes(field)
+                            ? 'Z–A'
+                            : field === 'originalSize'
+                              ? 'Largest first'
+                              : 'Newest first'}
+                        </option>
+                      </>
+                    )}
+                  </For>
+                </select>
+              </label>
             </div>
-          </Show>
+            <Show when={propertiesQuery.data?.propertyDefinitions.length}>
+              <div class="mt-3 flex flex-wrap items-end gap-2 rounded-lg border p-3">
+                <label class="space-y-1 text-sm">
+                  <span class="block">Filter by property</span>
+                  <select
+                    class="rounded-md border bg-background p-2"
+                    value={propertyId()}
+                    onChange={(event) => setPropertyId(event.currentTarget.value)}
+                  >
+                    <option value="">Choose property</option>
+                    <For each={propertiesQuery.data?.propertyDefinitions}>
+                      {(property) => <option value={property.id}>{property.name}</option>}
+                    </For>
+                  </select>
+                </label>
+                <label class="space-y-1 text-sm">
+                  <span class="block">Value</span>
+                  <input
+                    class="rounded-md border bg-background p-2"
+                    placeholder="Exact value (e.g. Approved)"
+                    value={propertyValue()}
+                    onInput={(event) => setPropertyValue(event.currentTarget.value)}
+                  />
+                </label>
+                <Button
+                  variant="outline"
+                  disabled={!propertyId() || !propertyValue().trim()}
+                  onClick={addPropertyFilter}
+                >
+                  Apply property filter
+                </Button>
+              </div>
+            </Show>
+          </details>
           <div class="mb-4 mt-2 ml-2 min-h-8 flex items-center">
             <Show
               when={showToolbar()}
               fallback={
                 <span class="text-sm text-muted-foreground">
-                  <Show when={documentsData()}>
+                  <Show
+                    when={
+                      documentsData() &&
+                      (documentsData()!.documentsCount > 0 || debouncedSearchQuery().length > 0)
+                    }
+                  >
                     <Show
                       when={debouncedSearchQuery().length > 0}
                       fallback={t('documents.list.search.total-count-no-query', {
