@@ -221,7 +221,7 @@ export function registerUploadRoutes(app: App) {
         updatedAt: row.progress_at,
         interrupted: row.interrupted === 1,
       })),
-      hasMore: rows.length > 100,
+      hasMore: rows.length > 100 || candidates.length === 500,
     });
   });
   // Folder editors can clear orphaned uploads that teammates started into their folders.
@@ -240,9 +240,15 @@ export function registerUploadRoutes(app: App) {
     const folder = await canReadFolder(c.env, identity, u.folder_id);
     if (folder.organization_id !== org) throw error(404, 'Upload not found');
     if (u.user_id !== identity.userId) await canWriteFolder(c.env, identity, u.folder_id);
+    // Claim the row first so a completion racing this request never has its bytes deleted.
+    const claimed = await c.env.DB.prepare(
+      "UPDATE uploads SET status='aborted' WHERE id=? AND status='uploading'",
+    )
+      .bind(u.id)
+      .run();
+    if (!claimed.meta.changes) throw error(409, 'Upload already finished');
     if (!single(u)) await s3(c.env).abortMultipartUpload(u.storage_key, u.upload_id);
     else await c.env.FILES.delete(u.storage_key);
-    await c.env.DB.prepare("UPDATE uploads SET status='aborted' WHERE id=?").bind(u.id).run();
     return c.body(null, 204);
   });
   app.get(base, async (c) => {
