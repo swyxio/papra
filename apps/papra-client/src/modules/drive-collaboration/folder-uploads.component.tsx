@@ -1,11 +1,18 @@
 import { formatBytes } from '@corentinth/chisels';
+import { useSearchParams } from '@solidjs/router';
 import { useQuery, useQueryClient } from '@tanstack/solid-query';
-import { createEffect, For, on, Show } from 'solid-js';
+import { createEffect, createSignal, For, on, Show } from 'solid-js';
+import { uploadFolderPaths } from '../documents/upload-scheduling.services';
+import { useConfirmModal } from '../shared/confirm';
 import { apiClient } from '../shared/http/api-client';
-import { driveBase } from './drive-collaboration.services';
+import { getHttpErrorMessage } from '../shared/http/http-errors';
+import { createToast } from '../ui/components/sonner';
+import { driveBase, fetchFolders } from './drive-collaboration.services';
 
 type FolderUpload = {
   id: string;
+  folderId: string;
+  canRemove: boolean;
   fileName: string;
   size: number;
   createdAt: number;
@@ -18,6 +25,14 @@ type FolderUpload = {
 const staleAfter = 2 * 60_000;
 const bytesLabel = (bytes: number) => formatBytes({ bytes });
 const timeLabel = (time: number) => new Date(time).toLocaleString();
+const hiddenKey = 'drive-hidden-unfinished-uploads';
+const readHidden = (): string[] => {
+  try {
+    return JSON.parse(localStorage.getItem(hiddenKey) || '[]');
+  } catch {
+    return [];
+  }
+};
 
 export function FolderUploads(props: { organizationId: string; folderId: string }) {
   const client = useQueryClient();
@@ -30,8 +45,52 @@ export function FolderUploads(props: { organizationId: string; folderId: string 
       }),
     refetchInterval: 10_000,
   }));
+  const [, setParams] = useSearchParams();
+  const { confirm } = useConfirmModal();
+  const folders = useQuery(() => ({
+    queryKey: [...key, 'folders'],
+    queryFn: async () => fetchFolders(props.organizationId),
+  }));
+  const paths = () => uploadFolderPaths(folders.data?.folders ?? []);
+  const [hidden, setHidden] = createSignal(readHidden());
+  const hide = (id: string) => {
+    const next = [...hidden(), id].slice(-500);
+    setHidden(next);
+    try {
+      localStorage.setItem(hiddenKey, JSON.stringify(next));
+    } catch {}
+  };
+  const remove = async (upload: FolderUpload) => {
+    const confirmed = await confirm({
+      title: `Remove "${upload.fileName}"?`,
+      message:
+        'This cancels the unfinished upload and discards the bytes already sent. Files that finished uploading are not affected.',
+      confirmButton: { text: 'Remove upload', variant: 'destructive' },
+      cancelButton: { text: 'Cancel' },
+    });
+    if (!confirmed) return;
+    try {
+      await apiClient({
+        method: 'DELETE',
+        path: `${driveBase(props.organizationId)}/folders/${upload.folderId}/uploads/${upload.id}`,
+      });
+      void uploads.refetch();
+      void client.invalidateQueries({ queryKey: [...key, 'uploads'] });
+    } catch (error) {
+      createToast({
+        type: 'error',
+        message: `Could not remove upload: ${getHttpErrorMessage(error)}`,
+      });
+    }
+  };
   // Avoid suspending the folder-change transition while a new folder's uploads load.
-  const data = () => (uploads.isPending ? undefined : uploads.data);
+  const data = () => {
+    if (uploads.isPending || !uploads.data) return undefined;
+    return {
+      ...uploads.data,
+      uploads: uploads.data.uploads.filter((upload) => !hidden().includes(upload.id)),
+    };
+  };
   createEffect(
     on(
       () => data()?.uploads,
@@ -54,7 +113,7 @@ export function FolderUploads(props: { organizationId: string; folderId: string 
     <Show when={data()?.uploads.length || uploads.isError}>
       <section aria-label="Unfinished uploads" class="rounded-lg border bg-card p-3 space-y-2">
         <h2 class="font-medium text-sm">
-          Unfinished uploads
+          Unfinished uploads in this folder and its subfolders
           <Show when={data()?.uploads.length}>
             {' '}
             ({data()?.uploads.length}
@@ -99,6 +158,37 @@ export function FolderUploads(props: { organizationId: string; folderId: string 
                     : `${bytesLabel(upload.bytes)} of ${bytesLabel(upload.size)} reported`}
                   <Show when={upload.uploader}> · {upload.uploader}</Show>
                 </p>
+                <p class="text-xs text-muted-foreground">
+                  Uploading to{' '}
+                  <button
+                    type="button"
+                    class="underline underline-offset-2 hover:text-foreground"
+                    onClick={() =>
+                      setParams({ folder: upload.folderId, scope: undefined, page: undefined })
+                    }
+                  >
+                    {paths()[upload.folderId] || 'this folder'}
+                  </button>
+                </p>
+                <div class="flex flex-wrap gap-3 text-xs">
+                  <button
+                    type="button"
+                    class="underline underline-offset-2 text-muted-foreground hover:text-foreground"
+                    onClick={() => hide(upload.id)}
+                    title="Hide this upload on this device"
+                  >
+                    Dismiss
+                  </button>
+                  <Show when={upload.canRemove}>
+                    <button
+                      type="button"
+                      class="underline underline-offset-2 text-destructive"
+                      onClick={() => void remove(upload)}
+                    >
+                      Remove upload
+                    </button>
+                  </Show>
+                </div>
                 <p class="text-xs text-muted-foreground">
                   Started {timeLabel(upload.createdAt)}
                   <Show when={upload.updatedAt}>
