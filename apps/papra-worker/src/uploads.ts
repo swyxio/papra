@@ -247,8 +247,18 @@ export function registerUploadRoutes(app: App) {
       .bind(u.id)
       .run();
     if (!claimed.meta.changes) throw error(409, 'Upload already finished');
-    if (!single(u)) await s3(c.env).abortMultipartUpload(u.storage_key, u.upload_id);
-    else await c.env.FILES.delete(u.storage_key);
+    try {
+      if (!single(u)) await s3(c.env).abortMultipartUpload(u.storage_key, u.upload_id);
+      else await c.env.FILES.delete(u.storage_key);
+    } catch (cause) {
+      // Keep it listed so removal can be retried instead of stranding the stored bytes.
+      await c.env.DB.prepare(
+        "UPDATE uploads SET status='uploading' WHERE id=? AND status='aborted'",
+      )
+        .bind(u.id)
+        .run();
+      throw cause;
+    }
     return c.body(null, 204);
   });
   app.get(base, async (c) => {
