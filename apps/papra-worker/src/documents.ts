@@ -594,7 +594,8 @@ export function registerDocumentRoutes(app: App) {
         excerpt: excerptOf(text),
       });
     }
-    if (!(await reserveDocumentAnswer(c.env))) throw error(429, 'Daily AI limit reached');
+    if (!(await reserveDocumentAnswer(c.env, sources.length)))
+      throw error(429, 'Daily AI limit reached');
     const suggestions = await suggestDocumentNames(c.env, sources);
     return c.json({
       suggestions: suggestions.map((s) => {
