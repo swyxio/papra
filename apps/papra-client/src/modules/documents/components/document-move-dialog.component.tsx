@@ -1,6 +1,6 @@
 import type { Component } from 'solid-js';
 import type { BatchTargetFilter } from '../documents-batch.services';
-import { createEffect, createSignal, For, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, Show } from 'solid-js';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/solid-query';
 import {
   driveBase,
@@ -54,30 +54,39 @@ export const DocumentMoveDialog: Component<{
     enabled: props.open && !props.filter,
   }));
   const batch = () => Boolean(props.filter || props.folderIds?.length);
-  const blocked = () => blockedMoveTargets(folders.data?.folders ?? [], props.folderIds ?? []);
+  const blocked = createMemo(() =>
+    blockedMoveTargets(folders.data?.folders ?? [], props.folderIds ?? []),
+  );
   const [failedFolders, setFailedFolders] = createSignal<string[]>([]);
+  // Items already moved by an earlier, partially failed attempt are not moved again on retry.
+  const [movedFolders, setMovedFolders] = createSignal<string[]>([]);
+  const [movedFiles, setMovedFiles] = createSignal(false);
   const move = useMutation(() => ({
     mutationFn: async () => {
       const folderId = props.destinationFolderId ?? destination();
+      if (!movedFiles() && (props.filter || !batch())) {
+        await batchMoveDocuments({
+          organizationId: props.organizationId,
+          filter: props.filter ?? { documentIds: selected() },
+          folderId,
+        });
+        setMovedFiles(true);
+      }
       const failed: string[] = [];
       for (const id of props.folderIds ?? []) {
+        if (movedFolders().includes(id)) continue;
         try {
           await apiClient({
             method: 'PATCH',
             path: `${driveBase(props.organizationId)}/folders/${id}`,
             body: { parentId: folderId },
           });
+          setMovedFolders((done) => [...done, id]);
         } catch (error) {
           const name = folders.data?.folders.find((folder) => folder.id === id)?.name ?? id;
           failed.push(`${name}: ${getHttpErrorMessage(error)}`);
         }
       }
-      if (props.filter || !batch())
-        await batchMoveDocuments({
-          organizationId: props.organizationId,
-          filter: props.filter ?? { documentIds: selected() },
-          folderId,
-        });
       setFailedFolders(failed);
       if (failed.length) {
         await client.invalidateQueries({ queryKey: ['organizations', props.organizationId] });
@@ -97,6 +106,8 @@ export const DocumentMoveDialog: Component<{
       setSearch('');
       setPage(0);
       setFailedFolders([]);
+      setMovedFolders([]);
+      setMovedFiles(false);
       move.reset();
     }
   });
