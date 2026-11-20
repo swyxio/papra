@@ -497,12 +497,6 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
   };
   const openFolder = (id: string) =>
     setParams({ folder: id, scope: undefined, query: undefined, page: undefined });
-  const accessLabel = (restricted: boolean) =>
-    restricted
-      ? 'Restricted access'
-      : folders.data?.isPersonal
-        ? 'Private to you'
-        : 'Shared with this team';
   return (
     <>
       <DriveInbox organizationId={props.organizationId} />
@@ -675,12 +669,13 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
         <Show when={current()}>
           {(folder) => (
             <p class="text-xs text-muted-foreground">
-              {accessLabel(folder().effectiveRestricted)} · {contentsLabel(folder())}
+              <Show when={folder().effectiveRestricted}>Restricted access · </Show>
+              {contentsLabel(folder())}
               <Show when={folder().shortcutsCount > 0}>
                 {' '}
                 · {folder().shortcutsCount} shortcuts
               </Show>{' '}
-              · {formatBytes({ bytes: folder().documentsSize })} including subfolders
+              · {formatBytes({ bytes: folder().documentsSize })}
             </p>
           )}
         </Show>
@@ -724,8 +719,8 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
                           {' '}
                           · {folder.shortcutsCount} shortcuts
                         </Show>{' '}
-                        · {formatBytes({ bytes: folder.documentsSize })} including subfolders ·{' '}
-                        {accessLabel(folder.effectiveRestricted)}
+                        · {formatBytes({ bytes: folder.documentsSize })}
+                        <Show when={folder.effectiveRestricted}> · Restricted access</Show>
                       </span>
                     </div>
                     <Show when={folder.lastActivityAt}>

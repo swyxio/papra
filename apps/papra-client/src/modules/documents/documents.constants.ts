@@ -21,6 +21,7 @@ export const DOCUMENT_SEARCH_SORT_FIELDS = [
   'modifiedAt',
   'name',
   'documentDate',
+  'originalSize',
 ] as const;
 export type DocumentSearchSortField = (typeof DOCUMENT_SEARCH_SORT_FIELDS)[number];
 

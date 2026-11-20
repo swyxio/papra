@@ -30,9 +30,11 @@ export function FolderUploads(props: { organizationId: string; folderId: string 
       }),
     refetchInterval: 10_000,
   }));
+  // Avoid suspending the folder-change transition while a new folder's uploads load.
+  const data = () => (uploads.isPending ? undefined : uploads.data);
   createEffect(
     on(
-      () => uploads.data?.uploads,
+      () => data()?.uploads,
       (current, previous) => {
         if (current && previous?.some((upload) => !current.some(({ id }) => id === upload.id))) {
           void client.invalidateQueries({ queryKey: [...key, 'documents'] });
@@ -49,14 +51,14 @@ export function FolderUploads(props: { organizationId: string; folderId: string 
     return upload.bytes >= upload.size ? 'Waiting for upload to finish' : 'Upload in progress';
   };
   return (
-    <Show when={uploads.data?.uploads.length || uploads.isError}>
+    <Show when={data()?.uploads.length || uploads.isError}>
       <section aria-label="Unfinished uploads" class="rounded-lg border bg-card p-3 space-y-2">
         <h2 class="font-medium text-sm">
           Unfinished uploads
-          <Show when={uploads.data?.uploads.length}>
+          <Show when={data()?.uploads.length}>
             {' '}
-            ({uploads.data?.uploads.length}
-            {uploads.data?.hasMore ? '+' : ''})
+            ({data()?.uploads.length}
+            {data()?.hasMore ? '+' : ''})
           </Show>
         </h2>
         <Show when={uploads.isError}>
@@ -68,7 +70,7 @@ export function FolderUploads(props: { organizationId: string; folderId: string 
           </p>
         </Show>
         <ul class="divide-y max-h-96 overflow-y-auto">
-          <For each={uploads.data?.uploads}>
+          <For each={data()?.uploads}>
             {(upload) => (
               <li class="py-2 space-y-1 min-w-0">
                 <div class="flex flex-wrap items-baseline justify-between gap-x-3 text-sm">

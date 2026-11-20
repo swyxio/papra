@@ -26,6 +26,7 @@ import { cn } from '@/modules/shared/style/cn';
 import { useDebounce } from '@/modules/shared/utils/timing';
 import { Button } from '@/modules/ui/components/button';
 import { createToast } from '@/modules/ui/components/sonner';
+import { Skeleton } from '@/modules/ui/components/skeleton';
 import { TextField, TextFieldRoot } from '@/modules/ui/components/textfield';
 import { DocumentMoveDialog } from '../components/document-move-dialog.component';
 import { DocumentsBatchTagDialog } from '../components/documents-batch-tag-dialog.component';
@@ -33,6 +34,7 @@ import {
   uploadedByColumn,
   modifiedByColumn,
   modifiedAtColumn,
+  sizeColumn,
   documentDateColumn,
   DocumentsPaginatedList,
   standardActionsColumn,
@@ -187,6 +189,27 @@ export const DocumentsPage: Component = () => {
       }),
   }));
 
+  // Reading `data` while pending would suspend the router transition and hold the previous
+  // folder on screen, so pending folders render skeletons immediately instead.
+  const documentsData = () => (documentsQuery.isPending ? undefined : documentsQuery.data);
+  const [lastOpenedFolder, setLastOpenedFolder] = createSignal<string>();
+  createEffect(() => {
+    const folder = queryFolderId();
+    if (allFiles() || !folder) return;
+    if (documentsQuery.isSuccess) {
+      setLastOpenedFolder(folder);
+      return;
+    }
+    const previous = lastOpenedFolder();
+    if (documentsQuery.isError && previous && previous !== folder) {
+      setSearchParams({ folder: previous, page: undefined }, { replace: true });
+      createToast({
+        type: 'error',
+        message: `Could not open this folder: ${getHttpErrorMessage(documentsQuery.error)}`,
+      });
+    }
+  });
+
   const setRowSelection: Setter<RowSelectionState> = (valueOrUpdater) => {
     setSelectAllMatchingQuery(false);
     return setInternalRowSelection(valueOrUpdater);
@@ -199,13 +222,13 @@ export const DocumentsPage: Component = () => {
 
   const getEffectiveCount = () => {
     if (getSelectAllMatchingQuery()) {
-      return documentsQuery.data?.documentsCount ?? 0;
+      return documentsData()?.documentsCount ?? 0;
     }
     return getSelectedIds().length;
   };
 
   const isAllPageSelected = createMemo(() => {
-    const docs = documentsQuery.data?.documents ?? [];
+    const docs = documentsData()?.documents ?? [];
     if (docs.length === 0) {
       return false;
     }
@@ -214,8 +237,8 @@ export const DocumentsPage: Component = () => {
   });
 
   const hasMoreThanPage = createMemo(() => {
-    const total = documentsQuery.data?.documentsCount ?? 0;
-    const shown = documentsQuery.data?.documents.length ?? 0;
+    const total = documentsData()?.documentsCount ?? 0;
+    const shown = documentsData()?.documents.length ?? 0;
     return total > shown;
   });
 
@@ -337,7 +360,7 @@ export const DocumentsPage: Component = () => {
   async function handleBatchDownload() {
     const filter = getBatchFilter();
     if (!filter || downloadStatus()) return;
-    const pageDocuments = documentsQuery.data?.documents ?? [];
+    const pageDocuments = documentsData()?.documents ?? [];
     const ids = 'documentIds' in filter ? filter.documentIds : undefined;
     if (ids?.length === 1) {
       const document = pageDocuments.find((doc) => doc.id === ids[0]);
@@ -581,6 +604,7 @@ export const DocumentsPage: Component = () => {
                   each={[
                     ['createdAt', 'Upload date'],
                     ['modifiedAt', 'Last modified'],
+                    ['originalSize', 'Size'],
                     ['name', 'File name'],
                     ['uploadedBy', 'Uploader'],
                     ['modifiedBy', 'Last modifier'],
@@ -594,13 +618,17 @@ export const DocumentsPage: Component = () => {
                         {label} ·{' '}
                         {['name', 'uploadedBy', 'modifiedBy'].includes(field)
                           ? 'A–Z'
-                          : 'Oldest first'}
+                          : field === 'originalSize'
+                            ? 'Smallest first'
+                            : 'Oldest first'}
                       </option>
                       <option value={`${field}:desc`}>
                         {label} ·{' '}
                         {['name', 'uploadedBy', 'modifiedBy'].includes(field)
                           ? 'Z–A'
-                          : 'Newest first'}
+                          : field === 'originalSize'
+                            ? 'Largest first'
+                            : 'Newest first'}
                       </option>
                     </>
                   )}
@@ -646,15 +674,17 @@ export const DocumentsPage: Component = () => {
               when={showToolbar()}
               fallback={
                 <span class="text-sm text-muted-foreground">
-                  <Show
-                    when={debouncedSearchQuery().length > 0}
-                    fallback={t('documents.list.search.total-count-no-query', {
-                      count: documentsQuery.data?.documentsCount ?? 0,
-                    })}
-                  >
-                    {t('documents.list.search.total-count-with-query', {
-                      count: documentsQuery.data?.documentsCount ?? 0,
-                    })}
+                  <Show when={documentsData()}>
+                    <Show
+                      when={debouncedSearchQuery().length > 0}
+                      fallback={t('documents.list.search.total-count-no-query', {
+                        count: documentsData()?.documentsCount ?? 0,
+                      })}
+                    >
+                      {t('documents.list.search.total-count-with-query', {
+                        count: documentsData()?.documentsCount ?? 0,
+                      })}
+                    </Show>
                   </Show>
                 </span>
               }
@@ -690,11 +720,11 @@ export const DocumentsPage: Component = () => {
                     <Show
                       when={debouncedSearchQuery().length > 0}
                       fallback={t('documents.list.batch.select-all', {
-                        count: documentsQuery.data?.documentsCount ?? 0,
+                        count: documentsData()?.documentsCount ?? 0,
                       })}
                     >
                       {t('documents.list.batch.select-all-matching', {
-                        count: documentsQuery.data?.documentsCount ?? 0,
+                        count: documentsData()?.documentsCount ?? 0,
                       })}
                     </Show>
                   </Button>
@@ -765,16 +795,26 @@ export const DocumentsPage: Component = () => {
             </p>
           </Show>
 
-          <Show
-            when={debouncedSearchQuery().length > 0 && documentsQuery.data?.documents.length === 0}
-          >
+          <Show when={debouncedSearchQuery().length > 0 && documentsData()?.documents.length === 0}>
             <p class="text-muted-foreground mt-1 mb-6">{t('documents.list.no-results')}</p>
           </Show>
 
           <Show when={documentsQuery.isPending && !documentsQuery.isError}>
-            <p role="status" class="my-4 text-sm text-muted-foreground">
-              Loading files…
-            </p>
+            <div role="status" aria-label="Loading files" class="my-4 space-y-2">
+              <For each={[0, 1, 2, 3, 4]}>
+                {() => (
+                  <div class="flex items-center gap-3 rounded-md border p-3">
+                    <Skeleton class="size-8 shrink-0" />
+                    <div class="flex-1 space-y-2">
+                      <Skeleton class="h-3 w-2/5" />
+                      <Skeleton class="h-3 w-1/4" />
+                    </div>
+                    <Skeleton class="hidden h-3 w-20 sm:block" />
+                    <Skeleton class="hidden h-3 w-16 sm:block" />
+                  </div>
+                )}
+              </For>
+            </div>
           </Show>
           <Show when={documentsQuery.isError || foldersQuery.isError}>
             <p role="alert" class="my-4 text-sm">
@@ -795,7 +835,7 @@ export const DocumentsPage: Component = () => {
               !documentsQuery.isPending &&
               !documentsQuery.isError &&
               !foldersQuery.isError &&
-              documentsQuery.data?.documents.length === 0 &&
+              documentsData()?.documents.length === 0 &&
               !debouncedSearchQuery().trim()
             }
           >
@@ -804,26 +844,29 @@ export const DocumentsPage: Component = () => {
               Import a document to add files here.
             </p>
           </Show>
-          <DocumentsPaginatedList
-            documents={documentsQuery.data?.documents ?? []}
-            documentsCount={documentsQuery.data?.documentsCount ?? 0}
-            getPagination={getPagination}
-            setPagination={setPagination}
-            enableBatchSelection
-            getRowSelection={getRowSelection}
-            setRowSelection={setRowSelection}
-            getSorting={getSorting}
-            setSorting={setSorting}
-            extraColumns={[
-              tagsColumn,
-              propertiesColumn,
-              documentDateColumn,
-              uploadedByColumn,
-              modifiedByColumn,
-              modifiedAtColumn,
-              standardActionsColumn,
-            ]}
-          />
+          <Show when={documentsData()}>
+            <DocumentsPaginatedList
+              documents={documentsData()?.documents ?? []}
+              documentsCount={documentsData()?.documentsCount ?? 0}
+              getPagination={getPagination}
+              setPagination={setPagination}
+              enableBatchSelection
+              getRowSelection={getRowSelection}
+              setRowSelection={setRowSelection}
+              getSorting={getSorting}
+              setSorting={setSorting}
+              extraColumns={[
+                tagsColumn,
+                propertiesColumn,
+                documentDateColumn,
+                uploadedByColumn,
+                modifiedByColumn,
+                sizeColumn,
+                modifiedAtColumn,
+                standardActionsColumn,
+              ]}
+            />
+          </Show>
 
           <DocumentMoveDialog
             organizationId={params.organizationId}
