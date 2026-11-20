@@ -3,6 +3,7 @@ import { multipartUpload } from './drive-multipart.services';
 import type { AsDto } from '../shared/http/http-client.types';
 import type { DocumentSearchSortField, DocumentSearchSortOrder } from './documents.constants';
 import type { Document, DocumentActivity } from './documents.types';
+import type { UploadActivity } from './upload-activity.services';
 import { apiClient } from '../shared/http/api-client';
 import { coerceDates } from '../shared/http/http-client.models';
 
@@ -12,6 +13,7 @@ export async function uploadDocument({
   onProgress,
   folderId,
   documentId,
+  activity,
   completeUpload,
   onShareReady,
   onNameReady,
@@ -23,11 +25,13 @@ export async function uploadDocument({
   organizationId: string;
   folderId?: string;
   documentId?: string;
+  activity?: UploadActivity;
   onProgress?: (progress: TransferProgress) => void;
 }) {
   return multipartUpload(file, organizationId, onProgress, {
     folderId,
     documentId,
+    activity,
     completeUpload,
     onShareReady,
     onNameReady,

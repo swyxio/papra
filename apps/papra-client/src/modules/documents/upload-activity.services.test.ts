@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import {
   isUploadActiveElsewhere,
-  trackUploadActivity,
+  createUploadActivity,
   UPLOAD_ACTIVE_MAX_AGE_MS,
   UPLOAD_HEARTBEAT_MS,
 } from './upload-activity.services';
@@ -20,11 +20,12 @@ test('an upload heartbeating in another tab is not reported as interrupted until
     removeItem: (k: string) => store.delete(k),
   });
   expect(isUploadActiveElsewhere('u1')).toBe(false);
-  const stop = trackUploadActivity('u1');
+  const activity = createUploadActivity();
+  activity.track('u1');
   expect(isUploadActiveElsewhere('u1')).toBe(true);
   vi.advanceTimersByTime(UPLOAD_HEARTBEAT_MS * 3);
   expect(isUploadActiveElsewhere('u1')).toBe(true);
   expect(isUploadActiveElsewhere('u1', Date.now() + UPLOAD_ACTIVE_MAX_AGE_MS)).toBe(false);
-  stop();
+  activity.stop();
   expect(isUploadActiveElsewhere('u1')).toBe(false);
 });

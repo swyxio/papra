@@ -5,7 +5,7 @@ const prefix = UPLOAD_ACTIVITY_PREFIX;
 export const UPLOAD_HEARTBEAT_MS = 5000;
 export const UPLOAD_ACTIVE_MAX_AGE_MS = 4 * UPLOAD_HEARTBEAT_MS;
 
-export function trackUploadActivity(uploadId: string) {
+function trackUploadActivity(uploadId: string) {
   const key = `${prefix}${uploadId}`;
   const beat = () => {
     try {
@@ -21,6 +21,23 @@ export function trackUploadActivity(uploadId: string) {
     } catch {}
   };
 }
+
+export function createUploadActivity() {
+  let current: { uploadId: string; stop: () => void } | undefined;
+  return {
+    track(uploadId: string) {
+      if (current?.uploadId === uploadId) return;
+      current?.stop();
+      current = { uploadId, stop: trackUploadActivity(uploadId) };
+    },
+    stop() {
+      current?.stop();
+      current = undefined;
+    },
+  };
+}
+
+export type UploadActivity = ReturnType<typeof createUploadActivity>;
 
 export function isUploadActiveElsewhere(uploadId: string, now = Date.now()) {
   try {

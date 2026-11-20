@@ -35,7 +35,11 @@ import { throttle } from '@/modules/shared/utils/timing';
 import { fetchOrganizationSubscription } from '@/modules/subscriptions/subscriptions.services';
 import { getHttpErrorMessage, isHttpErrorWithStatusCode } from '@/modules/shared/http/http-errors';
 import { getUploadErrorFallback } from '../upload-errors';
-import { isUploadActiveElsewhere, UPLOAD_ACTIVITY_PREFIX } from '../upload-activity.services';
+import {
+  createUploadActivity,
+  isUploadActiveElsewhere,
+  UPLOAD_ACTIVITY_PREFIX,
+} from '../upload-activity.services';
 import { ReportProblem } from '@/modules/feedback/report.component';
 import { errorObservation, errorProof } from '@/modules/feedback/feedback.services';
 import { Button } from '@/modules/ui/components/button';
@@ -193,10 +197,13 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
     },
     refetchOnWindowFocus: true,
   }));
-  // Another tab finishing an upload clears its heartbeat; refresh so it no longer looks interrupted.
+  const [uploadActivityRevision, setUploadActivityRevision] = createSignal(0);
+  const refreshUploadActivity = () => setUploadActivityRevision((revision) => revision + 1);
   const refreshInterrupted = (event: StorageEvent) => {
-    if (event.key?.startsWith(UPLOAD_ACTIVITY_PREFIX) && event.newValue === null)
-      void interruptedQuery.refetch();
+    if (!event.key?.startsWith(UPLOAD_ACTIVITY_PREFIX)) return;
+    // Refresh the server list before exposing a row whose heartbeat was just cleared.
+    if (event.newValue === null) void interruptedQuery.refetch().finally(refreshUploadActivity);
+    else if (event.oldValue === null) refreshUploadActivity();
   };
   window.addEventListener('storage', refreshInterrupted);
   onCleanup(() => window.removeEventListener('storage', refreshInterrupted));
@@ -429,10 +436,13 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
         }
 
         const transfer = async () => {
+          // The heartbeat belongs to the file task, including time spent waiting for a retry.
+          const activity = createUploadActivity();
           const upload = async () =>
             uploadDocument({
               file,
               organizationId,
+              activity,
               completeUpload,
               folderId: folderImport
                 ? folders.get(file.webkitRelativePath.split('/').slice(0, -1).join('/'))
@@ -456,13 +466,21 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
               updateTaskStatus({ file, status: 'uploading' });
               return safely(upload());
             });
-          let [result, error] = await attempt();
-          // Network drops and stalled sockets resume on their own; acknowledged parts are not resent.
-          for (const delay of AUTO_RETRY_DELAYS_MS) {
-            if (!error || !isTransientUploadError(error)) break;
-            await new Promise((resolve) => setTimeout(resolve, delay));
-            [result, error] = await attempt();
-          }
+          const retryUpload = async () => {
+            try {
+              let outcome = await attempt();
+              for (const delay of AUTO_RETRY_DELAYS_MS) {
+                const [, error] = outcome;
+                if (!error || !isTransientUploadError(error)) break;
+                await new Promise((resolve) => setTimeout(resolve, delay));
+                outcome = await attempt();
+              }
+              return outcome;
+            } finally {
+              activity.stop();
+            }
+          };
+          const [result, error] = await retryUpload();
 
           if (error) {
             updateTaskStatus({ file, status: 'error', error });
@@ -559,8 +577,9 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
       Array.from(groups.values(), async (group) => uploadDocuments({ ...group, retry: true })),
     );
   };
-  const visibleInterrupted = () =>
-    interruptedQuery.data?.uploads.filter(
+  const visibleInterrupted = () => {
+    uploadActivityRevision();
+    return interruptedQuery.data?.uploads.filter(
       (upload) =>
         !dismissedInterrupted().includes(upload.id) &&
         !isUploadActiveElsewhere(upload.id) &&
@@ -571,6 +590,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
             (!upload.folderId || task.folderId === upload.folderId),
         ),
     );
+  };
 
   const UploadTaskRow = (props: { task: () => Task }) => {
     const task = props.task;
