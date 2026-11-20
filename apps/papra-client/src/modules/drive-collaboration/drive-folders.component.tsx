@@ -462,6 +462,10 @@ export const DriveFolders: Component<{ organizationId: string }> = (props) => {
         path: `${driveBase(props.organizationId)}/folders/${folder.id}?contents=trash`,
       }),
     onSuccess: (result, folder) => {
+      // Unfinished uploads moved to the parent; refresh the upload panel's interrupted list.
+      void client.invalidateQueries({
+        queryKey: ['organizations', props.organizationId, 'uploads'],
+      });
       if (subtreeOf(folder).some((entry) => entry.id === folderId()))
         setParams({ folder: folder.parentId ?? undefined });
       createToast({

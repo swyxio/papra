@@ -75,6 +75,7 @@ export function FolderUploads(props: { organizationId: string; folderId: string 
         path: `${driveBase(props.organizationId)}/folders/${upload.folderId}/uploads/${upload.id}`,
       });
       void uploads.refetch();
+      void client.invalidateQueries({ queryKey: [...key, 'uploads'] });
     } catch (error) {
       createToast({
         type: 'error',
