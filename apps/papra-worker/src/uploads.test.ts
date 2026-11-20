@@ -110,6 +110,7 @@ async function fixture() {
   return {
     DB,
     env,
+    app,
     user,
     objects,
     call,
@@ -149,6 +150,8 @@ test('folder members can see unfinished upload reports only in folders they can 
     uploads: expect.arrayContaining([
       {
         id: active,
+        folderId: 'fld_home_org',
+        canRemove: expect.any(Boolean),
         fileName: 'active.mov',
         size: 10,
         createdAt: expect.any(Number),
@@ -159,6 +162,8 @@ test('folder members can see unfinished upload reports only in folders they can 
       },
       {
         id: unreported,
+        folderId: 'fld_home_org',
+        canRemove: expect.any(Boolean),
         fileName: 'unreported.mov',
         size: 10,
         createdAt: expect.any(Number),
@@ -175,10 +180,27 @@ test('folder members can see unfinished upload reports only in folders they can 
   expect(await (await f.folderUploads('private')).json()).toMatchObject({
     uploads: [{ id: privateUpload, bytes: 4 }],
   });
+  // Readable subfolders are included, labelled with their folder, and readers cannot remove them.
+  expect((await (await f.folderUploads('fld_home_org')).json()).uploads).toContainEqual(
+    expect.objectContaining({ id: privateUpload, folderId: 'private', canRemove: false }),
+  );
+  const remove = async (id: string) =>
+    f.app.request(
+      `/api/organizations/org/folders/fld_home_org/uploads/${id}`,
+      { method: 'DELETE' },
+      f.env,
+    );
+  expect((await remove(privateUpload)).status).toBe(404);
   await f.DB.prepare("UPDATE uploads SET status='complete' WHERE id=?").bind(active).run();
-  expect(await (await f.folderUploads('fld_home_org')).json()).toMatchObject({
-    uploads: [{ id: unreported }],
-  });
+  const ids = async () =>
+    (
+      (await (await f.folderUploads('fld_home_org')).json()) as { uploads: { id: string }[] }
+    ).uploads
+      .map((upload) => upload.id)
+      .toSorted();
+  expect(await ids()).toEqual([privateUpload, unreported].toSorted());
+  expect((await remove(unreported)).status).toBe(204);
+  expect(await ids()).toEqual([privateUpload]);
 });
 
 test('multipart sign/complete strictly validates owner, numbers and provider bytes; completion repairs lost response', async () => {

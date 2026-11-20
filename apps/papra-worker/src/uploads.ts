@@ -153,8 +153,11 @@ export function registerUploadRoutes(app: App) {
     await ensureOrganizationMember(c.env, identity, org);
     const folder = await canReadFolder(c.env, identity, c.req.param('folderId'));
     if (folder.organization_id !== org) throw error(404, 'Folder not found');
-    const rows = await all<{
+    // Include subfolders so a folder import's unfinished files are visible from where it started.
+    const candidates = await all<{
       id: string;
+      user_id: string;
+      folder_id: string;
       file_name: string;
       size: number;
       created_at: number;
@@ -164,19 +167,52 @@ export function registerUploadRoutes(app: App) {
       interrupted: number | null;
     }>(
       c.env,
-      `SELECT u.id,u.file_name,u.size,u.created_at,usr.name AS uploader,
+      `WITH RECURSIVE subtree(id) AS (SELECT ? UNION SELECT f.id FROM folders f JOIN subtree s ON f.parent_id=s.id)
+       SELECT u.id,u.user_id,u.folder_id,u.file_name,u.size,u.created_at,usr.name AS uploader,
               p.bytes,p.updated_at AS progress_at,p.interrupted
        FROM uploads u LEFT JOIN users usr ON usr.id=u.user_id
        LEFT JOIN upload_shares p ON p.upload_id=u.id
-       WHERE u.organization_id=? AND u.folder_id=? AND u.status='uploading' AND u.replacement=0
-       ORDER BY u.created_at DESC,u.id LIMIT 101`,
-      org,
+       WHERE u.organization_id=? AND u.folder_id IN (SELECT id FROM subtree) AND u.status='uploading' AND u.replacement=0
+       ORDER BY u.created_at DESC,u.id LIMIT 500`,
       folder.id,
+      org,
     );
+    const access = new Map<string, Promise<boolean>>();
+    const readable = (folderId: string) => {
+      if (!access.has(folderId))
+        access.set(
+          folderId,
+          canReadFolder(c.env, identity, folderId).then(
+            () => true,
+            () => false,
+          ),
+        );
+      return access.get(folderId)!;
+    };
+    const writable = new Map<string, Promise<boolean>>();
+    const canRemove = (row: { user_id: string; folder_id: string }) => {
+      if (row.user_id === identity.userId) return Promise.resolve(true);
+      if (!writable.has(row.folder_id))
+        writable.set(
+          row.folder_id,
+          canWriteFolder(c.env, identity, row.folder_id).then(
+            () => true,
+            () => false,
+          ),
+        );
+      return writable.get(row.folder_id)!;
+    };
+    const rows = [];
+    for (const row of candidates) {
+      if (rows.length > 100) break;
+      if (await readable(row.folder_id)) rows.push({ ...row, removable: await canRemove(row) });
+    }
     c.header('Cache-Control', 'private, no-store');
     return c.json({
       uploads: rows.slice(0, 100).map((row) => ({
         id: row.id,
+        folderId: row.folder_id,
+        canRemove: row.removable,
         fileName: row.file_name,
         size: row.size,
         createdAt: row.created_at,
@@ -187,6 +223,27 @@ export function registerUploadRoutes(app: App) {
       })),
       hasMore: rows.length > 100,
     });
+  });
+  // Folder editors can clear orphaned uploads that teammates started into their folders.
+  app.delete('/api/organizations/:org/folders/:folderId/uploads/:upload', async (c) => {
+    const identity = c.get('identity');
+    if (identity.serviceScope) throw error(403, 'Upload activity requires a user session');
+    const org = c.req.param('org');
+    await ensureOrganizationMember(c.env, identity, org);
+    const u = await first(
+      c.env,
+      "SELECT * FROM uploads WHERE id=? AND organization_id=? AND status='uploading' AND replacement=0",
+      c.req.param('upload'),
+      org,
+    );
+    if (!u) throw error(404, 'Upload not found');
+    const folder = await canReadFolder(c.env, identity, u.folder_id);
+    if (folder.organization_id !== org) throw error(404, 'Upload not found');
+    if (u.user_id !== identity.userId) await canWriteFolder(c.env, identity, u.folder_id);
+    if (!single(u)) await s3(c.env).abortMultipartUpload(u.storage_key, u.upload_id);
+    else await c.env.FILES.delete(u.storage_key);
+    await c.env.DB.prepare("UPDATE uploads SET status='aborted' WHERE id=?").bind(u.id).run();
+    return c.body(null, 204);
   });
   app.get(base, async (c) => {
     await ensureOrganizationMember(c.env, c.get('identity'), c.req.param('org'));

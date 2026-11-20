@@ -737,6 +737,49 @@ describe('D1 collaboration authorization and actual routes', () => {
     ).toBe(200);
   });
 
+  test('deleting a non-empty folder sends its files to Trash under the parent', async () => {
+    const f = await fixture();
+    const create = async (name: string, parentId: string) =>
+      (
+        (await (await f.request(`${f.base}/folders`, 'POST', { name, parentId })).json()) as {
+          folder: { id: string };
+        }
+      ).folder.id;
+    const outer = await create('Shoot day', f.home);
+    const inner = await create('Camera A', outer);
+    expect(
+      (await f.request(`${f.base}/documents/doc_public/folder`, 'PUT', { folderId: inner })).status,
+    ).toBe(200);
+    expect((await f.request(`${f.base}/folders/${outer}`, 'DELETE')).status).toBe(409);
+    const removed = await f.request(`${f.base}/folders/${outer}?contents=trash`, 'DELETE');
+    expect(removed.status).toBe(200);
+    expect(await removed.json()).toEqual({ success: true, trashedDocuments: 1 });
+    const left = await f.DB.prepare('SELECT count(*) n FROM folders WHERE id IN (?,?)')
+      .bind(outer, inner)
+      .first<{ n: number }>();
+    expect(left?.n).toBe(0);
+    const doc = await f.DB.prepare('SELECT is_deleted,home_folder_id FROM documents WHERE id=?')
+      .bind('doc_public')
+      .first<{ is_deleted: number; home_folder_id: string }>();
+    expect(doc).toEqual({ is_deleted: 1, home_folder_id: f.home });
+
+    const guarded = await create('Guarded', f.home);
+    const locked = await create('Locked', guarded);
+    expect(
+      (
+        await f.request(
+          `${f.base}/folders/${locked}/permissions`,
+          'PUT',
+          { isRestricted: true, grants: [] },
+          'admin',
+        )
+      ).status,
+    ).toBe(200);
+    expect((await f.request(`${f.base}/folders/${guarded}?contents=trash`, 'DELETE')).status).toBe(
+      409,
+    );
+  });
+
   test('shortcuts preserve one home and never grant permissions to restricted source documents', async () => {
     const f = await fixture();
     expect(
