@@ -158,6 +158,17 @@ export const modifiedAtColumn: ColumnDef<Document> = {
   ),
 };
 
+export const sizeColumn: ColumnDef<Document> = {
+  header: () => <span class="sr-only sm:not-sr-only">Size</span>,
+  accessorKey: 'originalSize',
+  enableSorting: true,
+  cell: (data) => (
+    <span class="hidden sm:block whitespace-nowrap text-sm text-muted-foreground">
+      {formatBytes({ bytes: data.getValue<number>() ?? 0 })}
+    </span>
+  ),
+};
+
 export const deletedAtColumn: ColumnDef<Document> = {
   header: () => {
     const { t } = useI18n();
