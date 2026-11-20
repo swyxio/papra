@@ -109,6 +109,12 @@ export const DocumentRenameSuggestionsDialog: Component<{
         <Show when={suggest.error}>
           {(err) => <p class="text-sm text-red-500">{getHttpErrorMessage(err())}</p>}
         </Show>
+        <Show when={suggest.isSuccess && rows().length < props.documentIds.length}>
+          <p class="text-xs text-muted-foreground">
+            No suggestion for {props.documentIds.length - rows().length} of the selected files. Try
+            them again later.
+          </p>
+        </Show>
         <Show when={rows().length > 0}>
           <div class="max-h-[60vh] overflow-y-auto divide-y rounded-md border">
             <Index each={rows()}>
