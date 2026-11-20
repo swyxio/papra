@@ -618,13 +618,17 @@ export const DocumentsPage: Component = () => {
                         {label} ·{' '}
                         {['name', 'uploadedBy', 'modifiedBy'].includes(field)
                           ? 'A–Z'
-                          : 'Oldest first'}
+                          : field === 'originalSize'
+                            ? 'Smallest first'
+                            : 'Oldest first'}
                       </option>
                       <option value={`${field}:desc`}>
                         {label} ·{' '}
                         {['name', 'uploadedBy', 'modifiedBy'].includes(field)
                           ? 'Z–A'
-                          : 'Newest first'}
+                          : field === 'originalSize'
+                            ? 'Largest first'
+                            : 'Newest first'}
                       </option>
                     </>
                   )}
