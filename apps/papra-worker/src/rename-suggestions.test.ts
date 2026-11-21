@@ -6,6 +6,7 @@ import {
   readRenameFrames,
   suggestDocumentNames,
   validateRenameSuggestions,
+  withNearbySpeech,
 } from './rename-suggestions';
 
 test('suggested names keep the original extension and drop unsafe characters', () => {
@@ -68,6 +69,29 @@ test('recording excerpts include speech from the beginning, middle, and end', ()
   expect(excerpt.length).toBeLessThanOrEqual(7506);
 });
 
+test('filename-only suggestions preserve camera and clip labels without model calls or filler', async () => {
+  const run = vi.fn();
+  const env = { AI: { run } } as unknown as Env;
+  const sources = ['Untitled CAM 4 01.mp4', 'Untitled CAM 2 01.MP4', 'Interview Edit CAM 4.mp4'];
+  const result = await suggestDocumentNames(
+    env,
+    sources.map((name, i) => ({
+      id: String(i),
+      name,
+      mimeType: 'video/mp4',
+      folder: 'Home / Pragmatic Engineer <> Swyx',
+      excerpt: '',
+      frames: [],
+    })),
+  );
+  expect(run).not.toHaveBeenCalled();
+  expect(result).toEqual([
+    { documentId: '0', name: 'Pragmatic Engineer + Swyx - CAM 4 01.mp4', description: '' },
+    { documentId: '1', name: 'Pragmatic Engineer + Swyx - CAM 2 01.MP4', description: '' },
+    { documentId: '2', name: 'Interview Edit CAM 4.mp4', description: '' },
+  ]);
+});
+
 test('rename reads bounded cached frames and adds them to one request for the same recording', async () => {
   const thumbnails = [0, 20, 40, 60, 80].map((timestamp_seconds) => ({
     timestamp_seconds,
@@ -110,7 +134,12 @@ test('rename reads bounded cached frames and adds them to one request for the sa
       mimeType: 'video/mp4',
       folder: 'Interview',
       excerpt: 'Introductions and the rest of the conversation',
-      frames,
+      frames: withNearbySpeech(frames, [
+        { text: '[Chunk 1 not transcribed]', startSeconds: null },
+        { text: 'Opening introduction', startSeconds: 2 },
+        { text: 'Self-introduction', startSeconds: 19 },
+        { text: 'Unrelated section', startSeconds: 45 },
+      ]),
     },
   ]);
   expect(run).toHaveBeenCalledTimes(1);
@@ -121,7 +150,7 @@ test('rename reads bounded cached frames and adds them to one request for the sa
         role: 'user',
         content: [
           { type: 'text', text: expect.stringContaining('Introductions') },
-          { type: 'text', text: 'Frame at 20s' },
+          { type: 'text', text: 'Frame at 20s. Nearby transcript excerpt: "Self-introduction"' },
           { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,AQID' } },
           { type: 'text', text: 'Frame at 60s' },
           { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,AQID' } },

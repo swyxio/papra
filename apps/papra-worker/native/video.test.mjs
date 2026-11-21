@@ -2,7 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { mkdtemp, open, readFile, rm, stat } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -11,6 +13,7 @@ import {
   encodePlayback,
   convertVideoJob,
   thumbnail,
+  writeAudioChunk,
 } from './server.mjs';
 import {
   needsVideoPreview,
@@ -23,6 +26,102 @@ import {
 const run = promisify(execFile);
 const signed = (key) =>
   `https://2d017c943ff16e4c52783635ef05e535.r2.cloudflarestorage.com/papra-drive/${key}?X-Amz-Signature=test`;
+
+test('FFmpeg extracts a late audio slice through ranges from a sparse 12 GiB MP4', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'papra-audio-range-'));
+  t.after(async () => rm(dir, { recursive: true, force: true }));
+  const original = join(dir, 'synthetic.mp4');
+  await run('ffmpeg', [
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'color=s=32x32:r=1',
+    '-f',
+    'lavfi',
+    '-i',
+    'sine=frequency=400:sample_rate=16000',
+    '-t',
+    '905',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    '-threads',
+    '1',
+    '-c:a',
+    'aac',
+    '-b:a',
+    '24k',
+    original,
+  ]);
+  const bytes = await readFile(original);
+  let movie = 0;
+  while (bytes.toString('ascii', movie + 4, movie + 8) !== 'moov') {
+    const atomSize = bytes.readUInt32BE(movie);
+    assert.ok(atomSize >= 8);
+    movie += atomSize;
+  }
+  const gap = 12 * 1024 ** 3;
+  const free = Buffer.alloc(16);
+  free.writeUInt32BE(1);
+  free.write('free', 4);
+  free.writeBigUInt64BE(BigInt(gap), 8);
+  const sparsePath = join(dir, 'large.mp4');
+  const sparse = await open(sparsePath, 'w');
+  try {
+    await sparse.write(bytes.subarray(0, movie));
+    await sparse.write(free);
+    await sparse.write(bytes.subarray(movie), 0, bytes.length - movie, movie + gap);
+  } finally {
+    await sparse.close();
+  }
+  const size = bytes.length + gap;
+  const starts = [];
+  let transferred = 0;
+  const source = createServer((request, response) => {
+    const match = /^bytes=(\d+)-(\d*)$/.exec(request.headers.range ?? '');
+    const start = match ? Number(match[1]) : 0;
+    const end = match?.[2] ? Math.min(Number(match[2]), size - 1) : size - 1;
+    starts.push(start);
+    response.writeHead(match ? 206 : 200, {
+      ...(match && { 'content-range': `bytes ${start}-${end}/${size}` }),
+      'accept-ranges': 'bytes',
+      'content-type': 'video/mp4',
+      'content-length': end - start + 1,
+    });
+    const body = createReadStream(sparsePath, { start, end });
+    response.on('close', () => body.destroy());
+    body.on('data', (chunk) => {
+      transferred += chunk.length;
+      if (transferred > 16 * 1024 ** 2) response.destroy();
+    });
+    body.pipe(response);
+  });
+  await new Promise((resolve) => source.listen(0, '127.0.0.1', resolve));
+  try {
+    const url = `http://127.0.0.1:${source.address().port}/large.mp4`;
+    const signal = AbortSignal.timeout(15_000);
+    const info = await probeMedia(url, signal);
+    assert.equal(Number(info.format.duration), 905);
+    assert.equal(Number(info.format.size), size);
+    const slice = join(dir, 'late.wav');
+    await writeAudioChunk(url, slice, 900, 5, signal);
+    const audio = await probeMedia(slice, signal);
+    assert.equal(Number(audio.format.duration), 5);
+    assert.equal(Number(audio.streams[0].sample_rate), 16_000);
+    assert.ok(
+      starts.some((offset) => offset >= gap),
+      'reads the MP4 index beyond 12 GiB',
+    );
+    assert.ok(transferred < 8 * 1024 ** 2, `read ${transferred} bytes through ranges`);
+  } finally {
+    source.closeAllConnections();
+    await new Promise((resolve) => source.close(resolve));
+  }
+});
 const safe = {
   videoCodec: 'h264',
   pixelFormat: 'yuv420p',

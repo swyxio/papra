@@ -299,9 +299,89 @@ function textChunks(text, extra = {}) {
     result.push({ text: text.slice(i, i + 1800), ...extra });
   return result;
 }
-export async function processJob(rawJob) {
+export async function writeAudioChunk(source, destination, start, duration, signal) {
+  await command(
+    'ffmpeg',
+    [
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-nostdin',
+      '-threads',
+      '1',
+      '-ss',
+      String(start),
+      '-discard:v',
+      'all',
+      ...httpsOptions(source),
+      ...(source.startsWith('https://')
+        ? ['-multiple_requests', '1', '-short_seek_size', '8388608']
+        : []),
+      '-i',
+      source,
+      '-t',
+      String(duration),
+      '-vn',
+      '-ac',
+      '1',
+      '-ar',
+      '16000',
+      '-c:a',
+      'pcm_s16le',
+      '-y',
+      destination,
+    ],
+    signal,
+  );
+}
+
+function validateAudioSlice(job) {
+  if (
+    typeof job?.jobId !== 'string' ||
+    !/^[a-zA-Z0-9_-]{1,128}$/.test(job.jobId) ||
+    !/^(audio|video)\//i.test(job.source?.contentType ?? '') ||
+    !Number.isSafeInteger(job.source.byteSize) ||
+    job.source.byteSize < 1 ||
+    !Number.isFinite(job.startSeconds) ||
+    !Number.isFinite(job.endSeconds) ||
+    job.startSeconds < 0 ||
+    job.endSeconds > 21600 ||
+    job.endSeconds <= job.startSeconds ||
+    job.endSeconds - job.startSeconds > 300
+  )
+    throw new ProcessingError('invalid_audio_slice', 400);
+  return { ...job, source: authorizedUrl(job.source.url), output: target(job.output) };
+}
+
+async function audioSliceJob(rawJob, callerSignal) {
+  const job = validateAudioSlice(rawJob);
+  const signal = AbortSignal.any([callerSignal, AbortSignal.timeout(8 * 60_000)]);
+  const dir = await mkdtemp(join(tmpdir(), 'papra-audio-'));
+  try {
+    const file = join(dir, 'chunk.wav');
+    await writeAudioChunk(
+      job.source,
+      file,
+      job.startSeconds,
+      job.endSeconds - job.startSeconds,
+      signal,
+    );
+    return {
+      jobId: job.jobId,
+      output: await upload(file, job.output, 'audio', 'audio/wav', signal, {
+        startSeconds: job.startSeconds,
+        endSeconds: job.endSeconds,
+      }),
+    };
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+export async function processJob(rawJob, callerSignal) {
   const job = validateJob(rawJob);
-  const signal = AbortSignal.timeout(JOB_TIMEOUT_MS);
+  const timeout = AbortSignal.timeout(JOB_TIMEOUT_MS);
+  const signal = callerSignal ? AbortSignal.any([timeout, callerSignal]) : timeout;
   const dir = await mkdtemp(join(tmpdir(), 'papra-native-'));
   const type = job.source.contentType.toLowerCase().split(';')[0];
   const media = type.startsWith('audio/') || type.startsWith('video/');
@@ -372,20 +452,34 @@ export async function processJob(rawJob) {
           await upload(preview, job.outputs.preview, 'preview', 'image/jpeg', signal),
         );
     } else if (type.startsWith('audio/') || type.startsWith('video/')) {
-      const info = await probeMedia(source, signal);
+      const info = await probeMedia(source, AbortSignal.any([signal, AbortSignal.timeout(60_000)]));
       const duration = Number(info.format?.duration);
       if (!Number.isFinite(duration) || duration <= 0 || duration > job.limits.maxDurationSeconds)
         throw new ProcessingError('media_duration_limit_exceeded');
       const hasAudio = info.streams?.some((stream) => stream.codec_type === 'audio') ?? false;
       const hasVideo = info.streams?.some((stream) => stream.codec_type === 'video') ?? false;
       result.metadata = normalizeMediaMetadata(info);
+      const largeMedia =
+        job.deferLongAudio === true && (job.source.byteSize >= HARD_MAX_BYTES || duration >= 900);
+      const frameSignal = () =>
+        largeMedia ? AbortSignal.any([signal, AbortSignal.timeout(35_000)]) : signal;
+      const optionalFrame = (error) =>
+        error.code === 'native_frame_unavailable' ||
+        (largeMedia &&
+          !signal.aborted &&
+          (error.code === 'processing_timeout' || error.status === 502));
       if (hasVideo && job.outputs.preview) {
         const preview = join(dir, 'preview.jpg');
-        await thumbnail(source, preview, signal);
-        result.outputs.push(
-          await upload(preview, job.outputs.preview, 'preview', 'image/jpeg', signal),
-        );
-        await rm(preview);
+        const frameBudget = frameSignal();
+        try {
+          await thumbnail(source, preview, frameBudget);
+          result.outputs.push(
+            await upload(preview, job.outputs.preview, 'preview', 'image/jpeg', frameBudget),
+          );
+        } catch (error) {
+          if (!largeMedia || !optionalFrame(error)) throw error;
+          result.warnings.push('video_cover_unavailable');
+        }
       }
       if (hasVideo) {
         const count = Math.min(job.limits.maxFrames, job.outputs.videoFrames.length);
@@ -402,26 +496,32 @@ export async function processJob(rawJob) {
         for (let index = 0; index < count; index++) {
           const time = Math.min((duration * index) / count, lastFrame);
           const frame = join(dir, 'frame.jpg');
+          const frameBudget = frameSignal();
           try {
-            await thumbnail(source, frame, signal, time);
+            await thumbnail(source, frame, frameBudget, time);
+            result.outputs.push(
+              await upload(
+                frame,
+                job.outputs.videoFrames[index],
+                'frame',
+                'image/jpeg',
+                frameBudget,
+                {
+                  startSeconds: time,
+                },
+              ),
+            );
+            const text = await ocr(frame, frameBudget);
+            result.chunks.push(
+              ...textChunks(text, {
+                startSeconds: time,
+                endSeconds: (duration * (index + 1)) / count,
+              }),
+            );
           } catch (error) {
-            if (error.code !== 'native_frame_unavailable') throw error;
-            result.warnings.push(`video_frame_${index}_unavailable`);
-            continue;
+            if (!optionalFrame(error)) throw error;
+            result.warnings.push(`video_frame_${index}_incomplete`);
           }
-          const text = await ocr(frame, signal);
-          result.chunks.push(
-            ...textChunks(text, {
-              startSeconds: time,
-              endSeconds: (duration * (index + 1)) / count,
-            }),
-          );
-          result.outputs.push(
-            await upload(frame, job.outputs.videoFrames[index], 'frame', 'image/jpeg', signal, {
-              startSeconds: time,
-            }),
-          );
-          await rm(frame);
         }
         result.text = result.chunks.map((chunk) => chunk.text).join('\n\n');
       }
@@ -429,45 +529,21 @@ export async function processJob(rawJob) {
         const count = Math.ceil(duration / job.limits.audioChunkSeconds);
         if (count > job.outputs.audioChunks.length)
           throw new ProcessingError('insufficient_audio_output_targets');
-        for (let index = 0; index < count; index++) {
-          const start = index * job.limits.audioChunkSeconds;
-          const audio = join(dir, 'chunk.wav');
-          await command(
-            'ffmpeg',
-            [
-              '-hide_banner',
-              '-loglevel',
-              'error',
-              '-nostdin',
-              '-threads',
-              '1',
-              '-ss',
-              String(start),
-              ...httpsOptions(source),
-              '-i',
-              source,
-              '-t',
-              String(job.limits.audioChunkSeconds),
-              '-vn',
-              '-ac',
-              '1',
-              '-ar',
-              '16000',
-              '-c:a',
-              'pcm_s16le',
-              '-y',
-              audio,
-            ],
-            signal,
-          );
-          result.outputs.push(
-            await upload(audio, job.outputs.audioChunks[index], 'audio', 'audio/wav', signal, {
-              startSeconds: start,
-              endSeconds: Math.min(duration, start + job.limits.audioChunkSeconds),
-            }),
-          );
-          await rm(audio);
-        }
+        if (largeMedia) result.deferredAudio = { durationSeconds: duration };
+        else
+          for (let index = 0; index < count; index++) {
+            const start = index * job.limits.audioChunkSeconds;
+            const audio = join(dir, 'chunk.wav');
+            const end = Math.min(duration, start + job.limits.audioChunkSeconds);
+            await writeAudioChunk(source, audio, start, end - start, signal);
+            result.outputs.push(
+              await upload(audio, job.outputs.audioChunks[index], 'audio', 'audio/wav', signal, {
+                startSeconds: start,
+                endSeconds: end,
+              }),
+            );
+            await rm(audio);
+          }
       }
     } else if (
       type.startsWith('text/') ||
@@ -819,9 +895,14 @@ export function createNativeServer({ convert = convertVideoJob, heartbeatMs = 15
     }
     if (
       request.method !== 'POST' ||
-      !['/process', '/hash', '/video/probe', '/video/convert', '/video/thumbnails'].includes(
-        request.url,
-      )
+      ![
+        '/process',
+        '/hash',
+        '/media/audio',
+        '/video/probe',
+        '/video/convert',
+        '/video/thumbnails',
+      ].includes(request.url)
     ) {
       response.writeHead(404);
       response.end(JSON.stringify({ error: 'not_found' }));
@@ -853,9 +934,13 @@ export function createNativeServer({ convert = convertVideoJob, heartbeatMs = 15
       } catch {
         throw new ProcessingError('invalid_json', 400);
       }
-      if (['/video/convert', '/video/thumbnails'].includes(request.url)) {
+      if (
+        ['/process', '/media/audio', '/video/convert', '/video/thumbnails'].includes(request.url)
+      ) {
+        if (request.url === '/process') validateJob(job);
+        if (request.url === '/media/audio') validateAudioSlice(job);
         if (request.url === '/video/convert') validateVideoJob(job, true);
-        else validateVideoJob(job);
+        if (request.url === '/video/thumbnails') validateVideoJob(job);
         if (request.url === '/video/convert')
           response.setHeader('content-type', 'application/x-ndjson');
         // Flush bytes during encoding so proxies do not expire a silent long-running response.
@@ -870,6 +955,7 @@ export function createNativeServer({ convert = convertVideoJob, heartbeatMs = 15
       const result = await {
         '/hash': hashObject,
         '/process': processJob,
+        '/media/audio': audioSliceJob,
         '/video/probe': probeVideoJob,
         '/video/convert': convert,
         '/video/thumbnails': thumbnailVideoJob,

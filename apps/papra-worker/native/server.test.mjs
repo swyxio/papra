@@ -44,6 +44,7 @@ test('invalid payloads return safe domain errors without echoing capability URLs
   try {
     for (const [path, code] of [
       ['/process', 'invalid_job'],
+      ['/media/audio', 'invalid_audio_slice'],
       ['/video/probe', 'invalid_video_job'],
       ['/video/convert', 'invalid_video_job'],
     ]) {

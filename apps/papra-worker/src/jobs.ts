@@ -15,7 +15,13 @@ import { AwsClient } from 'aws4fetch';
 import type { Env } from './types';
 import { all, first, run, id } from './db';
 import { s3 } from './storage';
-import type { NativeJob, NativeOutput, NativeResult } from '../native/protocol';
+import type {
+  NativeAudioResult,
+  NativeAudioSlice,
+  NativeJob,
+  NativeOutput,
+  NativeResult,
+} from '../native/protocol';
 import {
   recordVideoMetadata,
   recordVideoProgress,
@@ -67,6 +73,9 @@ type Enrichment = {
 const MAX_TEXT = 200_000,
   LEASE_MS = 20 * 60_000,
   WORKER_OBJECT_BYTES = 1024 ** 2;
+const AUDIO_CHUNK_SECONDS = 300;
+const MAX_AUDIO_CHUNKS = 72;
+const MAX_AUDIO_CHUNK_BYTES = 10 * 1024 ** 2;
 const WHISPER = '@cf/openai/whisper-large-v3-turbo' as const;
 const VISION = '@cf/google/gemma-4-26b-a4b-it' as const;
 const EMBEDDING = '@cf/baai/bge-base-en-v1.5' as const;
@@ -361,7 +370,7 @@ async function callNative<T>(
         method: 'POST',
         body: JSON.stringify(payload),
         headers: { 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(13 * 60_000),
+        signal: AbortSignal.timeout((path === '/media/audio' ? 9 : 13) * 60_000),
       }),
     );
     // A newly deployed Worker may briefly reach the previous container image.
@@ -369,7 +378,7 @@ async function callNative<T>(
     if (
       response.status === 503 ||
       response.status === 429 ||
-      (response.status === 404 && path.startsWith('/video/'))
+      (response.status === 404 && (path.startsWith('/video/') || path === '/media/audio'))
     )
       throw new JobError('native_capacity_pending');
     if (!response.ok) {
@@ -530,7 +539,7 @@ async function processVersion(env: Env, j: Job, v: Version) {
         outputs.preview = await target('preview.jpg');
       if (/^(audio|video)\//.test(v.mime_type))
         outputs.audioChunks = await Promise.all(
-          Array.from({ length: 72 }, async (_, i) => target(`audio-${i}.wav`)),
+          Array.from({ length: MAX_AUDIO_CHUNKS }, async (_, i) => target(`audio-${i}.wav`)),
         );
       if (v.mime_type.startsWith('video/'))
         outputs.videoFrames = await Promise.all(
@@ -544,11 +553,12 @@ async function processVersion(env: Env, j: Job, v: Version) {
           byteSize: v.size,
         },
         outputs,
+        deferLongAudio: true,
         limits: {
           maxBytes: 2 * 1024 ** 3,
           maxPages: 250,
-          maxDurationSeconds: 21600,
-          audioChunkSeconds: 300,
+          maxDurationSeconds: MAX_AUDIO_CHUNKS * AUDIO_CHUNK_SECONDS,
+          audioChunkSeconds: AUDIO_CHUNK_SECONDS,
           maxFrames: 12,
         },
       };
@@ -563,6 +573,11 @@ async function processVersion(env: Env, j: Job, v: Version) {
         typeof result.text !== 'string' ||
         !Array.isArray(result.outputs) ||
         result.outputs.length > 86 ||
+        (result.deferredAudio !== undefined &&
+          (!Number.isFinite(result.deferredAudio?.durationSeconds) ||
+            result.deferredAudio.durationSeconds <= 0 ||
+            result.deferredAudio.durationSeconds > MAX_AUDIO_CHUNKS * AUDIO_CHUNK_SECONDS ||
+            result.outputs.some((output) => output.kind === 'audio'))) ||
         result.outputs.some(
           (x) =>
             !allowed.has(x.key) ||
@@ -620,9 +635,10 @@ async function processVersion(env: Env, j: Job, v: Version) {
     ),
   ]);
   const kinds: string[] = ['hash', 'backup'];
-  m.result.outputs
-    .filter((x) => x.kind === 'audio')
-    .forEach((_, i) => kinds.push(`transcribe:${j.generation}:${i}`));
+  const audioCount = m.result.deferredAudio
+    ? Math.ceil(m.result.deferredAudio.durationSeconds / AUDIO_CHUNK_SECONDS)
+    : m.result.outputs.filter((output) => output.kind === 'audio').length;
+  for (let i = 0; i < audioCount; i++) kinds.push(`transcribe:${j.generation}:${i}`);
   const frames = m.result.outputs.filter((x) => x.kind === 'frame');
   if (frames.length) frames.forEach((_, i) => kinds.push(`vision:${j.generation}:${i}`));
   else if (preview) kinds.push(`vision:${j.generation}:0`);
@@ -665,6 +681,60 @@ async function verifyAsset(env: Env, a: NativeOutput, max: number) {
   if (hash !== a.sha256) throw new JobError('derived_asset_checksum_mismatch', true);
   return bytes;
 }
+
+async function prepareAudioSlice(env: Env, j: Job, v: Version, duration: number, index: number) {
+  const start = index * AUDIO_CHUNK_SECONDS;
+  const end = Math.min(duration, start + AUDIO_CHUNK_SECONDS);
+  if (!Number.isFinite(end) || end <= start || index >= MAX_AUDIO_CHUNKS)
+    throw new JobError('invalid_audio_slice', true);
+  const prefix = `derived/${v.id}/${j.kind.replaceAll(':', '-')}-source`;
+  const receiptKey = `${prefix}.json`;
+  const valid = (asset: NativeOutput | undefined) =>
+    asset?.kind === 'audio' &&
+    asset.contentType === 'audio/wav' &&
+    asset.startSeconds === start &&
+    asset.endSeconds === end &&
+    Number.isSafeInteger(asset.byteSize) &&
+    asset.byteSize > 0 &&
+    asset.byteSize <= MAX_AUDIO_CHUNK_BYTES &&
+    /^[a-f0-9]{64}$/.test(asset.sha256);
+
+  const receipt = await env.FILES.get(receiptKey);
+  if (receipt && receipt.size <= 4096) {
+    const cached = await receipt.json<NativeOutput>();
+    if (
+      valid(cached) &&
+      typeof cached.key === 'string' &&
+      cached.key.startsWith(`${prefix}-`) &&
+      (await env.FILES.head(cached.key))?.size === cached.byteSize
+    )
+      return cached;
+  }
+  const key = `${prefix}-${j.lease_token}.wav`;
+  const storage = s3(env);
+  const payload: NativeAudioSlice = {
+    jobId: j.id,
+    source: {
+      url: await storage.getPresignedUrl('GET', v.storage_key, 1800),
+      contentType: v.mime_type,
+      byteSize: v.size,
+    },
+    output: { key, url: await storage.getPresignedUrl('PUT', key, 1800) },
+    startSeconds: start,
+    endSeconds: end,
+  };
+  const result = await callNative<NativeAudioResult>(env, j, '/media/audio', payload);
+  if (result.jobId !== j.id || !valid(result.output) || result.output.key !== key)
+    throw new JobError('invalid_native_audio_result', true);
+  if (
+    !(await fencedPut(env, j, env.FILES, receiptKey, JSON.stringify(result.output), {
+      httpMetadata: { contentType: 'application/json' },
+    }))
+  )
+    return null;
+  return result.output;
+}
+
 async function enrichVersion(env: Env, j: Job, v: Version) {
   const [kind, generationText, indexText] = j.kind.split(':'),
     g = Number(generationText),
@@ -691,12 +761,16 @@ async function enrichVersion(env: Env, j: Job, v: Version) {
   );
   if (kind === 'vision' && !candidates.length)
     candidates = m.result.outputs.filter((x) => x.kind === 'preview');
-  const asset = candidates[index];
+  const asset =
+    kind === 'transcribe' && m.result.deferredAudio
+      ? await prepareAudioSlice(env, j, v, m.result.deferredAudio.durationSeconds, index)
+      : candidates[index];
+  if (asset === null) return;
   if (!asset) throw new JobError('enrichment_asset_missing', true);
   const bytes = await verifyAsset(
     env,
     asset,
-    kind === 'transcribe' ? 10 * 1024 ** 2 : 4 * 1024 ** 2,
+    kind === 'transcribe' ? MAX_AUDIO_CHUNK_BYTES : 4 * 1024 ** 2,
   );
   let result: Enrichment;
   if (kind === 'transcribe') {
