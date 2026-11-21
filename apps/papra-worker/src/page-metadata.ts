@@ -4,6 +4,7 @@ import { ensureDocumentAccess } from './collaboration';
 import { publicShare } from './shares';
 import { pendingUploadShare } from './upload-shares';
 import { getDocument } from './db';
+import { publicFolderTitle } from './folder-shares';
 
 export type PageMetadata = {
   title: string;
@@ -54,9 +55,19 @@ export async function pageMetadata(
   env: Env,
   path: string,
   identity?: Identity | null,
+  folderId?: string,
 ): Promise<PageMetadata> {
   const origin = new URL(env.APP_URL).origin;
   const metadata = { title: APP_TITLE, description: APP_DESCRIPTION, url: `${origin}/` };
+  if (folderId && /^\/(?:orgs|organizations)\/[^/]+\/documents\/?$/.test(path)) {
+    const url = new URL(path, origin);
+    url.searchParams.set('folder', folderId);
+    return {
+      title: 'Private folder — SwyxDrive',
+      description: 'Sign in with an account that has access to view this folder.',
+      url: url.href,
+    };
+  }
   if (isDocumentPage(path)) {
     const [, segment, documentId] = path.match(
       /^\/(?:orgs|organizations)\/([^/]+)\/documents\/([^/]+)\/?$/,
@@ -86,6 +97,27 @@ export async function pageMetadata(
     } catch (error) {
       if (!(error instanceof HTTPException) || ![403, 404].includes(error.status)) throw error;
       return privateMetadata;
+    }
+  }
+  const folderToken = path.match(/^\/sf\/([^/]+)\/?$/)?.[1];
+  if (folderToken) {
+    const url = `${origin}/sf/${encodeURIComponent(folderToken)}`;
+    try {
+      const name = await publicFolderTitle(env, folderToken);
+      return {
+        title: `${name} — SwyxDrive`,
+        description: 'Browse and download files in this shared folder on SwyxDrive.',
+        url,
+        image: `${origin}/og-swyxdrive.png`,
+        imageAlt: APP_TITLE,
+      };
+    } catch (error) {
+      if (!(error instanceof HTTPException) || error.status !== 404) throw error;
+      return {
+        title: 'Folder link unavailable — SwyxDrive',
+        description: 'Ask the sender for a current link to this folder.',
+        url,
+      };
     }
   }
   const token = path.match(/^\/s\/([^/]+)(?:\/[^/]+)?\/?$/)?.[1];

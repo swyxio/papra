@@ -59,6 +59,21 @@ async function requireAvailable<T extends ShareAuthor>(env: Env, row: T | null) 
   return row;
 }
 
+export async function publicFolderTitle(env: Env, token: string): Promise<string> {
+  if (!validShareId(token)) throw unavailable();
+  const row = await requireAvailable(
+    env,
+    await first<ShareAuthor & { name: string }>(
+      env,
+      `WITH RECURSIVE ${shareScope('COALESCE(?, share.root_id)')}
+       SELECT a.email,a.email_verified,f.name FROM allowed a JOIN folders f ON f.id=a.id`,
+      token,
+      null,
+    ),
+  );
+  return row.name;
+}
+
 export function registerFolderShareRoutes(app: App) {
   const managed = '/api/organizations/:org/folders/:folderId/share-links';
   app.get(managed, async (c) => {
