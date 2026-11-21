@@ -53,6 +53,32 @@ test('camera and clip labels survive suggestions that omit or guess them', () =>
     'Interview - CAM_1 - Take 02.MP4',
   );
   expect(cleanSuggestedName('Interview CAM 2', 'Untitled CAM 2.mp4')).toBe('Interview - CAM 2.mp4');
+  expect(cleanSuggestedName('Interview Clip 9', 'CAM_1 Clip 07.MP4', 'Wide Two-Shot')).toBe(
+    'Interview - CAM_1 - Clip 07 - Wide Two-Shot.MP4',
+  );
+  expect(cleanSuggestedName('Interview - wide two-shot', 'CAM_1.MP4', 'Wide Two-Shot')).toBe(
+    'Interview - CAM_1 - Wide Two-Shot.MP4',
+  );
+});
+
+test('shot cues appear in filenames only when a video has preview frames', () => {
+  const source = {
+    id: 'clip',
+    name: 'Untitled CAM 3 01.mp4',
+    mimeType: 'video/mp4',
+    folder: 'Interview',
+    excerpt: '',
+  };
+  const response = {
+    suggestions: [{ id: 'clip', name: 'Interview', shotCue: 'Wide / Two-Shot', description: '' }],
+  };
+  expect(
+    validateRenameSuggestions(response, [
+      { ...source, frames: [{ timestampSeconds: 300, imageUrl: 'data:image/jpeg;base64,AQID' }] },
+    ])[0]?.name,
+  ).toBe('Interview - CAM 3 01 - Wide Two-Shot.mp4');
+  expect(validateRenameSuggestions(response, [source])[0]?.name).toBe('Interview - CAM 3 01.mp4');
+  expect(cleanSuggestedName('x'.repeat(120), source.name, 'Wide Two-Shot')).toHaveLength(124);
 });
 
 test('recording excerpts include speech from the beginning, middle, and end', () => {
@@ -112,7 +138,12 @@ test('rename reads bounded cached frames and adds them to one request for the sa
         message: {
           content: JSON.stringify({
             suggestions: [
-              { id: 'video', name: 'Camera two-shot', description: 'Two people on camera.' },
+              {
+                id: 'video',
+                name: 'Interview',
+                shotCue: 'Wide Two-Shot',
+                description: 'Two people on camera.',
+              },
             ],
           }),
         },
@@ -134,6 +165,7 @@ test('rename reads bounded cached frames and adds them to one request for the sa
       mimeType: 'video/mp4',
       folder: 'Interview',
       excerpt: 'Introductions and the rest of the conversation',
+      excerptSource: 'audio transcript',
       frames: withNearbySpeech(frames, [
         { text: '[Chunk 1 not transcribed]', startSeconds: null },
         { text: 'Opening introduction', startSeconds: 2 },
@@ -145,18 +177,68 @@ test('rename reads bounded cached frames and adds them to one request for the sa
   expect(run).toHaveBeenCalledTimes(1);
   expect(run.mock.calls[0]?.[1]).toMatchObject({
     messages: [
-      { role: 'system' },
+      {
+        role: 'system',
+        content: expect.stringContaining(
+          'only when they explicitly introduce themselves in the audio',
+        ),
+      },
       {
         role: 'user',
         content: [
-          { type: 'text', text: expect.stringContaining('Introductions') },
+          { type: 'text', text: expect.stringContaining('"excerptSource":"audio transcript"') },
           { type: 'text', text: 'Frame at 20s. Nearby transcript excerpt: "Self-introduction"' },
           { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,AQID' } },
-          { type: 'text', text: 'Frame at 60s' },
+          { type: 'text', text: 'Frame at 60s. No nearby audio transcript.' },
           { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,AQID' } },
         ],
       },
     ],
   });
-  expect(result[0]?.name).toBe('Camera two-shot - CAM 1.mp4');
+  expect(result[0]?.name).toBe('Interview - CAM 1 - Wide Two-Shot.mp4');
+});
+
+test('description revision labels generated file text and keeps editor feedback separate from speech', async () => {
+  const description = 'A medium shot of one person at a microphone.';
+  const run = vi.fn(async (_model: string, _input: unknown) => ({
+    choices: [
+      {
+        message: {
+          content: JSON.stringify({
+            suggestions: [
+              { id: 'clip', name: 'Changed title', shotCue: 'Medium Single', description },
+            ],
+          }),
+        },
+      },
+    ],
+  }));
+  const revision = { feedback: 'Describe the angle.', draft: 'A medium shot of Jane.' };
+  const result = await suggestDocumentNames(
+    { AI: { run } } as unknown as Env,
+    [
+      {
+        id: 'clip',
+        name: 'Untitled CAM 2.mp4',
+        mimeType: 'video/mp4',
+        folder: 'Jane interview',
+        excerpt: 'Jane is at a microphone.',
+        excerptSource: 'file text',
+        frames: [{ timestampSeconds: 12, imageUrl: 'data:image/jpeg;base64,AQID' }],
+      },
+    ],
+    revision,
+  );
+  expect(run).toHaveBeenCalledOnce();
+  const { messages } = run.mock.calls[0]![1] as {
+    messages: [{ content: string }, { content: { text?: string }[] }];
+  };
+  expect(messages[0].content).toContain('They are not source evidence');
+  expect(JSON.parse(messages[1].content[0]!.text!)).toMatchObject({
+    file: { excerptSource: 'file text' },
+    descriptionRevision: revision,
+  });
+  expect(messages[1].content[1]?.text).toBe('Frame at 12s. No nearby audio transcript.');
+  expect(result[0]?.description).toBe(description);
+  expect(result[0]?.name).toBe('Untitled CAM 2.mp4');
 });

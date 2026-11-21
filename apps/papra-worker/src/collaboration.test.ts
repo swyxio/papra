@@ -224,6 +224,87 @@ describe('D1 collaboration authorization and actual routes', () => {
     expect((await f.request(startup, 'GET', undefined, 'reader')).status).toBe(403);
   });
 
+  test('streams a ready rename draft while another file is still drafting', async () => {
+    const f = await fixture();
+    let finishSlowDraft: () => void = () => {};
+    const slowDraft = new Promise<void>((resolve) => {
+      finishSlowDraft = resolve;
+    });
+    const model = vi.fn(async (_model, input) => {
+      const { file } = JSON.parse(input.messages[1].content);
+      if (file.id === 'doc_secret') {
+        await slowDraft;
+        throw new Error('Private provider error');
+      }
+      return {
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                suggestions: [
+                  { id: file.id, name: 'Reviewed file', description: 'A usable draft.' },
+                ],
+              }),
+            },
+          },
+        ],
+      };
+    });
+    Object.assign(f.env, { AI: { run: model } });
+    const response = await f.app.request(
+      `${f.base}/documents/batch/suggest-names`,
+      {
+        method: 'POST',
+        headers: { 'Accept': 'application/x-ndjson', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documentIds: ['doc_public', 'doc_secret'] }),
+      },
+      f.env,
+    );
+    const events: Array<Record<string, unknown>> = [];
+    expect(response.headers.get('Content-Type')).toContain('application/x-ndjson');
+    const read = (async () => {
+      const decoder = new TextDecoder();
+      let buffer = '';
+      for await (const chunk of response.body!) {
+        buffer += decoder.decode(chunk, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        events.push(...lines.filter(Boolean).map((line) => JSON.parse(line)));
+      }
+    })();
+    try {
+      await vi.waitFor(() => {
+        expect(model).toHaveBeenCalledTimes(2);
+        expect(events).toContainEqual({
+          type: 'drafting',
+          documentId: 'doc_secret',
+          frames: 0,
+          hasText: true,
+        });
+        expect(events).toContainEqual(
+          expect.objectContaining({
+            type: 'ready',
+            draftMs: expect.any(Number),
+            suggestion: expect.objectContaining({
+              documentId: 'doc_public',
+              description: 'A usable draft.',
+            }),
+          }),
+        );
+      });
+      expect(events[0]).toMatchObject({ type: 'start' });
+      expect(events).toContainEqual({ type: 'reading', documentId: 'doc_public' });
+      expect(events).not.toContainEqual({ type: 'done' });
+    } finally {
+      finishSlowDraft();
+      await read;
+    }
+    expect(events.slice(-2)).toEqual([
+      { type: 'failed', documentId: 'doc_secret', message: 'Couldn’t generate a suggestion.' },
+      { type: 'done' },
+    ]);
+  });
+
   test('scoped folder reloads revalidate before reading summaries and react to content and access changes', async () => {
     const f = await fixture();
     const view = `${f.base}/folders/${f.secret}/view`;

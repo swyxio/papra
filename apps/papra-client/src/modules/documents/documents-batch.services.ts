@@ -60,16 +60,58 @@ export type RenameSuggestion = {
   hasNotes: boolean;
 };
 
+export type RenameProgressEvent =
+  | { type: 'start'; files: { documentId: string; name: string }[] }
+  | { type: 'reading'; documentId: string }
+  | { type: 'drafting'; documentId: string; frames: number; hasText: boolean }
+  | { type: 'ready'; suggestion: RenameSuggestion; draftMs?: number }
+  | { type: 'failed'; documentId: string; message: string }
+  | { type: 'done' };
+
 export async function suggestDocumentNames({
   organizationId,
   documentIds,
+  descriptionRevision,
+  onProgress,
+  signal,
 }: {
   organizationId: string;
   documentIds: string[];
+  descriptionRevision?: { feedback: string; draft: string };
+  onProgress: (event: RenameProgressEvent) => void;
+  signal: AbortSignal;
 }) {
-  return apiClient<{ suggestions: RenameSuggestion[] }>({
+  const response = await apiClient<unknown, 'stream'>({
     method: 'POST',
     path: `/api/organizations/${organizationId}/documents/batch/suggest-names`,
-    body: { documentIds },
+    headers: { Accept: 'application/x-ndjson' },
+    responseType: 'stream',
+    body: { documentIds, descriptionRevision },
+    retry: 0,
+    signal,
   });
+  const reader = response.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let finished = false;
+  try {
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      buffer += decoder.decode(chunk.value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const event = JSON.parse(line) as RenameProgressEvent;
+        onProgress(event);
+        if (event.type === 'done') finished = true;
+      }
+    }
+    if (!finished || (buffer + decoder.decode()).trim())
+      throw new Error('The suggestion stream ended early.');
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
 }
