@@ -7,6 +7,7 @@ import { createEffect, createSignal, For, Show } from 'solid-js';
 import { formatBytes } from '@corentinth/chisels';
 import { apiClient } from '../shared/http/api-client';
 import { Button } from '../ui/components/button';
+import { ContextMenu, ContextMenuContent } from '../ui/components/context-menu';
 import {
   Dialog,
   DialogContent,
@@ -202,8 +203,11 @@ export const DocumentFolderPicker: Component<{ organizationId: string; documentI
   );
 };
 
-const FolderAccessPanel: Component<{ organizationId: string; folderId: string }> = (props) => {
-  const [open, setOpen] = createSignal(false);
+const FolderAccessPanel: Component<{
+  organizationId: string;
+  folderId: string;
+  onSaved: () => void;
+}> = (props) => {
   const [restricted, setRestricted] = createSignal(false);
   const [roles, setRoles] = createSignal<Record<string, string>>({});
   const key = () => [
@@ -214,7 +218,6 @@ const FolderAccessPanel: Component<{ organizationId: string; folderId: string }>
     'permissions',
   ];
   const permissions = useQuery(() => ({
-    enabled: open(),
     queryKey: key(),
     queryFn: async () =>
       apiClient<{
@@ -246,68 +249,66 @@ const FolderAccessPanel: Component<{ organizationId: string; folderId: string }>
         },
       }),
     onSuccess: () => {
-      setOpen(false);
+      props.onSaved();
       void refreshDriveQueries(props.organizationId);
     },
     onError: () => createToast({ type: 'error', message: 'Could not update folder access.' }),
   }));
   return (
-    <div>
-      <Button variant="outline" size="sm" onClick={() => setOpen(!open())}>
-        Folder access
-      </Button>
-      <Show when={open()}>
-        <div class="border rounded-md p-3 mt-3">
-          <Show when={permissions.isError}>
-            <p role="alert">Could not load folder permissions.</p>
-          </Show>
-          <Show when={permissions.data}>
-            <label class="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={restricted()}
-                disabled={permissions.data?.isPersonal}
-                onChange={(event) => setRestricted(event.currentTarget.checked)}
-              />
-              Restrict this folder to selected members
-            </label>
-            <p class="text-xs text-muted-foreground mt-2">
-              Restrictions apply to every nested file and folder. Team administrators always have
-              access. A shortcut cannot expand access.
-            </p>
-            <Show when={restricted()}>
-              <For
-                each={permissions.data?.members.filter(
-                  (member) => !['owner', 'admin'].includes(member.role),
-                )}
-              >
-                {(member) => (
-                  <label class="flex items-center justify-between gap-3 text-sm mt-3">
-                    <span>
-                      {member.name}
-                      <span class="text-xs text-muted-foreground block">{member.email}</span>
-                    </span>
-                    <select
-                      aria-label={`Access for ${member.name}`}
-                      class="border rounded-md bg-background p-2"
-                      value={roles()[member.id] ?? ''}
-                      onChange={(event) =>
-                        setRoles({ ...roles(), [member.id]: event.currentTarget.value })
-                      }
-                    >
-                      <option value="">No access</option>
-                      <option value="reader">Can view</option>
-                      <option value="writer">Can edit</option>
-                    </select>
-                  </label>
-                )}
-              </For>
-            </Show>
-            <Button class="mt-3" size="sm" isLoading={save.isPending} onClick={() => save.mutate()}>
-              Save access
-            </Button>
-          </Show>
-        </div>
+    <div class="space-y-3">
+      <Show when={permissions.isPending}>
+        <p class="text-sm text-muted-foreground" role="status">
+          Loading folder access…
+        </p>
+      </Show>
+      <Show when={permissions.isError}>
+        <p role="alert">Could not load folder permissions.</p>
+      </Show>
+      <Show when={permissions.data}>
+        <label class="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={restricted()}
+            disabled={permissions.data?.isPersonal}
+            onChange={(event) => setRestricted(event.currentTarget.checked)}
+          />
+          Restrict this folder to selected members
+        </label>
+        <p class="text-xs text-muted-foreground mt-2">
+          Restrictions apply to every nested file and folder. Team administrators always have
+          access. A shortcut cannot expand access.
+        </p>
+        <Show when={restricted()}>
+          <For
+            each={permissions.data?.members.filter(
+              (member) => !['owner', 'admin'].includes(member.role),
+            )}
+          >
+            {(member) => (
+              <label class="flex items-center justify-between gap-3 text-sm mt-3">
+                <span>
+                  {member.name}
+                  <span class="text-xs text-muted-foreground block">{member.email}</span>
+                </span>
+                <select
+                  aria-label={`Access for ${member.name}`}
+                  class="border rounded-md bg-background p-2"
+                  value={roles()[member.id] ?? ''}
+                  onChange={(event) =>
+                    setRoles({ ...roles(), [member.id]: event.currentTarget.value })
+                  }
+                >
+                  <option value="">No access</option>
+                  <option value="reader">Can view</option>
+                  <option value="writer">Can edit</option>
+                </select>
+              </label>
+            )}
+          </For>
+        </Show>
+        <Button class="mt-3" size="sm" isLoading={save.isPending} onClick={() => save.mutate()}>
+          Save access
+        </Button>
       </Show>
     </div>
   );
@@ -321,10 +322,9 @@ export const DriveFolders: Component<{
   const client = useQueryClient();
   const [params, setParams] = useSearchParams();
   const [name, setName] = createSignal('');
-  const [rename, setRename] = createSignal('');
   const [moveFilesOpen, setMoveFilesOpen] = createSignal(false);
   const [showCreate, setShowCreate] = createSignal(false);
-  const [manageOpen, setManageOpen] = createSignal(false);
+  const [accessFolder, setAccessFolder] = createSignal<DriveFolderMetadata>();
   const [folderDialog, setFolderDialog] = createSignal<{
     kind: 'rename' | 'move';
     folder: DriveFolderMetadata;
@@ -351,7 +351,7 @@ export const DriveFolders: Component<{
   const treeOptions = () => folderTreeQuery(props.organizationId);
   const tree = useQuery(() => ({
     ...treeOptions(),
-    enabled: manageOpen() || folderDialog()?.kind === 'move',
+    enabled: folderDialog()?.kind === 'move',
   }));
   const treeFolders = () => (tree.isPending || tree.isError ? [] : (tree.data?.folders ?? []));
   const current = () => viewData()?.folders.find((folder) => folder.id === folderId());
@@ -448,24 +448,6 @@ export const DriveFolders: Component<{
       parentId,
     });
   };
-  const update = useMutation(() => ({
-    mutationFn: async (changes: { name?: string; parentId?: string }) =>
-      apiClient({
-        method: 'PATCH',
-        path: `${driveBase(props.organizationId)}/folders/${folderId()}`,
-        body: changes,
-      }),
-    onSuccess: () => {
-      setRename('');
-      invalidate();
-    },
-    onError: () =>
-      createToast({
-        type: 'error',
-        message:
-          'Could not update folder. Check your access, duplicate names or a move inside itself.',
-      }),
-  }));
   const { confirm } = useConfirmModal();
   const remove = useMutation(() => ({
     mutationFn: async (folder: DriveFolderMetadata) =>
@@ -536,6 +518,48 @@ export const DriveFolders: Component<{
         message: `Could not update folder: ${getHttpErrorMessage(error)}`,
       }),
   }));
+  const canManageFolderAccess = () =>
+    Boolean(viewData()?.canManageAccess && !viewData()?.isPersonal);
+  const folderMenuItems = (folder: DriveFolderMetadata, currentFolder = false) => (
+    <>
+      <Show when={currentFolder && folder.canWrite}>
+        <DropdownMenuItem onSelect={() => setMoveFilesOpen(true)}>
+          <span class="i-tabler-folder-symlink size-4 mr-2" aria-hidden="true" />
+          Move files here
+        </DropdownMenuItem>
+      </Show>
+      <Show when={!folder.isHome && folder.canWrite}>
+        <DropdownMenuItem
+          onSelect={() => setFolderDialog({ kind: 'rename', folder, value: folder.name })}
+        >
+          <span class="i-tabler-pencil size-4 mr-2" aria-hidden="true" />
+          Rename
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => setFolderDialog({ kind: 'move', folder, value: folder.parentId ?? '' })}
+        >
+          <span class="i-tabler-folder-symlink size-4 mr-2" aria-hidden="true" />
+          Move folder to…
+        </DropdownMenuItem>
+      </Show>
+      <Show when={!folder.isHome && canManageFolderAccess()}>
+        <DropdownMenuItem onSelect={() => setAccessFolder(folder)}>
+          <span class="i-tabler-lock size-4 mr-2" aria-hidden="true" />
+          Folder access
+        </DropdownMenuItem>
+      </Show>
+      <Show when={!folder.isHome && folder.canWrite}>
+        <DropdownMenuItem
+          class="text-destructive"
+          disabled={remove.isPending}
+          onSelect={() => void deleteFolder(folder)}
+        >
+          <span class="i-tabler-trash size-4 mr-2" aria-hidden="true" />
+          Delete folder
+        </DropdownMenuItem>
+      </Show>
+    </>
+  );
   const ancestors = () => {
     const result = [];
     const visited = new Set<string>();
@@ -604,7 +628,7 @@ export const DriveFolders: Component<{
     <>
       <DriveInbox organizationId={props.organizationId} />
       <section class="mb-5 space-y-3" aria-label="Folder browser">
-        <div class="flex items-center justify-between gap-3">
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
           <nav
             aria-label="Folder breadcrumbs"
             class="flex min-w-0 items-center gap-1 overflow-x-auto text-sm"
@@ -626,7 +650,7 @@ export const DriveFolders: Component<{
               )}
             </For>
           </nav>
-          <div class="flex items-center gap-2 flex-wrap justify-end">
+          <div class="flex flex-wrap items-center gap-2 sm:justify-end">
             <Show when={!isPendingFolderId(folderId()) && current()}>
               {(folder) => (
                 <Button
@@ -660,95 +684,31 @@ export const DriveFolders: Component<{
                 <div class="i-tabler-folder-plus size-4 mr-1.5" />
                 New folder
               </Button>
-              <Button variant="outline" size="sm" onClick={() => setMoveFilesOpen(true)}>
-                Move files here
-              </Button>
             </Show>
             <Show
               when={
                 !isPendingFolderId(folderId()) &&
-                !current()?.isHome &&
-                (current()?.canWrite || viewData()?.canManageAccess)
+                current() &&
+                (current()?.canWrite || (!current()?.isHome && canManageFolderAccess())) &&
+                current()
               }
             >
-              <details
-                class="relative shrink-0 text-sm"
-                onToggle={(event) => setManageOpen(event.currentTarget.open)}
-              >
-                <summary class="cursor-pointer rounded-md border px-3 py-2">Manage folder</summary>
-                <div class="absolute right-0 z-20 mt-2 w-80 max-w-[calc(100vw-4rem)] space-y-3 rounded-lg border bg-background p-3 shadow-lg">
-                  <Show when={current() && !current()?.isHome && current()?.canWrite}>
-                    <div class="flex gap-2">
-                      <input
-                        aria-label="Rename current folder"
-                        class="min-w-0 w-44 border rounded-md bg-transparent px-3 text-sm"
-                        maxLength={200}
-                        value={rename()}
-                        onInput={(event) => setRename(event.currentTarget.value)}
-                        placeholder={current()?.name}
-                      />
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={!rename().trim() || update.isPending}
-                        onClick={() => update.mutate({ name: rename() })}
-                      >
-                        Rename
-                      </Button>
-                    </div>
-                    <label class="block space-y-1">
-                      <span class="block text-xs text-muted-foreground">Move folder to</span>
-                      <select
-                        aria-label="Move current folder"
-                        class="w-full max-w-80 border rounded-md bg-background p-2 text-sm"
-                        value={current()?.parentId ?? ''}
-                        disabled={update.isPending || tree.isPending || tree.isError}
-                        onChange={(event) => update.mutate({ parentId: event.currentTarget.value })}
-                      >
-                        <For
-                          each={treeFolders().filter(
-                            (candidate) =>
-                              candidate.canWrite &&
-                              !folderIsDescendant(candidate, folderId()!, treeFolders()),
-                          )}
-                        >
-                          {(candidate) => (
-                            <option value={candidate.id}>
-                              {folderPath(candidate, treeFolders())}
-                            </option>
-                          )}
-                        </For>
-                      </select>
-                    </label>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={remove.isPending}
-                      onClick={() => void deleteFolder(current()!)}
-                    >
-                      Delete folder
-                    </Button>
-                    <Show when={tree.isError}>
-                      <button class="text-xs underline" onClick={() => void tree.refetch()}>
-                        Retry loading destinations
-                      </button>
-                    </Show>
-                  </Show>
-                  <Show
-                    when={
-                      current() &&
-                      !current()?.isHome &&
-                      viewData()?.canManageAccess &&
-                      !viewData()?.isPersonal
-                    }
+              {(folder) => (
+                <DropdownMenu placement="bottom-end" flip>
+                  <DropdownMenuTrigger
+                    as={Button}
+                    variant="outline"
+                    size="icon"
+                    class="size-8"
+                    aria-label="Current folder actions"
                   >
-                    <FolderAccessPanel
-                      organizationId={props.organizationId}
-                      folderId={folderId()!}
-                    />
-                  </Show>
-                </div>
-              </details>
+                    <span class="i-tabler-dots size-4" aria-hidden="true" />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent class="w-48">
+                    {folderMenuItems(folder(), true)}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
             </Show>
           </div>
         </div>
@@ -838,133 +798,134 @@ export const DriveFolders: Component<{
           <div class="divide-y rounded-lg border">
             <For each={children()}>
               {(folder) => (
-                <div
-                  class="flex items-center hover:bg-muted/40"
-                  data-state={props.getFolderSelection?.()[folder.id] ? 'selected' : undefined}
-                  classList={{ 'bg-muted/60': Boolean(props.getFolderSelection?.()[folder.id]) }}
-                >
-                  <Show when={props.setFolderSelection}>
-                    <div class="flex w-10 shrink-0 justify-center pl-1">
-                      <Show when={folder.canWrite}>
-                        <Checkbox
-                          checked={Boolean(props.getFolderSelection?.()[folder.id])}
-                          onPointerDown={(event: PointerEvent) => (shiftKey = event.shiftKey)}
-                          onMouseDown={(event: MouseEvent) =>
-                            event.shiftKey && event.preventDefault()
-                          }
-                          onKeyDown={(event: KeyboardEvent) => (shiftKey = event.shiftKey)}
-                          onChange={(value) => toggleFolder(folder, value)}
-                          aria-label={`Select ${folder.name}`}
-                          title="Shift-click to select a range"
-                        >
-                          <CheckboxControl />
-                        </Checkbox>
-                      </Show>
-                    </div>
-                  </Show>
-                  <button
-                    class="flex min-w-0 flex-1 items-center gap-3 px-3 py-3 text-left focus-visible:outline"
-                    onClick={() => openFolder(folder.id)}
+                <ContextMenu>
+                  <ContextMenu.Trigger
+                    disabled={!folder.canWrite && !canManageFolderAccess()}
+                    class="flex items-center hover:bg-muted/40"
+                    data-state={props.getFolderSelection?.()[folder.id] ? 'selected' : undefined}
+                    classList={{ 'bg-muted/60': Boolean(props.getFolderSelection?.()[folder.id]) }}
                   >
-                    <span
-                      class={
-                        folder.effectiveRestricted
-                          ? 'i-tabler-folder-lock size-5 shrink-0 text-muted-foreground'
-                          : 'i-tabler-folder size-5 shrink-0 text-muted-foreground'
-                      }
-                    />
-                    <div class="min-w-0 flex-1">
-                      <span class="block truncate text-sm font-medium">{folder.name}</span>
-                      <span class="block text-xs text-muted-foreground">
-                        <Show when={summary(folder.id)}>
-                          {(counts) => (
-                            <>
-                              {contentsLabel(folder.id)}
-                              <Show when={counts().shortcutsCount > 0}>
-                                {' '}
-                                · {counts().shortcutsCount} shortcuts
-                              </Show>
-                              {' · '}
-                              {formatBytes({ bytes: counts().documentsSize })}
-                            </>
-                          )}
-                        </Show>
-                        <Show when={folder.effectiveRestricted}> · Restricted access</Show>
-                      </span>
-                    </div>
-                    <Show when={summary(folder.id)?.lastActivityAt}>
-                      {(at) => (
-                        <span class="hidden sm:block shrink-0 text-xs text-muted-foreground">
-                          {new Date(at()).toLocaleDateString()}
-                        </span>
-                      )}
-                    </Show>
-                    <span class="i-tabler-chevron-right size-4 shrink-0 text-muted-foreground" />
-                  </button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    class="mr-2 size-8 shrink-0"
-                    isLoading={downloading()?.id === folder.id}
-                    disabled={Boolean(downloading())}
-                    onClick={() => void downloadFolder(folder)}
-                    aria-label={`Download ${folder.name}`}
-                    title={`Download ${folder.name} as a ZIP`}
-                  >
-                    <Show when={downloading()?.id !== folder.id}>
-                      <div class="i-tabler-download size-4" />
-                    </Show>
-                  </Button>
-                  <Show when={folder.canWrite}>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger
-                        as={(triggerProps: object) => (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            class="mr-2 size-8 shrink-0"
-                            aria-label={`Actions for ${folder.name}`}
-                            {...triggerProps}
+                    <Show when={props.setFolderSelection}>
+                      <div class="flex w-10 shrink-0 justify-center pl-1">
+                        <Show when={folder.canWrite}>
+                          <Checkbox
+                            checked={Boolean(props.getFolderSelection?.()[folder.id])}
+                            onPointerDown={(event: PointerEvent) => (shiftKey = event.shiftKey)}
+                            onMouseDown={(event: MouseEvent) =>
+                              event.shiftKey && event.preventDefault()
+                            }
+                            onKeyDown={(event: KeyboardEvent) => (shiftKey = event.shiftKey)}
+                            onChange={(value) => toggleFolder(folder, value)}
+                            aria-label={`Select ${folder.name}`}
+                            title="Shift-click to select a range"
                           >
-                            <div class="i-tabler-dots-vertical size-4" />
-                          </Button>
-                        )}
+                            <CheckboxControl class="size-6 sm:size-5 cursor-pointer border-2 border-muted-foreground hover:border-foreground" />
+                          </Checkbox>
+                        </Show>
+                      </div>
+                    </Show>
+                    <button
+                      class="flex min-w-0 flex-1 items-center gap-3 px-3 py-3 text-left focus-visible:outline"
+                      onClick={() => openFolder(folder.id)}
+                    >
+                      <span
+                        class={
+                          folder.effectiveRestricted
+                            ? 'i-tabler-folder-lock size-5 shrink-0 text-muted-foreground'
+                            : 'i-tabler-folder size-5 shrink-0 text-muted-foreground'
+                        }
                       />
-                      <DropdownMenuContent class="w-44">
-                        <DropdownMenuItem
-                          class="cursor-pointer"
-                          onSelect={() =>
-                            setFolderDialog({ kind: 'rename', folder, value: folder.name })
-                          }
-                        >
-                          <div class="i-tabler-pencil size-4 mr-2" />
-                          Rename
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          class="cursor-pointer"
-                          onSelect={() =>
-                            setFolderDialog({ kind: 'move', folder, value: folder.parentId ?? '' })
-                          }
-                        >
-                          <div class="i-tabler-folder-symlink size-4 mr-2" />
-                          Move to…
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          class="cursor-pointer text-destructive"
-                          onSelect={() => void deleteFolder(folder)}
-                        >
-                          <div class="i-tabler-trash size-4 mr-2" />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </Show>
-                </div>
+                      <div class="min-w-0 flex-1">
+                        <span class="block truncate text-sm font-medium">{folder.name}</span>
+                        <span class="block text-xs text-muted-foreground">
+                          <Show when={summary(folder.id)}>
+                            {(counts) => (
+                              <>
+                                {contentsLabel(folder.id)}
+                                <Show when={counts().shortcutsCount > 0}>
+                                  {' '}
+                                  · {counts().shortcutsCount} shortcuts
+                                </Show>
+                                {' · '}
+                                {formatBytes({ bytes: counts().documentsSize })}
+                              </>
+                            )}
+                          </Show>
+                          <Show when={folder.effectiveRestricted}> · Restricted access</Show>
+                        </span>
+                      </div>
+                      <Show when={summary(folder.id)?.lastActivityAt}>
+                        {(at) => (
+                          <span class="hidden sm:block shrink-0 text-xs text-muted-foreground">
+                            {new Date(at()).toLocaleDateString()}
+                          </span>
+                        )}
+                      </Show>
+                      <span class="i-tabler-chevron-right size-4 shrink-0 text-muted-foreground" />
+                    </button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      class="mr-2 size-8 shrink-0"
+                      isLoading={downloading()?.id === folder.id}
+                      disabled={Boolean(downloading())}
+                      onClick={() => void downloadFolder(folder)}
+                      aria-label={`Download ${folder.name}`}
+                      title={`Download ${folder.name} as a ZIP`}
+                    >
+                      <Show when={downloading()?.id !== folder.id}>
+                        <div class="i-tabler-download size-4" />
+                      </Show>
+                    </Button>
+                    <Show when={folder.canWrite || canManageFolderAccess()}>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger
+                          as={(triggerProps: object) => (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              class="mr-2 size-8 shrink-0"
+                              aria-label={`Actions for ${folder.name}`}
+                              {...triggerProps}
+                            >
+                              <div class="i-tabler-dots-vertical size-4" />
+                            </Button>
+                          )}
+                        />
+                        <DropdownMenuContent class="w-48">
+                          {folderMenuItems(folder)}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </Show>
+                  </ContextMenu.Trigger>
+                  <ContextMenuContent class="w-48">{folderMenuItems(folder)}</ContextMenuContent>
+                </ContextMenu>
               )}
             </For>
           </div>
         </Show>
       </section>
+      <Dialog
+        open={Boolean(accessFolder())}
+        onOpenChange={(open) => !open && setAccessFolder(undefined)}
+      >
+        <DialogContent class="max-h-[85dvh] overflow-y-auto sm:max-w-md">
+          <Show when={accessFolder()} keyed>
+            {(folder) => (
+              <>
+                <DialogHeader>
+                  <DialogTitle>Folder access · {folder.name}</DialogTitle>
+                </DialogHeader>
+                <FolderAccessPanel
+                  organizationId={props.organizationId}
+                  folderId={folder.id}
+                  onSaved={() => setAccessFolder(undefined)}
+                />
+              </>
+            )}
+          </Show>
+        </DialogContent>
+      </Dialog>
       <Dialog
         open={Boolean(folderDialog())}
         onOpenChange={(open) => !open && setFolderDialog(undefined)}
@@ -1023,6 +984,16 @@ export const DriveFolders: Component<{
                       )}
                     </For>
                   </select>
+                  <Show when={tree.isError}>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => void tree.refetch()}
+                    >
+                      Retry loading destinations
+                    </Button>
+                  </Show>
                 </Show>
                 <DialogFooter>
                   <Button

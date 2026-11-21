@@ -47,7 +47,11 @@ function Sources(props: { organizationId: string; sources: DriveSource[] }) {
     </ul>
   );
 }
-export function DriveEvidence(props: { organizationId: string; documentId?: string }) {
+export function DriveEvidence(props: {
+  organizationId: string;
+  documentId?: string;
+  panel?: boolean;
+}) {
   const [question, setQuestion] = createSignal('');
   const [textStatus, { refetch: refetchTextStatus }] = createResource(
     () =>
@@ -92,10 +96,12 @@ export function DriveEvidence(props: { organizationId: string; documentId?: stri
     });
   };
   return (
-    <section class="space-y-4 rounded-lg border p-4">
-      <h2 class="text-lg font-semibold">
-        {props.documentId ? 'Ask this document' : 'Search and ask your files'}
-      </h2>
+    <section class="space-y-4" classList={{ 'rounded-lg border p-4': !props.panel }}>
+      <Show when={!props.panel}>
+        <h2 class="text-lg font-semibold">
+          {props.documentId ? 'Ask this document' : 'Search and ask your files'}
+        </h2>
+      </Show>
       <p class="text-sm text-muted-foreground">
         Answers quote readable text from files you can access. Open the sources to verify the
         answer.
@@ -135,15 +141,18 @@ export function DriveEvidence(props: { organizationId: string; documentId?: stri
           <Show when={!props.documentId}>
             <Button
               type="submit"
+              variant={props.panel ? 'outline' : 'default'}
+              size={props.panel ? 'sm' : undefined}
               isLoading={result.loading}
               disabled={!question().trim() || result.loading}
             >
-              Search
+              Search by meaning
             </Button>
           </Show>
           <Button
             type={props.documentId ? 'submit' : 'button'}
-            variant={props.documentId ? 'default' : 'outline'}
+            variant={props.documentId || props.panel ? 'default' : 'outline'}
+            size={props.panel ? 'sm' : undefined}
             isLoading={result.loading}
             disabled={!question().trim() || result.loading}
             onClick={() => !props.documentId && submit('answer')}

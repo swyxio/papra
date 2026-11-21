@@ -934,7 +934,7 @@ export const translations = {
   'layout.language-switcher.label': 'Language switcher',
 
   'layout.search.placeholder': 'Quick search',
-  'layout.menu.import-document': 'Import a document',
+  'layout.menu.import-document': 'New / Import',
 
   'user-menu.trigger.label': 'User menu',
   'user-menu.account-settings': 'Account settings',

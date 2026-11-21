@@ -7,9 +7,9 @@ import {
   fetchServiceCredentials,
   revokeServiceCredential,
 } from './drive-capabilities.services';
-import { DriveError, DriveEvidence, driveFieldClass } from './drive-evidence.component';
+import { DriveError, driveFieldClass } from './drive-evidence.component';
 
-export function DriveSpaceCapabilities(props: { organizationId: string }) {
+export function AutomationAccess(props: { organizationId: string }) {
   const client = useQueryClient();
   const [folders] = createResource(
     () => props.organizationId,
@@ -82,12 +82,11 @@ export function DriveSpaceCapabilities(props: { organizationId: string }) {
   };
   return (
     <div class="space-y-6">
-      <DriveEvidence organizationId={props.organizationId} />
       <section class="space-y-4 rounded-lg border p-4">
-        <h2 class="text-lg font-semibold">Service credentials</h2>
+        <h2 class="text-lg font-semibold">Folder access tokens</h2>
         <p class="text-sm text-muted-foreground">
-          Give an automation access to one folder and its subfolders. Your current access still
-          applies. Tokens are shown once and can be revoked here.
+          Give a script or integration access to a folder and its subfolders. Your existing
+          permissions still apply. Copy each access token when you create it.
         </p>
         <DriveError error={error() ?? credentials.error ?? folders.error} />
         <Show when={!folders.loading && folders()?.folders.some((folder) => folder.canWrite)}>
@@ -156,7 +155,7 @@ export function DriveSpaceCapabilities(props: { organizationId: string }) {
               </select>
             </label>
             <Button type="submit" isLoading={busy()} disabled={!name().trim() || !folderId()}>
-              Create credential
+              Create token
             </Button>
           </form>
         </Show>
@@ -189,7 +188,7 @@ export function DriveSpaceCapabilities(props: { organizationId: string }) {
         </Show>
         <Show when={credentials.loading}>
           <p role="status" class="text-sm">
-            Loading credentials…
+            Loading access tokens…
           </p>
         </Show>
         <Show when={!credentials.loading && credentials()}>
@@ -199,7 +198,7 @@ export function DriveSpaceCapabilities(props: { organizationId: string }) {
                 each={value().credentials}
                 fallback={
                   <li class="text-sm text-muted-foreground">
-                    You have no service credentials in this space.
+                    You have no folder access tokens in this space.
                   </li>
                 }
               >
@@ -226,7 +225,7 @@ export function DriveSpaceCapabilities(props: { organizationId: string }) {
                         disabled={busy()}
                         onClick={() => void revoke(credential.id)}
                       >
-                        Revoke credential
+                        Revoke token
                       </Button>
                     </Show>
                   </li>

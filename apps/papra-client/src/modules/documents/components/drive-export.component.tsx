@@ -1,5 +1,5 @@
 import { ZipWriter, TextReader } from '@zip.js/zip.js';
-import { createSignal } from 'solid-js';
+import { createSignal, Show } from 'solid-js';
 import { getHttpErrorMessage } from '@/modules/shared/http/http-errors';
 import { versionDownloadHref } from '@/modules/drive-capabilities/drive-capabilities.services';
 import { Button } from '@/modules/ui/components/button';
@@ -113,9 +113,26 @@ export function DriveExport(props: { organizationId: string }) {
   }
   return (
     <div class="flex flex-wrap items-center gap-3 text-sm">
-      <Button variant="outline" disabled={busy()} onClick={exportFiles}>
-        Export space
-      </Button>
+      <Show
+        when={typeof (window as SaveWindow).showSaveFilePicker === 'function'}
+        fallback={
+          <span class="text-xs text-muted-foreground">
+            Space export is available in Chrome or Edge.
+          </span>
+        }
+      >
+        <Button
+          size="sm"
+          variant="outline"
+          isLoading={busy()}
+          disabled={busy()}
+          onClick={exportFiles}
+          title="Export all accessible files in this space and their metadata"
+        >
+          <span class="i-tabler-download size-4 mr-1.5" aria-hidden="true" />
+          Export space
+        </Button>
+      </Show>
       <span role="status" class="text-muted-foreground">
         {status()}
       </span>

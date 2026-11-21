@@ -1,5 +1,8 @@
 import type { FolderView } from '@/modules/drive-collaboration/drive-collaboration.services';
-import { DriveSpaceCapabilities } from '@/modules/drive-capabilities';
+import { DriveEvidence } from '@/modules/drive-capabilities/drive-evidence.component';
+import { FileFilterMenu, FileSortMenu } from '../components/files-filter-toolbar.component';
+import { fileSearchQuery, parseFileFilters } from '../components/files-filter.models';
+import type { FileFilter } from '../components/files-filter.models';
 import {
   folderViewQuery,
   homeFolderId,
@@ -16,7 +19,7 @@ import type { Component, Setter } from 'solid-js';
 import type { Document } from '../documents.types';
 import type { BatchTargetFilter } from '../documents-batch.services';
 import type { DocumentSearchSortField, DocumentSearchSortOrder } from '../documents.constants';
-import { A, useParams, useSearchParams } from '@solidjs/router';
+import { useParams, useSearchParams } from '@solidjs/router';
 import { useMutation, useQuery } from '@tanstack/solid-query';
 import { createEffect, createMemo, createSignal, on, For, Show, Suspense } from 'solid-js';
 import { CreateDocumentViewModal } from '@/modules/document-views/components/document-view-modals';
@@ -63,28 +66,55 @@ const searchTips =
 export const DocumentsPage: Component = () => {
   const params = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const allFiles = () => searchParams.scope === 'all' || getSearchQuery().trim().length > 0;
+  const allFiles = () => searchParams.scope === 'all' || effectiveSearch().trim().length > 0;
   const selectedFolderId = () =>
     typeof searchParams.folder === 'string'
       ? searchParams.folder
       : homeFolderId(params.organizationId);
   const queryFolderId = () => (allFiles() ? undefined : selectedFolderId());
   const setScope = (all: boolean) =>
-    setSearchParams({ scope: all ? 'all' : undefined, query: undefined, page: undefined });
+    setSearchParams({
+      scope: all ? 'all' : undefined,
+      query: undefined,
+      fileFilters: undefined,
+      page: undefined,
+    });
   const { t } = useI18n();
   const { confirm } = useConfirmModal();
   const [getSearchQuery, setSearchQuery] = createParamSynchronizedSignal<string>({
     paramKey: 'query',
     defaultValue: '',
   });
-  const debouncedSearchQuery = useDebounce(getSearchQuery, 300);
+  const filters = createMemo(() => parseFileFilters(searchParams.fileFilters));
+  const effectiveSearch = () => fileSearchQuery(getSearchQuery(), filters());
+  const debouncedSearchQuery = useDebounce(effectiveSearch, 300);
+  const updateFilters = (next: FileFilter[]) =>
+    setSearchParams({
+      fileFilters: next.length ? JSON.stringify(next) : undefined,
+      page: undefined,
+    });
+  const addFilter = (filter: FileFilter) => {
+    if (!filters().some((f) => f.field === filter.field && f.value === filter.value))
+      updateFilters([...filters(), filter]);
+  };
   const [getPagination, setPagination] = createParamSynchronizedPagination();
   const [getRowSelection, setInternalRowSelection] = createSignal<RowSelectionState>({});
   const [getSelectAllMatchingQuery, setSelectAllMatchingQuery] = createSignal(false);
   const [getTagDialogOpen, setTagDialogOpen] = createSignal(false);
   const [moveOpen, setMoveOpen] = createSignal(false);
   const [renameOpen, setRenameOpen] = createSignal(false);
-  const [showAutomation, setShowAutomation] = createSignal(false);
+  const [askOpen, setAskOpen] = createSignal(false);
+  const [askStarted, setAskStarted] = createSignal(false);
+  let askPanel: HTMLElement | undefined;
+  let askButton: HTMLButtonElement | undefined;
+  const toggleAsk = (open: boolean) => {
+    if (open) setAskStarted(true);
+    setAskOpen(open);
+    queueMicrotask(() => {
+      if (open) askPanel?.querySelector('textarea')?.focus();
+      else askButton?.focus();
+    });
+  };
   const [getFolderSelection, setFolderSelection] = createSignal<Record<string, boolean>>({});
   const getSelectedFolderIds = createMemo(() => {
     const selection = getFolderSelection();
@@ -130,24 +160,19 @@ export const DocumentsPage: Component = () => {
   };
 
   const [searchFocused, setSearchFocused] = createSignal(false);
-  const [personField, setPersonField] = createSignal('uploadedBy');
-  const [personValue, setPersonValue] = createSignal('');
-  const applyPersonFilter = () => {
-    const quoted = personValue().trim().replaceAll('\\', '\\\\').replaceAll('"', '\\"');
-    setSearchQuery(`${getSearchQuery().trim()} ${personField()}:"${quoted}"`.trim());
-    setPagination((current) => ({ ...current, pageIndex: 0 }));
-  };
-
-  const [propertyId, setPropertyId] = createSignal('');
-  const [propertyValue, setPropertyValue] = createSignal('');
   const propertiesQuery = useQuery(() => ({
     queryKey: ['organizations', params.organizationId, 'custom-properties'],
     queryFn: async () => fetchCustomPropertyDefinitions({ organizationId: params.organizationId }),
   }));
-  const addPropertyFilter = () => {
-    const quoted = propertyValue().replaceAll('\\', '\\\\').replaceAll('"', '\\"');
-    setSearchQuery(`${getSearchQuery().trim()} property.${propertyId()}:"${quoted}"`.trim());
-    setPagination((current) => ({ ...current, pageIndex: 0 }));
+  const properties = () => propertiesQuery.data?.propertyDefinitions ?? [];
+  const filterLabel = ({ field, value }: FileFilter) => {
+    const label =
+      field === 'uploadedBy'
+        ? 'Uploaded by'
+        : field === 'modifiedBy'
+          ? 'Modified by'
+          : (properties().find((property) => property.id === field.slice(9))?.name ?? 'Property');
+    return `${label}: ${value}`;
   };
 
   const listing = useDriveDocumentPage(
@@ -437,508 +462,441 @@ export const DocumentsPage: Component = () => {
   }
 
   return (
-    <div class="p-6 mt-4 pb-32">
-      <div class="mb-4 flex items-center justify-between gap-3">
-        <h1 class="text-xl font-bold">Files</h1>
-        <div class="flex gap-1 rounded-md border p-1" aria-label="File scope">
-          <Button
-            size="sm"
-            variant={allFiles() ? 'ghost' : 'secondary'}
-            onClick={() => setScope(false)}
-            aria-pressed={!allFiles()}
-          >
-            Folders
-          </Button>
-          <Button
-            size="sm"
-            variant={allFiles() ? 'secondary' : 'ghost'}
-            onClick={() => setScope(true)}
-            aria-pressed={allFiles()}
-          >
-            All files
-          </Button>
+    <div
+      class="p-4 sm:p-6 mt-4 pb-32 grid items-start gap-5"
+      classList={{ 'xl:grid-cols-[minmax(0,1fr)_22rem]': askOpen() }}
+    >
+      <div class="min-w-0">
+        <div class="mb-4 flex items-center justify-between gap-3">
+          <h1 class="text-xl font-bold">Files</h1>
+          <div class="flex gap-1 rounded-md border p-1" aria-label="File scope">
+            <Button
+              size="sm"
+              variant={allFiles() ? 'ghost' : 'secondary'}
+              onClick={() => setScope(false)}
+              aria-pressed={!allFiles()}
+            >
+              Folders
+            </Button>
+            <Button
+              size="sm"
+              variant={allFiles() ? 'secondary' : 'ghost'}
+              onClick={() => setScope(true)}
+              aria-pressed={allFiles()}
+            >
+              All files
+            </Button>
+          </div>
         </div>
-      </div>
-      <Show when={!allFiles()}>
-        <DriveFolders
-          organizationId={params.organizationId}
-          getFolderSelection={getFolderSelection}
-          setFolderSelection={setFolderSelection}
-        />
-      </Show>
-      <Show when={allFiles()}>
-        <p class="mb-4 text-xs text-muted-foreground">
-          All files you can access in this space, across folders.
-        </p>
-      </Show>
-      <div class="my-4 flex flex-wrap items-start gap-4 text-sm text-muted-foreground">
-        <details class="relative">
-          <summary class="cursor-pointer hover:text-foreground">Create or export</summary>
-          <div class="absolute z-20 mt-2 flex w-64 flex-col gap-2 rounded-lg border bg-background p-3 shadow-lg">
-            <Button
-              as={A}
-              variant="outline"
-              size="sm"
-              href={`/organizations/${params.organizationId}/documents/new`}
-            >
-              Create doc from template
-            </Button>
-            <Button
-              as={A}
-              variant="outline"
-              size="sm"
-              href={`/orgs/${params.organizationId}/documents/new?template=sponsorship-order`}
-            >
-              Create sponsorship order
-            </Button>
-            <div title="Export all accessible files in this space">
-              <DriveExport organizationId={params.organizationId} />
-            </div>
-          </div>
-        </details>
-        <details
-          class="flex-1"
-          onToggle={(event) => {
-            if (event.currentTarget.open) setShowAutomation(true);
-          }}
-        >
-          <summary class="cursor-pointer hover:text-foreground">
-            Semantic search, document answers and automation
-          </summary>
-          <div class="mt-4 text-foreground">
-            <Show when={showAutomation()}>
-              <DriveSpaceCapabilities organizationId={params.organizationId} />
-            </Show>
-          </div>
-        </details>
-      </div>
-      <Suspense>
-        <>
-          <div class="flex flex-wrap items-center gap-4">
-            <div class="flex items-center max-w-md flex-1">
-              <TextFieldRoot class="flex-1">
-                <TextField
-                  type="search"
-                  name="search"
-                  placeholder="Search all files in this space…"
-                  title={searchTips}
-                  value={getSearchQuery()}
-                  onFocus={() => setSearchFocused(true)}
-                  onBlur={() => setSearchFocused(false)}
-                  onInput={(e) => {
-                    setSearchQuery(e.currentTarget.value);
-                    setPagination((current) => ({ ...current, pageIndex: 0 }));
-                  }}
-                  class="pr-9"
-                />
-              </TextFieldRoot>
-
-              <Show when={getSearchQuery().length > 0}>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  class="size-6 ml--8"
-                  disabled={documentsQuery.isFetching}
-                  onClick={() => setSearchQuery('')}
-                  aria-label={documentsQuery.isFetching ? 'Loading' : 'Clear search'}
-                >
-                  <div
-                    class={cn(
-                      'text-muted-foreground',
-                      documentsQuery.isFetching ? 'i-tabler-loader-2 animate-spin' : 'i-tabler-x',
-                    )}
+        <Show when={!allFiles()}>
+          <DriveFolders
+            organizationId={params.organizationId}
+            getFolderSelection={getFolderSelection}
+            setFolderSelection={setFolderSelection}
+          />
+        </Show>
+        <Show when={allFiles()}>
+          <p class="mb-4 text-xs text-muted-foreground">
+            All files you can access in this space, across folders.
+          </p>
+        </Show>
+        <Suspense>
+          <>
+            <div class="mt-4 flex flex-wrap items-center gap-2">
+              <div class="flex items-center max-w-xl min-w-48 grow basis-full sm:basis-0">
+                <TextFieldRoot class="flex-1">
+                  <TextField
+                    type="search"
+                    name="search"
+                    placeholder="Search all files in this space…"
+                    title={searchTips}
+                    value={getSearchQuery()}
+                    onFocus={() => setSearchFocused(true)}
+                    onBlur={() => setSearchFocused(false)}
+                    onInput={(e) => {
+                      setSearchQuery(e.currentTarget.value);
+                      setPagination((current) => ({ ...current, pageIndex: 0 }));
+                    }}
+                    class="pr-9"
                   />
-                </Button>
-              </Show>
-            </div>
+                </TextFieldRoot>
 
-            <Show when={getSearchQuery().length > 0}>
-              <CreateDocumentViewModal
-                organizationId={params.organizationId}
-                initialValues={{ query: debouncedSearchQuery() }}
-              >
-                {(triggerProps) => (
-                  <Button
-                    variant="outline"
-                    title={t('document-views.save-as-view')}
-                    {...triggerProps}
-                  >
-                    <div class="i-tabler-layout-list size-4 mr-1.5" />
-                    {t('document-views.save-as-view')}
-                  </Button>
-                )}
-              </CreateDocumentViewModal>
-            </Show>
-          </div>
-
-          <Show when={searchFocused()}>
-            <p class="mt-2 text-xs text-muted-foreground">{searchTips}</p>
-          </Show>
-          <details class="mt-3">
-            <summary class="cursor-pointer text-sm text-muted-foreground hover:text-foreground">
-              Filter and sort
-            </summary>
-            <div class="mt-3 flex flex-wrap items-end gap-2">
-              <label class="space-y-1 text-sm">
-                <span class="block">Filter by person</span>
-                <select
-                  class="rounded-md border bg-background p-2"
-                  value={personField()}
-                  onChange={(e) => setPersonField(e.currentTarget.value)}
-                >
-                  <option value="uploadedBy">Uploaded by</option>
-                  <option value="modifiedBy">Last modified by</option>
-                </select>
-              </label>
-              <label class="space-y-1 text-sm">
-                <span class="block">Name or email</span>
-                <input
-                  class="rounded-md border bg-background p-2"
-                  placeholder="e.g. Vibhu"
-                  value={personValue()}
-                  onInput={(e) => setPersonValue(e.currentTarget.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && personValue().trim()) applyPersonFilter();
-                  }}
-                />
-              </label>
-              <Button
-                variant="outline"
-                disabled={!personValue().trim()}
-                onClick={applyPersonFilter}
-              >
-                Apply person filter
-              </Button>
-              <label class="space-y-1 text-sm">
-                <span class="block">Sort files</span>
-                <select
-                  class="rounded-md border bg-background p-2"
-                  value={`${getSortField()}:${getSortOrder()}`}
-                  onChange={(e) => {
-                    const [field, order] = e.currentTarget.value.split(':');
-                    setSearchParams({ sortField: field, sortOrder: order, page: undefined });
-                  }}
-                >
-                  <For
-                    each={[
-                      ['createdAt', 'Upload date'],
-                      ['modifiedAt', 'Last modified'],
-                      ['originalSize', 'Size'],
-                      ['name', 'File name'],
-                      ['uploadedBy', 'Uploader'],
-                      ['modifiedBy', 'Last modifier'],
-                      ['documentDate', 'Document date'],
-                      ['updatedAt', 'Last updated (including processing)'],
-                    ]}
-                  >
-                    {([field, label]) => (
-                      <>
-                        <option value={`${field}:asc`}>
-                          {label} ·{' '}
-                          {['name', 'uploadedBy', 'modifiedBy'].includes(field)
-                            ? 'A–Z'
-                            : field === 'originalSize'
-                              ? 'Smallest first'
-                              : 'Oldest first'}
-                        </option>
-                        <option value={`${field}:desc`}>
-                          {label} ·{' '}
-                          {['name', 'uploadedBy', 'modifiedBy'].includes(field)
-                            ? 'Z–A'
-                            : field === 'originalSize'
-                              ? 'Largest first'
-                              : 'Newest first'}
-                        </option>
-                      </>
-                    )}
-                  </For>
-                </select>
-              </label>
-            </div>
-            <Show when={propertiesQuery.data?.propertyDefinitions.length}>
-              <div class="mt-3 flex flex-wrap items-end gap-2 rounded-lg border p-3">
-                <label class="space-y-1 text-sm">
-                  <span class="block">Filter by property</span>
-                  <select
-                    class="rounded-md border bg-background p-2"
-                    value={propertyId()}
-                    onChange={(event) => setPropertyId(event.currentTarget.value)}
-                  >
-                    <option value="">Choose property</option>
-                    <For each={propertiesQuery.data?.propertyDefinitions}>
-                      {(property) => <option value={property.id}>{property.name}</option>}
-                    </For>
-                  </select>
-                </label>
-                <label class="space-y-1 text-sm">
-                  <span class="block">Value</span>
-                  <input
-                    class="rounded-md border bg-background p-2"
-                    placeholder="Exact value (e.g. Approved)"
-                    value={propertyValue()}
-                    onInput={(event) => setPropertyValue(event.currentTarget.value)}
-                  />
-                </label>
-                <Button
-                  variant="outline"
-                  disabled={!propertyId() || !propertyValue().trim()}
-                  onClick={addPropertyFilter}
-                >
-                  Apply property filter
-                </Button>
-              </div>
-            </Show>
-          </details>
-          <div class="mb-4 mt-2 ml-2 min-h-8 flex items-center">
-            <Show
-              when={showToolbar()}
-              fallback={
-                <span class="text-sm text-muted-foreground">
-                  <Show
-                    when={
-                      listing.total() !== undefined &&
-                      ((listing.total() ?? 0) > 0 || debouncedSearchQuery().length > 0)
-                    }
-                  >
-                    <Show
-                      when={debouncedSearchQuery().length > 0}
-                      fallback={t('documents.list.search.total-count-no-query', {
-                        count: listing.total() ?? 0,
-                      })}
-                    >
-                      {t('documents.list.search.total-count-with-query', {
-                        count: listing.total() ?? 0,
-                      })}
-                    </Show>
-                  </Show>
-                </span>
-              }
-            >
-              <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm flex-1">
-                <span class="font-medium">
-                  <Show when={getSelectedFolderIds().length === 0} fallback={mixedSelectionLabel()}>
-                    <Show
-                      when={getSelectAllMatchingQuery()}
-                      fallback={t('documents.list.batch.selected-count', {
-                        count: getEffectiveCount(),
-                      })}
-                    >
-                      <Show
-                        when={debouncedSearchQuery().length > 0}
-                        fallback={t('documents.list.batch.all-selected', {
-                          count: getEffectiveCount(),
-                        })}
-                      >
-                        {t('documents.list.batch.all-matching-selected', {
-                          count: getEffectiveCount(),
-                        })}
-                      </Show>
-                    </Show>
-                  </Show>
-                </span>
-
-                <Show when={canPromoteToAllMatching()}>
-                  <Button
-                    variant="link"
-                    size="sm"
-                    class="h-auto p-0"
-                    onClick={() => setSelectAllMatchingQuery(true)}
-                  >
-                    <Show
-                      when={debouncedSearchQuery().length > 0}
-                      fallback={t('documents.list.batch.select-all', {
-                        count: listing.total() ?? 0,
-                      })}
-                    >
-                      {t('documents.list.batch.select-all-matching', {
-                        count: listing.total() ?? 0,
-                      })}
-                    </Show>
-                  </Button>
-                </Show>
-
-                <div class="flex items-center gap-2 ml-auto">
-                  <Show when={hasFileSelection() && getSelectedFolderIds().length === 0}>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void handleBatchDownload()}
-                      isLoading={Boolean(downloadStatus())}
-                      title="Download the selected files (more than one downloads as a ZIP)"
-                    >
-                      <div class="i-tabler-download size-4 mr-2" />
-                      Download
-                    </Button>
-                  </Show>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={
-                      tagMutation.isPending || trashMutation.isPending || getEffectiveCount() > 500
-                    }
-                    onClick={() => setMoveOpen(true)}
-                    title={getEffectiveCount() > 500 ? 'Move up to 500 files at a time' : undefined}
-                  >
-                    <div class="i-tabler-folder-symlink size-4 mr-2" />
-                    Move to…
-                  </Button>
-                  <Show when={hasFileSelection() && getSelectedFolderIds().length === 0}>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setRenameOpen(true)}
-                      disabled={
-                        getSelectAllMatchingQuery() ||
-                        getSelectedIds().length > MAX_RENAME_SUGGESTIONS
-                      }
-                      title={`Suggest names using file details, text and available video frames (up to ${MAX_RENAME_SUGGESTIONS} files)`}
-                    >
-                      <div class="i-tabler-sparkles size-4 mr-2" />
-                      Suggest names
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setTagDialogOpen(true)}
-                      disabled={tagMutation.isPending || trashMutation.isPending}
-                    >
-                      <div class="i-tabler-tag size-4 mr-2" />
-                      {t('documents.list.batch.tag-action')}
-                    </Button>
-
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleBatchTrash}
-                      isLoading={trashMutation.isPending}
-                      disabled={tagMutation.isPending}
-                      class="text-red-500 hover:text-red-600"
-                    >
-                      <div class="i-tabler-trash size-4 mr-2" />
-                      {t('documents.list.batch.trash-action')}
-                    </Button>
-                  </Show>
-
+                <Show when={getSearchQuery().length > 0}>
                   <Button
                     variant="ghost"
                     size="icon"
-                    class="size-8"
-                    onClick={clearSelection}
-                    disabled={tagMutation.isPending || trashMutation.isPending}
-                    aria-label={t('documents.list.batch.clear')}
+                    class="size-6 ml--8"
+                    disabled={documentsQuery.isFetching}
+                    onClick={() => setSearchQuery('')}
+                    aria-label={documentsQuery.isFetching ? 'Loading' : 'Clear search'}
                   >
-                    <div class="i-tabler-x size-4" />
+                    <div
+                      class={cn(
+                        'text-muted-foreground',
+                        documentsQuery.isFetching ? 'i-tabler-loader-2 animate-spin' : 'i-tabler-x',
+                      )}
+                    />
                   </Button>
-                </div>
+                </Show>
+              </div>
+
+              <FileFilterMenu filters={filters()} properties={properties()} add={addFilter} />
+              <FileSortMenu
+                field={getSortField()}
+                order={getSortOrder()}
+                onSort={(sortField, sortOrder) =>
+                  setSearchParams({ sortField, sortOrder, page: undefined })
+                }
+              />
+
+              <Show when={effectiveSearch().trim().length > 0}>
+                <CreateDocumentViewModal
+                  organizationId={params.organizationId}
+                  initialValues={{ query: debouncedSearchQuery() }}
+                >
+                  {(triggerProps) => (
+                    <Button
+                      variant="outline"
+                      title={t('document-views.save-as-view')}
+                      {...triggerProps}
+                    >
+                      <div class="i-tabler-layout-list size-4 mr-1.5" />
+                      {t('document-views.save-as-view')}
+                    </Button>
+                  )}
+                </CreateDocumentViewModal>
+              </Show>
+            </div>
+
+            <Show when={searchFocused()}>
+              <p class="mt-2 text-xs text-muted-foreground">{searchTips}</p>
+            </Show>
+            <Show when={filters().length}>
+              <div class="mt-2 flex flex-wrap gap-2" aria-label="Applied filters">
+                <For each={filters()}>
+                  {(filter, index) => (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      class="max-w-full gap-1.5"
+                      aria-label={`Remove filter ${filterLabel(filter)}`}
+                      onClick={() => updateFilters(filters().filter((_, i) => i !== index()))}
+                    >
+                      <span class="truncate">{filterLabel(filter)}</span>
+                      <span class="i-tabler-x size-3.5 shrink-0" aria-hidden="true" />
+                    </Button>
+                  )}
+                </For>
               </div>
             </Show>
-          </div>
-          <Show when={downloadStatus()}>
-            <p role="status" class="mb-3 break-words text-xs text-muted-foreground">
-              {downloadStatus()}
-            </p>
-          </Show>
-
-          <Show when={debouncedSearchQuery().length > 0 && documentsData()?.documents.length === 0}>
-            <p class="text-muted-foreground mt-1 mb-6">{t('documents.list.no-results')}</p>
-          </Show>
-
-          <Show when={documentsQuery.isPending && !documentsQuery.isError}>
-            <div role="status" aria-label="Loading files" class="my-4 space-y-2">
-              <For each={[0, 1, 2, 3, 4]}>
-                {() => (
-                  <div class="flex items-center gap-3 rounded-md border p-3">
-                    <Skeleton class="size-8 shrink-0" />
-                    <div class="flex-1 space-y-2">
-                      <Skeleton class="h-3 w-2/5" />
-                      <Skeleton class="h-3 w-1/4" />
-                    </div>
-                    <Skeleton class="hidden h-3 w-20 sm:block" />
-                    <Skeleton class="hidden h-3 w-16 sm:block" />
-                  </div>
-                )}
-              </For>
-            </div>
-          </Show>
-          <Show when={documentsQuery.isError}>
-            <p role="alert" class="my-4 text-sm">
-              Could not load files.{' '}
-              <button
-                class="underline"
-                onClick={() => {
-                  void documentsQuery.refetch();
-                }}
+            <div class="mb-4 mt-2 ml-2 min-h-8 flex items-center">
+              <Show
+                when={showToolbar()}
+                fallback={
+                  <span class="text-sm text-muted-foreground">
+                    <Show
+                      when={
+                        listing.total() !== undefined &&
+                        ((listing.total() ?? 0) > 0 || debouncedSearchQuery().length > 0)
+                      }
+                    >
+                      <Show
+                        when={debouncedSearchQuery().length > 0}
+                        fallback={t('documents.list.search.total-count-no-query', {
+                          count: listing.total() ?? 0,
+                        })}
+                      >
+                        {t('documents.list.search.total-count-with-query', {
+                          count: listing.total() ?? 0,
+                        })}
+                      </Show>
+                    </Show>
+                  </span>
+                }
               >
-                Retry
-              </button>
-            </p>
-          </Show>
-          <Show
-            when={
-              !documentsQuery.isPending &&
-              !documentsQuery.isError &&
-              documentsData()?.documents.length === 0 &&
-              !debouncedSearchQuery().trim() &&
-              getPagination().pageIndex === 0
-            }
-          >
-            <p class="my-4 text-sm text-muted-foreground">
-              {allFiles() ? 'No files in this space yet.' : 'No files in this folder yet.'} Use
-              Import a document to add files here.
-            </p>
-          </Show>
-          <Show when={documentsData()}>
-            <DocumentsPaginatedList
-              documents={documentsData()?.documents ?? []}
-              documentsCount={listing.total()}
-              hasMore={documentsData()?.hasMore}
-              onNextPageIntent={listing.prefetchNext}
-              getPagination={getPagination}
-              setPagination={setPagination}
-              enableBatchSelection
-              getRowSelection={getRowSelection}
-              setRowSelection={setRowSelection}
-              getSorting={getSorting}
-              setSorting={setSorting}
-              extraColumns={[
-                uploadedByColumn,
-                modifiedByColumn,
-                sizeColumn,
-                modifiedAtColumn,
-                standardActionsColumn,
-              ]}
-            />
-          </Show>
+                <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm flex-1">
+                  <span class="font-medium">
+                    <Show
+                      when={getSelectedFolderIds().length === 0}
+                      fallback={mixedSelectionLabel()}
+                    >
+                      <Show
+                        when={getSelectAllMatchingQuery()}
+                        fallback={t('documents.list.batch.selected-count', {
+                          count: getEffectiveCount(),
+                        })}
+                      >
+                        <Show
+                          when={debouncedSearchQuery().length > 0}
+                          fallback={t('documents.list.batch.all-selected', {
+                            count: getEffectiveCount(),
+                          })}
+                        >
+                          {t('documents.list.batch.all-matching-selected', {
+                            count: getEffectiveCount(),
+                          })}
+                        </Show>
+                      </Show>
+                    </Show>
+                  </span>
 
-          <DocumentMoveDialog
-            organizationId={params.organizationId}
-            open={moveOpen()}
-            onOpenChange={setMoveOpen}
-            filter={getBatchFilter()}
-            folderIds={getSelectedFolderIds()}
-            fileCount={getEffectiveCount()}
-            onMoved={clearSelection}
-          />
-          <DocumentRenameSuggestionsDialog
-            organizationId={params.organizationId}
-            open={renameOpen()}
-            onOpenChange={setRenameOpen}
-            documentIds={getSelectedIds()}
-            onApplied={clearSelection}
-          />
-          <DocumentsBatchTagDialog
-            open={getTagDialogOpen()}
-            onOpenChange={setTagDialogOpen}
-            organizationId={params.organizationId}
-            selectionCount={getEffectiveCount()}
-            isPending={tagMutation.isPending}
-            onSubmit={({ addTagIds, removeTagIds }) => {
-              setTagDialogOpen(false);
-              tagMutation.mutate({ addTagIds, removeTagIds });
-            }}
-          />
-        </>
-      </Suspense>
+                  <Show when={canPromoteToAllMatching()}>
+                    <Button
+                      variant="link"
+                      size="sm"
+                      class="h-auto p-0"
+                      onClick={() => setSelectAllMatchingQuery(true)}
+                    >
+                      <Show
+                        when={debouncedSearchQuery().length > 0}
+                        fallback={t('documents.list.batch.select-all', {
+                          count: listing.total() ?? 0,
+                        })}
+                      >
+                        {t('documents.list.batch.select-all-matching', {
+                          count: listing.total() ?? 0,
+                        })}
+                      </Show>
+                    </Button>
+                  </Show>
+
+                  <div class="flex items-center gap-2 ml-auto">
+                    <Show when={hasFileSelection() && getSelectedFolderIds().length === 0}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void handleBatchDownload()}
+                        isLoading={Boolean(downloadStatus())}
+                        title="Download the selected files (more than one downloads as a ZIP)"
+                      >
+                        <div class="i-tabler-download size-4 mr-2" />
+                        Download
+                      </Button>
+                    </Show>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={
+                        tagMutation.isPending ||
+                        trashMutation.isPending ||
+                        getEffectiveCount() > 500
+                      }
+                      onClick={() => setMoveOpen(true)}
+                      title={
+                        getEffectiveCount() > 500 ? 'Move up to 500 files at a time' : undefined
+                      }
+                    >
+                      <div class="i-tabler-folder-symlink size-4 mr-2" />
+                      Move to…
+                    </Button>
+                    <Show when={hasFileSelection() && getSelectedFolderIds().length === 0}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setRenameOpen(true)}
+                        disabled={
+                          getSelectAllMatchingQuery() ||
+                          getSelectedIds().length > MAX_RENAME_SUGGESTIONS
+                        }
+                        title={`Suggest names using file details, text and available video frames (up to ${MAX_RENAME_SUGGESTIONS} files)`}
+                      >
+                        <div class="i-tabler-sparkles size-4 mr-2" />
+                        Suggest names
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setTagDialogOpen(true)}
+                        disabled={tagMutation.isPending || trashMutation.isPending}
+                      >
+                        <div class="i-tabler-tag size-4 mr-2" />
+                        {t('documents.list.batch.tag-action')}
+                      </Button>
+
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleBatchTrash}
+                        isLoading={trashMutation.isPending}
+                        disabled={tagMutation.isPending}
+                        class="text-red-500 hover:text-red-600"
+                      >
+                        <div class="i-tabler-trash size-4 mr-2" />
+                        {t('documents.list.batch.trash-action')}
+                      </Button>
+                    </Show>
+
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      class="size-8"
+                      onClick={clearSelection}
+                      disabled={tagMutation.isPending || trashMutation.isPending}
+                      aria-label={t('documents.list.batch.clear')}
+                    >
+                      <div class="i-tabler-x size-4" />
+                    </Button>
+                  </div>
+                </div>
+              </Show>
+            </div>
+            <Show when={downloadStatus()}>
+              <p role="status" class="mb-3 break-words text-xs text-muted-foreground">
+                {downloadStatus()}
+              </p>
+            </Show>
+
+            <Show
+              when={debouncedSearchQuery().length > 0 && documentsData()?.documents.length === 0}
+            >
+              <p class="text-muted-foreground mt-1 mb-6">{t('documents.list.no-results')}</p>
+            </Show>
+
+            <Show when={documentsQuery.isPending && !documentsQuery.isError}>
+              <div role="status" aria-label="Loading files" class="my-4 space-y-2">
+                <For each={[0, 1, 2, 3, 4]}>
+                  {() => (
+                    <div class="flex items-center gap-3 rounded-md border p-3">
+                      <Skeleton class="size-8 shrink-0" />
+                      <div class="flex-1 space-y-2">
+                        <Skeleton class="h-3 w-2/5" />
+                        <Skeleton class="h-3 w-1/4" />
+                      </div>
+                      <Skeleton class="hidden h-3 w-20 sm:block" />
+                      <Skeleton class="hidden h-3 w-16 sm:block" />
+                    </div>
+                  )}
+                </For>
+              </div>
+            </Show>
+            <Show when={documentsQuery.isError}>
+              <p role="alert" class="my-4 text-sm">
+                Could not load files.{' '}
+                <button
+                  class="underline"
+                  onClick={() => {
+                    void documentsQuery.refetch();
+                  }}
+                >
+                  Retry
+                </button>
+              </p>
+            </Show>
+            <Show
+              when={
+                !documentsQuery.isPending &&
+                !documentsQuery.isError &&
+                documentsData()?.documents.length === 0 &&
+                !debouncedSearchQuery().trim() &&
+                getPagination().pageIndex === 0
+              }
+            >
+              <p class="my-4 text-sm text-muted-foreground">
+                {allFiles() ? 'No files in this space yet.' : 'No files in this folder yet.'} Use
+                {t('layout.menu.import-document')} to add files here.
+              </p>
+            </Show>
+            <Show when={documentsData()}>
+              <DocumentsPaginatedList
+                documents={documentsData()?.documents ?? []}
+                documentsCount={listing.total()}
+                hasMore={documentsData()?.hasMore}
+                onNextPageIntent={listing.prefetchNext}
+                getPagination={getPagination}
+                setPagination={setPagination}
+                enableBatchSelection
+                enableContextMenu
+                getRowSelection={getRowSelection}
+                setRowSelection={setRowSelection}
+                getSorting={getSorting}
+                setSorting={setSorting}
+                extraColumns={[
+                  uploadedByColumn,
+                  modifiedByColumn,
+                  sizeColumn,
+                  modifiedAtColumn,
+                  standardActionsColumn,
+                ]}
+              />
+            </Show>
+
+            <div
+              class="mt-5 flex flex-wrap items-center gap-x-3 gap-y-2 border-t pt-3"
+              aria-label="Space tools"
+            >
+              <Button
+                ref={askButton}
+                size="sm"
+                variant="outline"
+                aria-expanded={askOpen()}
+                aria-controls="files-ask-panel"
+                onClick={() => toggleAsk(!askOpen())}
+              >
+                <span class="i-tabler-sparkles size-4 mr-1.5" aria-hidden="true" />
+                Ask this space
+              </Button>
+              <DriveExport organizationId={params.organizationId} />
+            </div>
+
+            <DocumentMoveDialog
+              organizationId={params.organizationId}
+              open={moveOpen()}
+              onOpenChange={setMoveOpen}
+              filter={getBatchFilter()}
+              folderIds={getSelectedFolderIds()}
+              fileCount={getEffectiveCount()}
+              onMoved={clearSelection}
+            />
+            <DocumentRenameSuggestionsDialog
+              organizationId={params.organizationId}
+              open={renameOpen()}
+              onOpenChange={setRenameOpen}
+              documentIds={getSelectedIds()}
+              onApplied={clearSelection}
+            />
+            <DocumentsBatchTagDialog
+              open={getTagDialogOpen()}
+              onOpenChange={setTagDialogOpen}
+              organizationId={params.organizationId}
+              selectionCount={getEffectiveCount()}
+              isPending={tagMutation.isPending}
+              onSubmit={({ addTagIds, removeTagIds }) => {
+                setTagDialogOpen(false);
+                tagMutation.mutate({ addTagIds, removeTagIds });
+              }}
+            />
+          </>
+        </Suspense>
+      </div>
+      <Show when={askStarted()}>
+        <aside
+          id="files-ask-panel"
+          ref={askPanel}
+          hidden={!askOpen()}
+          aria-label="Ask this space"
+          class="min-w-0 rounded-lg border bg-card p-4 xl:sticky xl:top-4 xl:max-h-[calc(100dvh-6rem)] xl:overflow-y-auto"
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.stopPropagation();
+              toggleAsk(false);
+            }
+          }}
+        >
+          <div class="mb-4 flex items-center justify-between gap-2">
+            <h2 class="text-base font-semibold">Ask this space</h2>
+            <Button
+              size="icon"
+              variant="ghost"
+              class="size-8"
+              aria-label="Close Ask panel"
+              onClick={() => toggleAsk(false)}
+            >
+              <span class="i-tabler-x size-4" aria-hidden="true" />
+            </Button>
+          </div>
+          <DriveEvidence organizationId={params.organizationId} panel />
+        </aside>
+      </Show>
     </div>
   );
 };

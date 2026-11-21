@@ -358,7 +358,7 @@ try {
     'Chrome kept cached rows visible during a stale refresh and picked up edits.\n',
   );
   await observer.goto(origin + documentsPath);
-  await uploader.getByRole('button', { name: 'Import a document' }).click();
+  await uploader.getByRole('button', { name: 'New / Import' }).click();
   const chooser = uploader.waitForEvent('filechooser');
   await uploader.getByRole('menuitem', { name: 'Upload files' }).click();
   await (

@@ -233,7 +233,7 @@ export const standardActionsColumn: ColumnDef<Document> = {
   id: 'actions',
   enableSorting: false,
   cell: (data) => (
-    <div class={cn('flex items-center justify-end', revealOnHover)}>
+    <div class="flex items-center justify-end">
       <DocumentManagementDropdown document={data.row.original} />
     </div>
   ),
@@ -273,6 +273,7 @@ export const DocumentsPaginatedList: Component<{
   showPagination?: boolean;
   pageSizeOptions?: number[];
   enableBatchSelection?: boolean;
+  enableContextMenu?: boolean;
   getRowSelection?: Accessor<RowSelectionState>;
   setRowSelection?: Setter<RowSelectionState>;
   getSorting?: Accessor<SortingState>;
@@ -430,8 +431,8 @@ export const DocumentsPaginatedList: Component<{
             <TableBody>
               <Show when={table.getRowModel().rows?.length}>
                 <For each={table.getRowModel().rows}>
-                  {(row) => (
-                    <TableRow class="group" data-state={row.getIsSelected() && 'selected'}>
+                  {(row) => {
+                    const cells = () => (
                       <For each={row.getVisibleCells()}>
                         {(cell) => (
                           <TableCell
@@ -445,8 +446,30 @@ export const DocumentsPaginatedList: Component<{
                           </TableCell>
                         )}
                       </For>
-                    </TableRow>
-                  )}
+                    );
+                    return (
+                      <Show
+                        when={props.enableContextMenu}
+                        fallback={
+                          <TableRow class="group" data-state={row.getIsSelected() && 'selected'}>
+                            {cells()}
+                          </TableRow>
+                        }
+                      >
+                        <DocumentManagementDropdown
+                          document={row.original}
+                          row={{
+                            get content() {
+                              return cells();
+                            },
+                            get selected() {
+                              return row.getIsSelected();
+                            },
+                          }}
+                        />
+                      </Show>
+                    );
+                  }}
                 </For>
               </Show>
             </TableBody>
