@@ -815,6 +815,131 @@ test('native streaming is kept alive until its response settles, then cleaned up
   expect(destroy).toHaveBeenCalledOnce();
 });
 
+test('large recordings schedule independent slices and reuse the extracted WAV after an ASR retry', async () => {
+  const { env, DB, mf, send } = await fixture(['FILES', 'BACKUPS']);
+  const files = await mf.getR2Bucket('FILES');
+  const bytes = Uint8Array.of(1, 2, 3);
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  const duration = 601.25;
+  const slices: { startSeconds: number; endSeconds: number }[] = [];
+  let timedOut = false;
+  const native = vi.fn(async (request: Request) => {
+    const payload = (await request.json()) as any;
+    if (new URL(request.url).pathname === '/process') {
+      expect(payload.deferLongAudio).toBe(true);
+      expect(payload.source.byteSize).toBe(30 * 1024 ** 3);
+      return Response.json({
+        jobId: payload.jobId,
+        text: '',
+        chunks: [],
+        outputs: [],
+        warnings: [],
+        deferredAudio: { durationSeconds: duration },
+        metadata: {
+          durationSeconds: duration,
+          width: 3840,
+          height: 2160,
+          videoCodec: 'h264',
+          hasAudio: true,
+        },
+      });
+    }
+    expect(new URL(request.url).pathname).toBe('/media/audio');
+    const { startSeconds, endSeconds } = payload;
+    slices.push({ startSeconds, endSeconds });
+    if (startSeconds === 300 && !timedOut) {
+      timedOut = true;
+      return Response.json({ error: 'processing_timeout' }, { status: 504 });
+    }
+    await files.put(payload.output.key, bytes);
+    return Response.json({
+      jobId: payload.jobId,
+      output: {
+        key: payload.output.key,
+        kind: 'audio',
+        contentType: 'audio/wav',
+        startSeconds,
+        endSeconds,
+        byteSize: bytes.length,
+        sha256,
+      },
+    });
+  });
+  const ai = vi.fn(async () => ({ text: 'Spoken audio', segments: [] }));
+  ai.mockRejectedValueOnce(new Error('temporary ASR outage'));
+  Object.assign(env, {
+    FILES: files,
+    BACKUPS: await mf.getR2Bucket('BACKUPS'),
+    VIDEO_JOBS: { send },
+    R2_ACCESS_KEY_ID: 'test',
+    R2_SECRET_ACCESS_KEY: 'test',
+    R2_ENDPOINT: 'https://example.r2.cloudflarestorage.com',
+    R2_BUCKET: 'papra-drive',
+    AI: { run: ai },
+  });
+  vi.mocked(getContainer).mockReturnValue({
+    fetch: native,
+    destroy: vi.fn(async () => {}),
+  } as never);
+  await DB.prepare(
+    "UPDATE versions SET size=?,mime_type='video/mp4',original_name='large.mp4' WHERE id='v'",
+  )
+    .bind(30 * 1024 ** 3)
+    .run();
+  await DB.prepare(
+    "INSERT INTO jobs(id,version_id,kind,status,created_at,updated_at) VALUES('process','v','process','pending',1,1)",
+  ).run();
+  await consumeJobs(batch({ jobId: 'process', generation: 0 }), env);
+  expect(await DB.prepare("SELECT status FROM jobs WHERE id='process'").first()).toEqual({
+    status: 'done',
+  });
+  expect(
+    await DB.prepare("SELECT kind FROM jobs WHERE kind='video:thumbnails-v2'").first(),
+  ).toBeTruthy();
+  const jobs = (
+    await DB.prepare("SELECT id,kind FROM jobs WHERE kind LIKE 'transcribe:%' ORDER BY kind").all<{
+      id: string;
+      kind: string;
+    }>()
+  ).results;
+  expect(jobs.map((job) => job.kind)).toEqual([
+    'transcribe:0:0',
+    'transcribe:0:1',
+    'transcribe:0:2',
+  ]);
+  expect(slices).toEqual([]);
+
+  const consume = async (i: number) =>
+    consumeJobs(batch({ jobId: jobs[i]!.id, generation: 0 }), env);
+  await consume(0);
+  await consume(1);
+  await consume(2);
+  expect(await DB.prepare("SELECT status FROM jobs WHERE kind='transcribe:0:0'").first()).toEqual({
+    status: 'pending',
+  });
+  expect(await DB.prepare("SELECT status FROM jobs WHERE kind='transcribe:0:2'").first()).toEqual({
+    status: 'done',
+  });
+  await consume(0);
+  expect(await DB.prepare("SELECT status FROM jobs WHERE kind='transcribe:0:0'").first()).toEqual({
+    status: 'done',
+  });
+  await consume(1);
+  expect(slices).toEqual([
+    { startSeconds: 0, endSeconds: 300 },
+    { startSeconds: 300, endSeconds: 600 },
+    { startSeconds: 600, endSeconds: duration },
+    { startSeconds: 300, endSeconds: 600 },
+  ]);
+  expect(await DB.prepare("SELECT processing_status FROM versions WHERE id='v'").first()).toEqual({
+    processing_status: 'ready',
+  });
+  const last = (await (await files.get('derived/v/transcribe-0-2.json'))?.json()) as
+    | { chunks: { startSeconds: number }[] }
+    | undefined;
+  expect(last?.chunks[0]?.startSeconds).toBe(600);
+});
+
 test('vision jobs use Gemma multimodal messages and publish its chat completion caption', async () => {
   const { env, DB } = await fixture();
   const bytes = new Uint8Array([1, 2, 3]);

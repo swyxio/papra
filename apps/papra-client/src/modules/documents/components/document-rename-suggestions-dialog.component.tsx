@@ -18,7 +18,7 @@ import { updateDocument } from '../documents.services';
 
 export const MAX_RENAME_SUGGESTIONS = 20;
 
-type Row = RenameSuggestion & { apply: boolean };
+type Row = RenameSuggestion & { apply: boolean; descriptionEdited?: boolean };
 
 export const DocumentRenameSuggestionsDialog: Component<{
   organizationId: string;
@@ -34,6 +34,20 @@ export const DocumentRenameSuggestionsDialog: Component<{
     setRows((current) =>
       current.map((row) => (row.documentId === id ? { ...row, ...patch } : row)),
     );
+
+  const selectedChanges = () =>
+    rows().flatMap((row) => {
+      const name = row.name.trim();
+      if (!row.apply || !name) return [];
+      const newName = name !== row.currentName ? name : undefined;
+      const notesIfEmpty =
+        saveNotes() && !row.hasNotes && (row.hasContent || row.hasVisuals || row.descriptionEdited)
+          ? row.description.trim() || undefined
+          : undefined;
+      return newName || notesIfEmpty
+        ? [{ documentId: row.documentId, name: newName, notesIfEmpty }]
+        : [];
+    });
 
   const suggest = useMutation(() => ({
     mutationFn: async () =>
@@ -52,24 +66,27 @@ export const DocumentRenameSuggestionsDialog: Component<{
 
   const apply = useMutation(() => ({
     mutationFn: async () => {
-      const chosen = rows().filter((row) => row.apply && row.name.trim());
-      for (const row of chosen)
-        await updateDocument({
+      const chosen = selectedChanges();
+      for (const change of chosen) {
+        const { document } = await updateDocument({
+          ...change,
           organizationId: props.organizationId,
-          documentId: row.documentId,
-          name: row.name.trim(),
-          notes:
-            saveNotes() && row.hasContent && !row.hasNotes && row.description
-              ? row.description
-              : undefined,
         });
+        update(change.documentId, {
+          apply: false,
+          currentName: document.name,
+          hasNotes: Boolean(document.notes?.trim()),
+        });
+      }
       return chosen.length;
     },
-    onSuccess: async (count) => {
+    onSettled: async () => {
       await client.invalidateQueries({ queryKey: ['organizations', props.organizationId] });
+    },
+    onSuccess: (count) => {
       createToast({
         type: 'success',
-        message: `Renamed ${count} ${count === 1 ? 'file' : 'files'}`,
+        message: `Updated ${count} ${count === 1 ? 'file' : 'files'}`,
       });
       props.onApplied?.();
       props.onOpenChange(false);
@@ -79,11 +96,12 @@ export const DocumentRenameSuggestionsDialog: Component<{
   createEffect(() => {
     if (!props.open) return;
     setRows([]);
+    setSaveNotes(true);
     apply.reset();
     suggest.mutate();
   });
 
-  const chosenCount = () => rows().filter((row) => row.apply && row.name.trim()).length;
+  const chosenCount = () => selectedChanges().length;
 
   return (
     <Dialog
@@ -96,8 +114,8 @@ export const DocumentRenameSuggestionsDialog: Component<{
         <DialogHeader>
           <DialogTitle>Suggested names</DialogTitle>
           <DialogDescription>
-            Suggestions use each file’s name, folder, text, and any available video frames. Select
-            the names you want to apply and edit them as needed.
+            Review and edit each name and description. You can keep a file’s original name and save
+            just its description as a note.
           </DialogDescription>
         </DialogHeader>
         <Show when={suggest.isPending}>
@@ -116,7 +134,10 @@ export const DocumentRenameSuggestionsDialog: Component<{
           </p>
         </Show>
         <Show when={rows().length > 0}>
-          <div class="max-h-[60vh] overflow-y-auto divide-y rounded-md border">
+          <fieldset
+            disabled={apply.isPending}
+            class="min-w-0 max-h-[58vh] overflow-y-auto divide-y rounded-md border"
+          >
             <Index each={rows()}>
               {(row) => (
                 <div class="p-3">
@@ -124,7 +145,7 @@ export const DocumentRenameSuggestionsDialog: Component<{
                     <input
                       type="checkbox"
                       class="size-6 shrink-0 cursor-pointer accent-primary focus-visible:ring-2 focus-visible:ring-ring"
-                      aria-label={`Rename ${row().currentName}`}
+                      aria-label={`Select changes for ${row().currentName}`}
                       checked={row().apply}
                       onChange={(event) =>
                         update(row().documentId, { apply: event.currentTarget.checked })
@@ -144,29 +165,64 @@ export const DocumentRenameSuggestionsDialog: Component<{
                         update(row().documentId, { name: event.currentTarget.value, apply: true })
                       }
                     />
-                    <p class="text-xs text-muted-foreground">
-                      {row().description}
-                      <Show when={row().hasVisuals}>
-                        <span class="ml-1 italic">
-                          {row().hasContent
-                            ? '(preview frames and transcript)'
-                            : '(preview frames and metadata)'}
-                        </span>
+                    <div class="flex flex-wrap items-center justify-between gap-x-2">
+                      <span class="text-xs text-muted-foreground">
+                        {row().hasVisuals
+                          ? row().hasContent
+                            ? 'Preview frames and available text'
+                            : 'Preview frames and filename'
+                          : row().hasContent
+                            ? 'Available text and filename'
+                            : 'Filename and folder only'}
+                      </span>
+                      <Show when={row().name !== row().currentName}>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          class="h-auto px-2 py-1 text-xs"
+                          onClick={() => update(row().documentId, { name: row().currentName })}
+                        >
+                          Keep original name
+                        </Button>
                       </Show>
-                      <Show when={!row().hasContent && !row().hasVisuals}>
-                        <span class="ml-1 italic">(filename and folder only)</span>
-                      </Show>
-                    </p>
+                    </div>
+                    <Show
+                      when={!row().hasNotes}
+                      fallback={
+                        <p class="text-xs text-muted-foreground">Existing note will be kept.</p>
+                      }
+                    >
+                      <label class="block space-y-1">
+                        <span class="text-xs text-muted-foreground">Description</span>
+                        <textarea
+                          aria-label={`Description for ${row().currentName}`}
+                          class="w-full resize-y rounded-md border bg-background px-2 py-1 text-sm"
+                          rows={2}
+                          placeholder="Add a note about this file"
+                          value={row().description}
+                          disabled={!saveNotes()}
+                          onInput={(event) => {
+                            update(row().documentId, {
+                              description: event.currentTarget.value,
+                              descriptionEdited: true,
+                              apply: true,
+                            });
+                          }}
+                        />
+                      </label>
+                    </Show>
                   </div>
                 </div>
               )}
             </Index>
-          </div>
+          </fieldset>
           <label class="flex cursor-pointer items-center gap-2 rounded px-1 py-1.5 text-sm hover:bg-muted">
             <input
               type="checkbox"
               class="size-6 shrink-0 cursor-pointer accent-primary focus-visible:ring-2 focus-visible:ring-ring"
               checked={saveNotes()}
+              disabled={apply.isPending}
               onChange={(event) => setSaveNotes(event.currentTarget.checked)}
             />
             Save descriptions as notes on files that have none
@@ -188,7 +244,7 @@ export const DocumentRenameSuggestionsDialog: Component<{
             isLoading={apply.isPending}
             disabled={suggest.isPending || chosenCount() === 0}
           >
-            Rename {chosenCount()} {chosenCount() === 1 ? 'file' : 'files'}
+            Apply to {chosenCount()} {chosenCount() === 1 ? 'file' : 'files'}
           </Button>
         </DialogFooter>
       </DialogContent>

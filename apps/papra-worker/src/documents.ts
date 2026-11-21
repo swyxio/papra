@@ -32,8 +32,10 @@ import type { RenameSource } from './rename-suggestions';
 import {
   MAX_RENAME_BATCH,
   excerptOf,
+  hasRenameEvidence,
   readRenameFrames,
   suggestDocumentNames,
+  withNearbySpeech,
 } from './rename-suggestions';
 
 const base = '/api/organizations/:org/documents';
@@ -387,6 +389,12 @@ export function registerDocumentRoutes(app: App) {
         fields.push(`${column}=?`);
       }
     }
+    if (b.notes === undefined && b.notesIfEmpty !== undefined) {
+      if (typeof b.notesIfEmpty !== 'string' || b.notesIfEmpty.length > 200000)
+        throw error(400, 'Invalid document value');
+      fields.push("notes=CASE WHEN trim(coalesce(notes,''))='' THEN ? ELSE notes END");
+      values.push(b.notesIfEmpty);
+    }
     if (fields.length) {
       const editedAt = Date.now();
       await c.env.DB.batch([
@@ -626,29 +634,37 @@ export function registerDocumentRoutes(app: App) {
       if (d.is_deleted) throw error(404, 'Document not found');
       documents.push(d);
     }
-    if (!(await reserveDocumentAnswer(c.env, documents.length)))
-      throw error(429, 'Daily AI limit reached');
     const sources: RenameSource[] = [];
     const withNotes = new Set<string>();
     for (const d of documents) {
       if ((d.notes as string | null)?.trim()) withNotes.add(d.id);
       const video = d.mime_type.startsWith('video/');
       const media = video || d.mime_type.startsWith('audio/');
-      let text = d.content as string | null;
-      if ((media || !text?.trim()) && d.current_version_id)
-        text = (await fetchTranscript(c.env, d.current_version_id))?.text || text;
+      const content = d.content as string | null;
+      const transcript =
+        (media || !content?.trim()) && d.current_version_id
+          ? await fetchTranscript(c.env, d.current_version_id)
+          : null;
+      const frames =
+        video && d.current_version_id
+          ? await readRenameFrames(c.env, d.current_version_id)
+          : undefined;
       sources.push({
         id: d.id,
         name: d.name,
         mimeType: d.mime_type,
         folder: path(d.home_folder_id),
-        excerpt: excerptOf(text, media),
+        excerpt: excerptOf(transcript?.text || content, media),
+        partialTranscript: transcript?.text
+          ? Boolean(transcript.partial || transcript.truncated)
+          : undefined,
         frames:
-          video && d.current_version_id
-            ? await readRenameFrames(c.env, d.current_version_id)
-            : undefined,
+          frames?.length && transcript ? withNearbySpeech(frames, transcript.segments) : frames,
       });
     }
+    const modelCalls = sources.filter(hasRenameEvidence).length;
+    if (modelCalls && !(await reserveDocumentAnswer(c.env, modelCalls)))
+      throw error(429, 'Daily AI limit reached');
     const suggestions = await suggestDocumentNames(c.env, sources);
     return c.json({
       suggestions: suggestions.map((s) => {

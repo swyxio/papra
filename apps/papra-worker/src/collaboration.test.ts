@@ -259,6 +259,27 @@ describe('D1 collaboration authorization and actual routes', () => {
     expect((await get(summary, 'reader', summaryTag)).status).toBe(404);
   });
 
+  test('a suggested description can fill a blank note without renaming or replacing a newer note', async () => {
+    const f = await fixture();
+    const path = `${f.base}/documents/doc_public`;
+    await f.DB.prepare("UPDATE documents SET notes='' WHERE id='doc_public'").run();
+    const result = await f.request(path, 'PATCH', { notesIfEmpty: 'Wide two-shot' });
+    expect(result.status).toBe(200);
+    expect(((await result.json()) as any).document).toMatchObject({
+      name: 'Public needle',
+      notes: 'Wide two-shot',
+    });
+    const second = await f.request(path, 'PATCH', {
+      name: 'Reviewed title',
+      notesIfEmpty: 'Stale draft',
+    });
+    expect(second.status).toBe(200);
+    expect(((await second.json()) as any).document).toMatchObject({
+      name: 'Reviewed title',
+      notes: 'Wide two-shot',
+    });
+  });
+
   test('space and folder summaries count only live readable original files, with shortcuts separate', async () => {
     const f = await fixture();
     await f.DB.prepare('UPDATE documents SET updated_at=200 WHERE id=?').bind('doc_secret').run();

@@ -16,6 +16,7 @@ export type NativeJob = {
     audioChunkSeconds?: number;
     maxFrames?: number;
   };
+  deferLongAudio?: boolean;
 };
 export type NativeOutput = {
   kind: 'text' | 'preview' | 'audio' | 'frame' | 'playback';
@@ -33,7 +34,16 @@ export type NativeResult = {
   outputs: NativeOutput[];
   metadata: MediaMetadata & { pages?: number };
   warnings: string[];
+  deferredAudio?: { durationSeconds: number };
 };
+export type NativeAudioSlice = {
+  jobId: string;
+  source: NativeJob['source'];
+  output: OutputTarget;
+  startSeconds: number;
+  endSeconds: number;
+};
+export type NativeAudioResult = { jobId: string; output: NativeOutput };
 export type HashJob = { jobId: string; source: { url: string; byteSize: number } };
 export type HashResult = { jobId: string; byteSize: number; sha256: string };
 

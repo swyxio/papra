@@ -19,12 +19,17 @@ Audio and video use ffprobe/ffmpeg directly against signed R2 URLs with HTTP
 range requests, including originals larger than container disk. Processing
 supports media up to 6 hours, 72 five-minute audio chunks and 12 video frames.
 Each audio chunk is 16 kHz, mono, signed 16-bit PCM WAV, at most about 9.6 MB.
+For media at least 2 GiB or 15 minutes long, `/process` records the audio
+duration and the existing transcription jobs request one window each from
+`POST /media/audio`. The Worker saves the WAV receipt before calling the model,
+so a transcription retry can reuse the same audio. Each slice has an 8-minute
+native deadline and a 9-minute caller deadline.
 The consumer transcribes these chunks and adds each chunk's start time to word
 or segment timestamps. Frame receipts contain source timestamps for vision and
 search provenance. No model calls run in the image.
 
-A job has a 12 minute deadline and one active job per container instance.
-The caller deadline is 13 minutes and destroys the per-job instance in finally;
+Other jobs have a 12 minute native deadline. Each container handles one job at a time.
+The caller deadline for these jobs is 13 minutes and destroys the per-job instance in finally;
 the fallback idle window is 15 minutes so an idle alarm cannot interrupt a
 long response if its Durable Object request state is lost. Tool
 failure or bounds violations produce stable errors; originals remain available

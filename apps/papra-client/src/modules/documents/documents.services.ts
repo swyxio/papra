@@ -214,6 +214,7 @@ export async function updateDocument({
   content,
   name,
   notes,
+  notesIfEmpty,
   documentDate,
 }: {
   documentId: string;
@@ -221,12 +222,13 @@ export async function updateDocument({
   content?: string;
   name?: string;
   notes?: string;
+  notesIfEmpty?: string;
   documentDate?: Date | null;
 }) {
   const { document } = await apiClient<{ document: AsDto<Document> }>({
     method: 'PATCH',
     path: `/api/organizations/${organizationId}/documents/${documentId}`,
-    body: { content, name, documentDate, notes },
+    body: { content, name, documentDate, notes, notesIfEmpty },
   });
 
   return {
