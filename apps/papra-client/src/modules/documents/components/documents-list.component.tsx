@@ -264,7 +264,9 @@ export const tagsColumn: ColumnDef<Document> = {
 
 export const DocumentsPaginatedList: Component<{
   documents: Document[];
-  documentsCount: number;
+  documentsCount?: number;
+  hasMore?: boolean;
+  onNextPageIntent?: () => void;
   getPagination?: Accessor<Pagination>;
   setPagination?: Setter<Pagination>;
   extraColumns?: ColumnDef<Document>[];
@@ -363,10 +365,18 @@ export const DocumentsPaginatedList: Component<{
     manualSorting: true,
   });
 
+  const canGoNext = () => props.hasMore ?? table.getCanNextPage();
+
   return (
     <div>
       <Switch>
-        <Match when={props.documentsCount > 0}>
+        <Match
+          when={
+            props.documents.length > 0 ||
+            (props.documentsCount ?? 0) > 0 ||
+            (props.getPagination?.().pageIndex ?? 0) > 0
+          }
+        >
           <Table class="table-fixed sm:table-auto">
             <TableHeader>
               <For each={table.getHeaderGroups()}>
@@ -463,10 +473,17 @@ export const DocumentsPaginatedList: Component<{
                 </Select>
               </div>
               <div class="flex items-center justify-center whitespace-nowrap text-sm font-medium">
-                {t('common.tables.pagination-info', {
-                  currentPage: table.getState().pagination.pageIndex + 1,
-                  totalPages: table.getPageCount(),
-                })}
+                <Show
+                  when={props.documentsCount !== undefined}
+                  fallback={t('common.tables.current-page', {
+                    currentPage: table.getState().pagination.pageIndex + 1,
+                  })}
+                >
+                  {t('common.tables.pagination-info', {
+                    currentPage: table.getState().pagination.pageIndex + 1,
+                    totalPages: Math.max(1, table.getPageCount()),
+                  })}
+                </Show>
               </div>
               <div class="flex items-center space-x-2">
                 <Button
@@ -494,7 +511,9 @@ export const DocumentsPaginatedList: Component<{
                   size="icon"
                   class="size-8"
                   onClick={() => table.nextPage()}
-                  disabled={!table.getCanNextPage()}
+                  onPointerEnter={props.onNextPageIntent}
+                  onFocus={props.onNextPageIntent}
+                  disabled={!canGoNext()}
                 >
                   <div class="size-4 i-tabler-chevron-right" />
                 </Button>
@@ -504,7 +523,11 @@ export const DocumentsPaginatedList: Component<{
                   size="icon"
                   class="flex size-8"
                   onClick={() => table.setPageIndex(table.getPageCount() - 1)}
-                  disabled={!table.getCanNextPage()}
+                  disabled={
+                    props.documentsCount === undefined ||
+                    props.documentsCount === 0 ||
+                    !table.getCanNextPage()
+                  }
                 >
                   <div class="size-4 i-tabler-chevrons-right" />
                 </Button>

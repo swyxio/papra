@@ -56,12 +56,20 @@ export const folderTreeQuery = (organizationId: string) => ({
   queryKey: folderQueryKey(organizationId),
   queryFn: async () => fetchFolders(organizationId),
   staleTime: FOLDER_FRESHNESS_MS,
+  gcTime: 10 * 60_000,
+  refetchOnWindowFocus: 'always' as const,
+  refetchOnReconnect: 'always' as const,
+  meta: { discardOnAccessError: true },
 });
 export const folderViewQuery = (organizationId: string, folderId: string) => ({
   queryKey: [...folderQueryKey(organizationId), 'view', folderId],
   queryFn: async () =>
     apiClient<FolderView>({ path: `${driveBase(organizationId)}/folders/${folderId}/view` }),
   staleTime: FOLDER_FRESHNESS_MS,
+  gcTime: 10 * 60_000,
+  refetchOnWindowFocus: 'always' as const,
+  refetchOnReconnect: 'always' as const,
+  meta: { discardOnAccessError: true },
 });
 export const folderSummaryQuery = (organizationId: string, folderId: string) => ({
   queryKey: [...folderQueryKey(organizationId), 'summary', folderId],
@@ -70,6 +78,10 @@ export const folderSummaryQuery = (organizationId: string, folderId: string) => 
       path: `${driveBase(organizationId)}/folders/${folderId}/summary`,
     }),
   staleTime: FOLDER_FRESHNESS_MS,
+  gcTime: 10 * 60_000,
+  refetchOnWindowFocus: 'always' as const,
+  refetchOnReconnect: 'always' as const,
+  meta: { discardOnAccessError: true },
 });
 export function folderPath(folder: DriveFolder, folders: DriveFolder[]): string {
   const names = [folder.name];

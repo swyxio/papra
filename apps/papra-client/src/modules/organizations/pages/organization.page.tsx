@@ -2,7 +2,7 @@ import type { RowSelectionState } from '@tanstack/solid-table';
 import type { Component } from 'solid-js';
 import { formatBytes } from '@corentinth/chisels';
 import { useParams } from '@solidjs/router';
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/solid-query';
+import { useMutation, useQuery } from '@tanstack/solid-query';
 import { createMemo, createSignal, on, createEffect, Show, Suspense } from 'solid-js';
 import { DocumentMoveDialog } from '@/modules/documents/components/document-move-dialog.component';
 import {
@@ -22,10 +22,9 @@ import {
   locationColumn,
   tagsColumn,
 } from '@/modules/documents/components/documents-list.component';
-import {
-  fetchOrganizationDocuments,
-  getOrganizationDocumentsStats,
-} from '@/modules/documents/documents.services';
+import { getOrganizationDocumentsStats } from '@/modules/documents/documents.services';
+import { useDriveDocumentPage } from '@/modules/documents/document-list.queries';
+import { refreshDriveQueries } from '@/modules/shared/query/query-client';
 import { useI18n } from '@/modules/i18n/i18n.provider';
 import { createParamSynchronizedPagination } from '@/modules/shared/pagination/query-synchronized-pagination';
 import { Button } from '@/modules/ui/components/button';
@@ -38,25 +37,36 @@ export const OrganizationPage: Component = () => {
     defaultPageIndex: 0,
   });
 
-  const documentsQuery = useQuery(() => ({
-    queryKey: ['organizations', params.organizationId, 'documents', getPagination()],
-    queryFn: async () =>
-      fetchOrganizationDocuments({
-        organizationId: params.organizationId,
-        includeFolderPath: true,
-        ...getPagination(),
-      }),
-    placeholderData: keepPreviousData,
-  }));
+  const listing = useDriveDocumentPage(
+    () => ({
+      organizationId: params.organizationId,
+      includeFolderPath: true,
+      ...getPagination(),
+    }),
+    undefined,
+    false,
+  );
 
   const statsQuery = useQuery(() => ({
     queryKey: ['organizations', params.organizationId, 'documents', 'stats'],
     queryFn: async () => getOrganizationDocumentsStats({ organizationId: params.organizationId }),
   }));
 
+  const documentTotal = () =>
+    listing.total() ??
+    (listing.data() && !statsQuery.isPending
+      ? statsQuery.data?.organizationStats.documentsCount
+      : undefined);
+  createEffect(() => {
+    const total = documentTotal();
+    const { pageIndex, pageSize } = getPagination();
+    if (total === undefined || listing.data()?.documents.length !== 0) return;
+    const lastPage = Math.max(0, Math.ceil(total / pageSize) - 1);
+    if (pageIndex > lastPage) setPagination({ pageIndex: lastPage, pageSize });
+  });
+
   const { promptImport } = useDocumentUpload();
 
-  const client = useQueryClient();
   const { confirm } = useConfirmModal();
   const [getRowSelection, setRowSelection] = createSignal<RowSelectionState>({});
   const [moveOpen, setMoveOpen] = createSignal(false);
@@ -71,7 +81,7 @@ export const OrganizationPage: Component = () => {
       batchTrashDocuments({ organizationId: params.organizationId, filter: { documentIds } }),
     onSuccess: async (_, documentIds) => {
       clearSelection();
-      await client.invalidateQueries({ queryKey: ['organizations', params.organizationId] });
+      await refreshDriveQueries(params.organizationId);
       createToast({
         type: 'success',
         message: t('documents.list.batch.trash.success', { count: documentIds.length }),
@@ -97,7 +107,7 @@ export const OrganizationPage: Component = () => {
     <div class="p-6 mt-4 pb-32 max-w-5xl mx-auto">
       <UploadDestinationPicker organizationId={params.organizationId} />
       <Suspense>
-        {documentsQuery.data?.documents?.length === 0 ? (
+        {listing.data()?.documents.length === 0 && getPagination().pageIndex === 0 ? (
           <>
             <h2 class="text-xl font-bold ">{t('organizations.details.no-documents.title')}</h2>
 
@@ -199,8 +209,10 @@ export const OrganizationPage: Component = () => {
             </div>
 
             <DocumentsPaginatedList
-              documents={documentsQuery.data?.documents ?? []}
-              documentsCount={documentsQuery.data?.documentsCount ?? 0}
+              documents={listing.data()?.documents ?? []}
+              documentsCount={documentTotal()}
+              hasMore={listing.data()?.hasMore}
+              onNextPageIntent={listing.prefetchNext}
               getPagination={getPagination}
               setPagination={setPagination}
               pageSizeOptions={[15, 20, 50, 100]}

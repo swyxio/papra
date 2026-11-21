@@ -4,7 +4,7 @@ import type { SsoProviderConfig } from './auth.types';
 import { genericOAuthClient, twoFactorClient } from 'better-auth/client/plugins';
 import { createAuthClient as createBetterAuthClient } from 'better-auth/solid';
 import { buildTimeConfig, isDemoMode } from '../config/config';
-import { queryClient } from '../shared/query/query-client';
+import { clearQueryCache } from '../shared/query/query-client';
 import { trackingServices } from '../tracking/tracking.services';
 import { createDemoAuthClient } from './auth.demo.services';
 import { buildUrl } from '@corentinth/chisels';
@@ -29,7 +29,7 @@ export function createAuthClient() {
       const result = await client.signOut();
       trackingServices.reset();
 
-      queryClient.clear();
+      if (!result.error) clearQueryCache();
 
       return result;
     },

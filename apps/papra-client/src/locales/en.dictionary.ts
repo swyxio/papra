@@ -1283,6 +1283,7 @@ export const translations = {
 
   'common.confirm-modal.type-to-confirm': 'Type "{{ text }}" to confirm',
   'common.tables.rows-per-page': 'Rows per page',
+  'common.tables.current-page': 'Page {{ currentPage }}',
   'common.tables.pagination-info': 'Page {{ currentPage }} of {{ totalPages }}',
   'common.tables.first-page': 'Go to first page',
   'common.tables.previous-page': 'Go to previous page',

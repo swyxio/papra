@@ -1,7 +1,6 @@
 import type { FolderView } from '@/modules/drive-collaboration/drive-collaboration.services';
 import { DriveSpaceCapabilities } from '@/modules/drive-capabilities';
 import {
-  FOLDER_FRESHNESS_MS,
   folderViewQuery,
   homeFolderId,
 } from '@/modules/drive-collaboration/drive-collaboration.services';
@@ -11,7 +10,7 @@ import { DriveExport } from '../components/drive-export.component';
 import { saveDocumentsZip, zipProgressText } from '../components/drive-zip-download';
 import { useDownloadDocument } from '../documents.composables';
 import { apiClient } from '@/modules/shared/http/api-client';
-import { getHttpErrorMessage, isHttpErrorWithStatusCode } from '@/modules/shared/http/http-errors';
+import { getHttpErrorMessage } from '@/modules/shared/http/http-errors';
 import type { RowSelectionState, SortingState } from '@tanstack/solid-table';
 import type { Component, Setter } from 'solid-js';
 import type { Document } from '../documents.types';
@@ -24,7 +23,7 @@ import { CreateDocumentViewModal } from '@/modules/document-views/components/doc
 import { useI18n } from '@/modules/i18n/i18n.provider';
 import { useConfirmModal } from '@/modules/shared/confirm';
 import { createParamSynchronizedPagination } from '@/modules/shared/pagination/query-synchronized-pagination';
-import { queryClient } from '@/modules/shared/query/query-client';
+import { queryClient, refreshDriveQueries } from '@/modules/shared/query/query-client';
 import { createParamSynchronizedSignal } from '@/modules/shared/signals/params';
 import { resolveSetterValue } from '@/modules/shared/signals/setters';
 import { cn } from '@/modules/shared/style/cn';
@@ -56,6 +55,7 @@ import {
 } from '../documents.constants';
 import { fetchCustomPropertyDefinitions } from '@/modules/custom-properties/custom-properties.services';
 import { fetchOrganizationDocuments } from '../documents.services';
+import { useDriveDocumentPage } from '../document-list.queries';
 
 const searchTips =
   'Search filenames, document text, notes and property values. Filters: tag:Contract · created:>=2026-01-01 · uploadedBy:"Vibhu" · modifiedBy:name@example.com · has:date';
@@ -150,38 +150,18 @@ export const DocumentsPage: Component = () => {
     setPagination((current) => ({ ...current, pageIndex: 0 }));
   };
 
-  const documentsQuery = useQuery(() => ({
-    enabled: allFiles() || (Boolean(queryFolderId()) && !isPendingFolderId(queryFolderId())),
-    staleTime: FOLDER_FRESHNESS_MS,
-    queryKey: [
-      'organizations',
-      params.organizationId,
-      'documents',
-      queryFolderId(),
-      getPagination(),
-      debouncedSearchQuery(),
-      getSortField(),
-      getSortOrder(),
-    ],
-    queryFn: async () =>
-      fetchOrganizationDocuments({
-        organizationId: params.organizationId,
-        searchQuery: debouncedSearchQuery(),
-        folderId: queryFolderId(),
-        sortField: getSortField(),
-        sortOrder: getSortOrder(),
-        ...getPagination(),
-      }),
-  }));
-
-  // Reading `data` while pending would suspend the router transition and hold the previous
-  // folder on screen, so pending folders render skeletons immediately instead.
-  const accessLost = () =>
-    [401, 403, 404].some((statusCode) =>
-      isHttpErrorWithStatusCode({ error: documentsQuery.error, statusCode }),
-    );
-  const documentsData = () =>
-    documentsQuery.isPending || accessLost() ? undefined : documentsQuery.data;
+  const listing = useDriveDocumentPage(
+    () => ({
+      organizationId: params.organizationId,
+      searchQuery: debouncedSearchQuery(),
+      folderId: queryFolderId(),
+      sortField: getSortField(),
+      sortOrder: getSortOrder(),
+      ...getPagination(),
+    }),
+    () => allFiles() || (Boolean(queryFolderId()) && !isPendingFolderId(queryFolderId())),
+  );
+  const { query: documentsQuery, data: documentsData } = listing;
   const [lastOpenedFolder, setLastOpenedFolder] = createSignal<string>();
   createEffect(() => {
     const folder = queryFolderId();
@@ -212,7 +192,7 @@ export const DocumentsPage: Component = () => {
 
   const getEffectiveCount = () => {
     if (getSelectAllMatchingQuery()) {
-      return documentsData()?.documentsCount ?? 0;
+      return listing.total() ?? 0;
     }
     return getSelectedIds().length;
   };
@@ -226,8 +206,16 @@ export const DocumentsPage: Component = () => {
     return docs.every((doc) => selection[doc.id]);
   });
 
+  createEffect(() => {
+    const total = listing.total();
+    const { pageIndex, pageSize } = getPagination();
+    if (total === undefined || documentsData()?.documents.length !== 0) return;
+    const lastPage = Math.max(0, Math.ceil(total / pageSize) - 1);
+    if (pageIndex > lastPage) setPagination({ pageIndex: lastPage, pageSize });
+  });
+
   const hasMoreThanPage = createMemo(() => {
-    const total = documentsData()?.documentsCount ?? 0;
+    const total = listing.total() ?? 0;
     const shown = documentsData()?.documents.length ?? 0;
     return total > shown;
   });
@@ -277,12 +265,8 @@ export const DocumentsPage: Component = () => {
   }
 
   function invalidateDocuments() {
-    void queryClient.invalidateQueries({
-      queryKey: ['organizations', params.organizationId, 'folders'],
-    });
-    void queryClient.invalidateQueries({
-      queryKey: ['organizations', params.organizationId, 'documents'],
-    });
+    // Trash/tag changes can affect shortcut and workspace-wide views.
+    void refreshDriveQueries(params.organizationId);
   }
 
   const trashMutation = useMutation(() => ({
@@ -712,18 +696,18 @@ export const DocumentsPage: Component = () => {
                 <span class="text-sm text-muted-foreground">
                   <Show
                     when={
-                      documentsData() &&
-                      (documentsData()!.documentsCount > 0 || debouncedSearchQuery().length > 0)
+                      listing.total() !== undefined &&
+                      ((listing.total() ?? 0) > 0 || debouncedSearchQuery().length > 0)
                     }
                   >
                     <Show
                       when={debouncedSearchQuery().length > 0}
                       fallback={t('documents.list.search.total-count-no-query', {
-                        count: documentsData()?.documentsCount ?? 0,
+                        count: listing.total() ?? 0,
                       })}
                     >
                       {t('documents.list.search.total-count-with-query', {
-                        count: documentsData()?.documentsCount ?? 0,
+                        count: listing.total() ?? 0,
                       })}
                     </Show>
                   </Show>
@@ -763,11 +747,11 @@ export const DocumentsPage: Component = () => {
                     <Show
                       when={debouncedSearchQuery().length > 0}
                       fallback={t('documents.list.batch.select-all', {
-                        count: documentsData()?.documentsCount ?? 0,
+                        count: listing.total() ?? 0,
                       })}
                     >
                       {t('documents.list.batch.select-all-matching', {
-                        count: documentsData()?.documentsCount ?? 0,
+                        count: listing.total() ?? 0,
                       })}
                     </Show>
                   </Button>
@@ -894,7 +878,8 @@ export const DocumentsPage: Component = () => {
               !documentsQuery.isPending &&
               !documentsQuery.isError &&
               documentsData()?.documents.length === 0 &&
-              !debouncedSearchQuery().trim()
+              !debouncedSearchQuery().trim() &&
+              getPagination().pageIndex === 0
             }
           >
             <p class="my-4 text-sm text-muted-foreground">
@@ -905,7 +890,9 @@ export const DocumentsPage: Component = () => {
           <Show when={documentsData()}>
             <DocumentsPaginatedList
               documents={documentsData()?.documents ?? []}
-              documentsCount={documentsData()?.documentsCount ?? 0}
+              documentsCount={listing.total()}
+              hasMore={documentsData()?.hasMore}
+              onNextPageIntent={listing.prefetchNext}
               getPagination={getPagination}
               setPagination={setPagination}
               enableBatchSelection

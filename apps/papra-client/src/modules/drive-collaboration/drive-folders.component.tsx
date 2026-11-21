@@ -1,3 +1,4 @@
+import { refreshDriveQueries } from '@/modules/shared/query/query-client';
 import type { DriveFolderMetadata, FolderView } from './drive-collaboration.services';
 import type { Accessor, Component, Setter } from 'solid-js';
 import { A, useSearchParams } from '@solidjs/router';
@@ -24,7 +25,6 @@ import { createToast } from '../ui/components/sonner';
 import {
   documentDriveBase,
   driveBase,
-  folderQueryKey,
   folderSummaryQuery,
   folderTreeQuery,
   folderViewQuery,
@@ -49,7 +49,6 @@ import { getHttpErrorMessage, isHttpErrorWithStatusCode } from '../shared/http/h
 export const DocumentFolderPicker: Component<{ organizationId: string; documentId: string }> = (
   props,
 ) => {
-  const client = useQueryClient();
   const [shortcutFolder, setShortcutFolder] = createSignal('');
   const folders = useQuery(() => folderTreeQuery(props.organizationId));
   const key = () => [
@@ -69,20 +68,12 @@ export const DocumentFolderPicker: Component<{ organizationId: string; documentI
         shortcuts: { id: string; folderId: string }[];
       }>({ path: `${base()}/folder` }),
   }));
-  const invalidate = () => {
-    void client.invalidateQueries({ queryKey: key() });
-    void client.invalidateQueries({
-      queryKey: ['organizations', props.organizationId, 'documents'],
-    });
-    void client.invalidateQueries({ queryKey: ['organizations', props.organizationId, 'folders'] });
-    void client.invalidateQueries({
-      queryKey: ['organizations', props.organizationId, 'documents', props.documentId, 'activity'],
-    });
-  };
+  const invalidate = (folderIds?: string[]) =>
+    void refreshDriveQueries(props.organizationId, folderIds);
   const move = useMutation(() => ({
     mutationFn: async (folderId: string) =>
       apiClient({ method: 'PUT', path: `${base()}/folder`, body: { folderId } }),
-    onSuccess: invalidate,
+    onSuccess: () => invalidate(),
     onError: () =>
       createToast({
         type: 'error',
@@ -90,22 +81,25 @@ export const DocumentFolderPicker: Component<{ organizationId: string; documentI
       }),
   }));
   const createShortcut = useMutation(() => ({
-    mutationFn: async () =>
+    mutationFn: async (folderId: string) =>
       apiClient({
         method: 'POST',
         path: `${base()}/shortcuts`,
-        body: { folderId: shortcutFolder() },
+        body: { folderId },
       }),
-    onSuccess: () => {
+    onSuccess: (_, folderId) => {
       setShortcutFolder('');
-      invalidate();
+      invalidate([folderId]);
     },
     onError: () => createToast({ type: 'error', message: 'Could not add shortcut.' }),
   }));
   const removeShortcut = useMutation(() => ({
     mutationFn: async (id: string) =>
       apiClient({ method: 'DELETE', path: `${base()}/shortcuts/${id}` }),
-    onSuccess: invalidate,
+    onSuccess: (_, id) => {
+      const folderId = current.data?.shortcuts.find((shortcut) => shortcut.id === id)?.folderId;
+      invalidate(folderId ? [folderId] : undefined);
+    },
     onError: () => createToast({ type: 'error', message: 'Could not remove shortcut.' }),
   }));
   return (
@@ -194,7 +188,7 @@ export const DocumentFolderPicker: Component<{ organizationId: string; documentI
           size="sm"
           disabled={!shortcutFolder()}
           isLoading={createShortcut.isPending}
-          onClick={() => createShortcut.mutate()}
+          onClick={() => createShortcut.mutate(shortcutFolder())}
         >
           Add shortcut
         </Button>
@@ -209,7 +203,6 @@ export const DocumentFolderPicker: Component<{ organizationId: string; documentI
 };
 
 const FolderAccessPanel: Component<{ organizationId: string; folderId: string }> = (props) => {
-  const client = useQueryClient();
   const [open, setOpen] = createSignal(false);
   const [restricted, setRestricted] = createSignal(false);
   const [roles, setRoles] = createSignal<Record<string, string>>({});
@@ -254,7 +247,7 @@ const FolderAccessPanel: Component<{ organizationId: string; folderId: string }>
       }),
     onSuccess: () => {
       setOpen(false);
-      void client.invalidateQueries({ queryKey: ['organizations', props.organizationId] });
+      void refreshDriveQueries(props.organizationId);
     },
     onError: () => createToast({ type: 'error', message: 'Could not update folder access.' }),
   }));
@@ -337,7 +330,6 @@ export const DriveFolders: Component<{
     folder: DriveFolderMetadata;
     value: string;
   }>();
-  const key = () => folderQueryKey(props.organizationId);
   const folderId = () =>
     typeof params.folder === 'string' ? params.folder : homeFolderId(props.organizationId);
   const viewOptions = (id = folderId()) => folderViewQuery(props.organizationId, id);
@@ -373,15 +365,11 @@ export const DriveFolders: Component<{
     )
       setParams({ folder: undefined });
   });
-  const invalidate = () => {
-    void client.invalidateQueries({ queryKey: key() });
-    void client.invalidateQueries({
-      queryKey: ['organizations', props.organizationId, 'documents'],
-    });
-  };
+  const invalidate = (folderIds?: string[]) =>
+    void refreshDriveQueries(props.organizationId, folderIds);
   const [settledPlaceholder, setSettledPlaceholder] = createSignal<{
     id: string;
-    refresh: boolean;
+    parentId?: string;
   }>();
   const create = useMutation(() => ({
     mutationFn: async (draft: { pendingId: string; name: string; parentId: string }) =>
@@ -429,11 +417,11 @@ export const DriveFolders: Component<{
         });
       if (folderId() === draft.pendingId)
         setParams({ folder: result.folder.id }, { replace: true });
-      setSettledPlaceholder({ id: draft.pendingId, refresh: true });
+      setSettledPlaceholder({ id: draft.pendingId, parentId: draft.parentId });
     },
     onError: (error, draft) => {
       if (folderId() === draft.pendingId) setParams({ folder: draft.parentId }, { replace: true });
-      setSettledPlaceholder({ id: draft.pendingId, refresh: false });
+      setSettledPlaceholder({ id: draft.pendingId });
       setName(draft.name);
       setShowCreate(true);
       createToast({
@@ -449,7 +437,7 @@ export const DriveFolders: Component<{
     if (!settled || folderId() === settled.id) return;
     setSettledPlaceholder(undefined);
     client.removeQueries({ queryKey: viewOptions(settled.id).queryKey, exact: true });
-    if (settled.refresh) invalidate();
+    if (settled.parentId) invalidate([settled.parentId]);
   });
   const submitCreate = () => {
     const parentId = folderId();
