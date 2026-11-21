@@ -38,6 +38,7 @@ ImageProcessorContainer.outboundByHost = {
     }
     let key: string | undefined, versionId: string | undefined, generation: number | undefined;
     let videoQuality: string | undefined, leaseToken: string | undefined;
+    let audioKind: string | undefined;
     if (request.method === 'PUT') {
       try {
         key = decodeURIComponent(url.pathname.slice('/papra-drive/'.length));
@@ -48,13 +49,29 @@ ImageProcessorContainer.outboundByHost = {
       const video = key.match(
         /^derived\/([^/]+)\/playback\/(720|1080|720-full-v2|720-teaser-v2|1080-full-v2|thumbnails-v2)-g(\d+)-([a-f0-9-]{36})(?:\.mp4|-thumb-[0-5]\.jpg)$/,
       );
-      if (!match && !video) return new Response('Job capability required', { status: 403 });
-      versionId = match?.[1] ?? video![1];
-      generation = Number(match?.[2] ?? video![3]);
+      const audio = key.match(
+        /^derived\/([^/]+)\/transcribe-(\d+)-(\d+)-source-([a-f0-9-]{36})\.wav$/,
+      );
+      if (!match && !video && !audio)
+        return new Response('Job capability required', { status: 403 });
+      versionId = match?.[1] ?? video?.[1] ?? audio![1];
+      generation = Number(match?.[2] ?? video?.[3] ?? audio![2]);
       videoQuality = video?.[2];
-      leaseToken = video?.[4];
+      leaseToken = video?.[4] ?? audio?.[4];
+      if (audio) audioKind = `transcribe:${audio[2]}:${audio[3]}`;
     }
     const active = async () => {
+      if (audioKind) {
+        const job = await env.DB.prepare(
+          "SELECT j.id,j.generation FROM jobs j JOIN versions v ON v.id=j.version_id JOIN documents d ON d.id=v.document_id WHERE v.id=? AND d.is_deleted<>2 AND j.kind=? AND j.status='processing' AND j.lease_token=? AND EXISTS (SELECT 1 FROM jobs p WHERE p.version_id=v.id AND p.kind='process' AND p.generation=?)",
+        )
+          .bind(versionId, audioKind, leaseToken, generation)
+          .first<{ id: string; generation: number }>();
+        return (
+          !!job &&
+          env.PROCESSOR.idFromName(`${job.id}-${job.generation}`).toString() === ctx.containerId
+        );
+      }
       const job = await env.DB.prepare(
         videoQuality
           ? "SELECT j.id FROM jobs j JOIN versions v ON v.id=j.version_id JOIN documents d ON d.id=v.document_id WHERE v.id=? AND d.is_deleted=0 AND j.kind=? AND j.generation=? AND j.status='processing' AND j.lease_token=?"

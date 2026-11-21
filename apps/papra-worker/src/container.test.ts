@@ -104,6 +104,31 @@ test('a video lease revoked during PUT deletes only its late preview', async () 
   expect((await f.handler(request, f.env, f.context)).status).toBe(403);
   expect(f.remove).toHaveBeenCalledExactlyOnceWith(key);
 });
+
+test('audio slice writes require the exact active chunk, parent generation, lease and container', async () => {
+  const f = await fixture();
+  const lease = 'f15f7200-0000-4000-8000-000000000000';
+  await f.DB.prepare("UPDATE jobs SET generation=4,status='done' WHERE id='j'").run();
+  await f.DB.prepare("INSERT INTO jobs VALUES('audio','v','transcribe:4:8',0,'processing',?)")
+    .bind(lease)
+    .run();
+  const key = `derived/v/transcribe-4-8-source-${lease}.wav`;
+  const request = (path = key) =>
+    new Request(
+      `https://2d017c943ff16e4c52783635ef05e535.r2.cloudflarestorage.com/papra-drive/${path}?X-Amz-Signature=synthetic`,
+      { method: 'PUT', body: 'synthetic' },
+    );
+  const ctx = { ...f.context, containerId: 'audio-0' };
+  expect((await f.handler(request(), f.env, ctx)).status).toBe(200);
+  expect((await f.handler(request(), f.env, f.context)).status).toBe(403);
+  expect((await f.handler(request(key.replace('-4-8-', '-4-9-')), f.env, ctx)).status).toBe(403);
+  expect((await f.handler(request(key.replace(lease, 'a'.repeat(36))), f.env, ctx)).status).toBe(
+    403,
+  );
+  await f.DB.prepare("UPDATE jobs SET generation=5 WHERE id='j'").run();
+  expect((await f.handler(request(), f.env, ctx)).status).toBe(403);
+  expect(f.forward).toHaveBeenCalledOnce();
+});
 test('purging revokes stale presigned derived writes before R2 forwarding', async () => {
   const f = await fixture();
   await f.DB.prepare("UPDATE documents SET is_deleted=2 WHERE id='d'").run();
