@@ -500,6 +500,72 @@ try {
   process.stdout.write(
     'Chrome showed and paginated folder rows while the exact total was blocked.\n',
   );
+
+  await uploader.goto(origin + documentsPath);
+  const folderActions = uploader.getByRole('button', { name: 'Current folder actions' });
+  await folderActions.click();
+  await expect(uploader.getByRole('menuitem', { name: 'Move files here' })).toBeVisible();
+  await expect(uploader.getByRole('menuitem', { name: 'Move folder to…' })).toBeVisible();
+  await uploader.keyboard.press('Escape');
+  await expect(folderActions).toBeFocused();
+
+  const fileActions = uploader.getByRole('button', { name: 'Actions for existing.txt' });
+  await fileActions.click();
+  await expect(uploader.getByRole('menuitem', { name: 'Rename document' })).toBeVisible();
+  await uploader.keyboard.press('Escape');
+  await expect(uploader.getByRole('menu')).toHaveCount(0);
+  await uploader.getByRole('link', { name: 'existing', exact: true }).click({ button: 'right' });
+  await uploader.getByRole('menuitem', { name: 'Move to…', exact: true }).click();
+  await expect(uploader.getByRole('dialog', { name: 'Move to folder' })).toBeVisible();
+  await uploader.keyboard.press('Escape');
+  await expect(uploader.getByRole('dialog')).toHaveCount(0);
+
+  await home.click();
+  await uploader.getByRole('button', { name: 'Actions for Fixture parent' }).click();
+  await expect(uploader.getByRole('menuitem', { name: 'Rename', exact: true })).toBeVisible();
+  await uploader.keyboard.press('Escape');
+  await expect(uploader.getByRole('menu')).toHaveCount(0);
+  await openParent.click({ button: 'right' });
+  await expect(uploader.getByRole('menuitem', { name: 'Move folder to…' })).toBeVisible();
+  await uploader.keyboard.press('Escape');
+
+  await uploader.setViewportSize({ width: 1536, height: 960 });
+  await uploader.getByRole('button', { name: 'New / Import' }).click();
+  await uploader.getByRole('menuitem', { name: 'Create from template' }).click();
+  await expect(uploader.getByRole('heading', { name: 'Create doc from template' })).toBeVisible();
+  const sponsorshipOrder = uploader
+    .getByRole('complementary', { name: 'Document templates' })
+    .getByRole('button', { name: /Sponsorship Order/ });
+  await sponsorshipOrder.click();
+  await expect(sponsorshipOrder).toHaveAttribute('aria-pressed', 'true');
+  process.stdout.write(
+    'Chrome verified folder and file action menus and the Sponsorship Order template.\n',
+  );
+
+  await observer.setViewportSize({ width: 390, height: 844 });
+  await observer.goto(origin + documentsPath);
+  await expect(observer.getByRole('link', { name: 'existing', exact: true })).toBeVisible();
+  const mobileAsk = observer.getByRole('button', { name: 'Ask this space' });
+  const mobileExport = observer.getByRole('button', { name: 'Export space' });
+  const pagination = observer.getByRole('button', { name: 'Go to next page' });
+  await expect(mobileAsk).toBeVisible();
+  await expect(mobileExport).toBeVisible();
+  await expect(pagination).toBeVisible();
+  const paginationBounds = await pagination.boundingBox();
+  for (const action of [mobileAsk, mobileExport]) {
+    assert.ok((await action.boundingBox()).y >= paginationBounds.y + paginationBounds.height);
+  }
+  await mobileAsk.click();
+  const askPanel = observer.getByRole('complementary', { name: 'Ask this space' });
+  await expect(askPanel.getByRole('textbox', { name: 'Search or question' })).toBeFocused();
+  const panelBounds = await askPanel.boundingBox();
+  const exportBounds = await mobileExport.boundingBox();
+  assert.ok(panelBounds.y >= exportBounds.y + exportBounds.height);
+  assert.ok(await observer.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  await observer.keyboard.press('Escape');
+  await expect(askPanel).toBeHidden();
+  await expect(mobileAsk).toBeFocused();
+  process.stdout.write('Chrome verified footer order and Ask panel focus at 390px.\n');
 } catch (error) {
   for (const page of [uploader, observer]) {
     if (!page) continue;
