@@ -44,6 +44,7 @@ export async function fetchOrganizationDocuments({
   pageSize,
   searchQuery,
   folderId,
+  includeFolderPath,
   sortField,
   sortOrder,
 }: {
@@ -52,6 +53,7 @@ export async function fetchOrganizationDocuments({
   pageSize: number;
   searchQuery?: string;
   folderId?: string;
+  includeFolderPath?: boolean;
   sortField?: DocumentSearchSortField;
   sortOrder?: DocumentSearchSortOrder;
 }) {
@@ -64,6 +66,7 @@ export async function fetchOrganizationDocuments({
     query: {
       searchQuery,
       folderId,
+      includeFolderPath,
       pageIndex,
       pageSize,
       sortField,

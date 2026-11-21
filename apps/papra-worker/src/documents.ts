@@ -1,11 +1,22 @@
 import type { App, Env, Identity } from './types';
 import { getContainer } from '@cloudflare/containers';
-import { all, first, run, id, error, camel, formatDocument, getDocument } from './db';
+import {
+  all,
+  first,
+  run,
+  id,
+  error,
+  camel,
+  formatDocument,
+  formatDocuments,
+  getDocument,
+} from './db';
 import {
   ensureDocumentAccess,
   permittedDocumentPredicateSQL,
   canReadFolder,
   canWriteFolder,
+  organizationHomeFolderId,
 } from './collaboration';
 import { signedDownload, signedMedia, s3 } from './storage';
 import { downloadBytes } from './download';
@@ -178,22 +189,34 @@ export function registerDocumentRoutes(app: App) {
           )[q.sortField] || 'd.created_at',
         direction = q.sortOrder === 'asc' ? 'ASC' : 'DESC';
       const filterReady = performance.now();
+      const includeFolderPath = q.includeFolderPath === 'true';
+      const folderPathRoot =
+        c.get('identity').serviceScope?.folderId || organizationHomeFolderId(c.req.param('org'));
+      const folderPathColumn = includeFolderPath
+        ? `, (WITH RECURSIVE path(id,parent_id,label) AS (
+          SELECT f.id,f.parent_id,f.name FROM folders f WHERE f.id=d.home_folder_id AND f.organization_id=d.organization_id
+          UNION ALL
+          SELECT f.id,f.parent_id,f.name || ' / ' || path.label FROM path
+          JOIN folders f ON f.id=path.parent_id AND f.organization_id=d.organization_id WHERE path.id<>?
+        ) SELECT label FROM path WHERE id=?) home_folder_path`
+        : '';
       const rows = await c.env.DB.prepare(
-        `SELECT d.*,${q.folderId ? 'CASE WHEN d.home_folder_id=? THEN 0 ELSE 1 END' : '0'} is_shortcut,coalesce(v.size,0) original_size FROM documents d LEFT JOIN versions v ON v.id=d.current_version_id WHERE ${f.sql} ORDER BY ${sort} ${direction},d.id LIMIT ? OFFSET ?`,
+        `SELECT d.*,${q.folderId ? 'CASE WHEN d.home_folder_id=? THEN 0 ELSE 1 END' : '0'} is_shortcut,coalesce(v.size,0) original_size${folderPathColumn} FROM documents d LEFT JOIN versions v ON v.id=d.current_version_id WHERE ${f.sql} ORDER BY ${sort} ${direction},d.id LIMIT ? OFFSET ?`,
       )
-        .bind(...(q.folderId ? [q.folderId] : []), ...f.bindings, size, page * size)
+        .bind(
+          ...(q.folderId ? [q.folderId] : []),
+          ...(includeFolderPath ? [folderPathRoot, folderPathRoot] : []),
+          ...f.bindings,
+          size,
+          page * size,
+        )
         .all();
       const rowsReady = performance.now();
       const count = await c.env.DB.prepare(`SELECT count(*) n FROM documents d WHERE ${f.sql}`)
         .bind(...f.bindings)
         .all<{ n: number }>();
       const countReady = performance.now();
-      const documents = await Promise.all(
-        rows.results.map(async (d) => ({
-          ...(await formatDocument(c.env, d)),
-          isShortcut: !!d.is_shortcut,
-        })),
-      );
+      const documents = await formatDocuments(c.env, rows.results);
       c.header(
         'Server-Timing',
         [

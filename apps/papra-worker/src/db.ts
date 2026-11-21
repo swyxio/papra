@@ -51,27 +51,63 @@ export async function getDocument(env: Env, documentId: string) {
     documentId,
   );
 }
-export async function formatDocument(env: Env, row: Record<string, any>) {
-  const tags = await all(
-    env,
-    'SELECT t.* FROM tags t JOIN documents_tags dt ON dt.tag_id=t.id WHERE dt.document_id=?',
-    row.id,
-  );
-  const properties = await all(
-    env,
-    'SELECT p.*, dp.value FROM custom_properties p JOIN document_custom_properties dp ON dp.property_id=p.id WHERE dp.document_id=?',
-    row.id,
-  );
-  const attribution = await first(
-    env,
-    `SELECT
+function groupDocumentMetadata(rows: Record<string, any>[]) {
+  const grouped = new Map<string, Record<string, any>[]>();
+  for (const { document_id, ...row } of rows) {
+    const documents = grouped.get(document_id) ?? [];
+    documents.push(row);
+    grouped.set(document_id, documents);
+  }
+  return grouped;
+}
+
+export async function formatDocuments(env: Env, rows: Record<string, any>[]) {
+  if (!rows.length) return [];
+  const ids = JSON.stringify(rows.map(({ id }) => id));
+  const pageIds = 'SELECT value FROM json_each(?)';
+  const [tags, properties, attribution] = await env.DB.batch<Record<string, any>>([
+    env.DB.prepare(
+      `SELECT dt.document_id,t.* FROM documents_tags dt JOIN tags t ON t.id=dt.tag_id
+       WHERE dt.document_id IN (${pageIds}) ORDER BY dt.document_id,dt.tag_id`,
+    ).bind(ids),
+    env.DB.prepare(
+      `SELECT dp.document_id,p.*,dp.value FROM document_custom_properties dp
+       JOIN custom_properties p ON p.id=dp.property_id
+       WHERE dp.document_id IN (${pageIds}) ORDER BY dp.document_id,dp.property_id`,
+    ).bind(ids),
+    env.DB.prepare(`SELECT d.id document_id,
     uploader.id uploaded_id,uploader.name uploaded_name,uploader.email uploaded_email,
     modifier.id modified_id,modifier.name modified_name,modifier.email modified_email,
     ${modifiedAtSQL} modified_at
     FROM documents d LEFT JOIN users uploader ON uploader.id=d.created_by
-    LEFT JOIN users modifier ON modifier.id=${modifiedBySQL} WHERE d.id=?`,
-    row.id,
+    LEFT JOIN users modifier ON modifier.id=${modifiedBySQL} WHERE d.id IN (${pageIds})`).bind(ids),
+  ]);
+  const tagsByDocument = groupDocumentMetadata(tags.results);
+  const propertiesByDocument = groupDocumentMetadata(properties.results);
+  const attributionByDocument = new Map(
+    attribution.results.map((actor) => [actor.document_id, actor]),
   );
+  return rows.map((row) =>
+    documentDto(
+      row,
+      tagsByDocument.get(row.id) ?? [],
+      propertiesByDocument.get(row.id) ?? [],
+      attributionByDocument.get(row.id),
+    ),
+  );
+}
+
+export async function formatDocument(env: Env, row: Record<string, any>) {
+  const [document] = await formatDocuments(env, [row]);
+  return document!;
+}
+
+function documentDto(
+  row: Record<string, any>,
+  tags: Record<string, any>[],
+  properties: Record<string, any>[],
+  attribution: Record<string, any> | undefined,
+) {
   const actor = (prefix: string) =>
     attribution?.[`${prefix}_id`]
       ? {
@@ -82,6 +118,7 @@ export async function formatDocument(env: Env, row: Record<string, any>) {
       : null;
   return {
     ...camel(row),
+    ...(row.is_shortcut === undefined ? {} : { isShortcut: !!row.is_shortcut }),
     uploadedBy: actor('uploaded'),
     modifiedBy: actor('modified'),
     modifiedAt:

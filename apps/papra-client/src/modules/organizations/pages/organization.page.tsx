@@ -34,7 +34,7 @@ export const OrganizationPage: Component = () => {
   const params = useParams();
   const { t } = useI18n();
   const [getPagination, setPagination] = createParamSynchronizedPagination({
-    defaultPageSize: 100,
+    defaultPageSize: 20,
     defaultPageIndex: 0,
   });
 
@@ -43,6 +43,7 @@ export const OrganizationPage: Component = () => {
     queryFn: async () =>
       fetchOrganizationDocuments({
         organizationId: params.organizationId,
+        includeFolderPath: true,
         ...getPagination(),
       }),
     placeholderData: keepPreviousData,
@@ -118,7 +119,7 @@ export const OrganizationPage: Component = () => {
                 {t('organizations.details.upload-documents')}
               </Button>
 
-              <Show when={statsQuery.data?.organizationStats}>
+              <Show when={!statsQuery.isPending && statsQuery.data?.organizationStats}>
                 {(organizationStats) => (
                   <>
                     <div class="border rounded-lg p-2 flex items-center gap-4 py-4 px-6">
@@ -202,6 +203,7 @@ export const OrganizationPage: Component = () => {
               documentsCount={documentsQuery.data?.documentsCount ?? 0}
               getPagination={getPagination}
               setPagination={setPagination}
+              pageSizeOptions={[15, 20, 50, 100]}
               enableBatchSelection
               getRowSelection={getRowSelection}
               setRowSelection={setRowSelection}

@@ -39,11 +39,6 @@ import {
   getDocumentNameWithoutExtension,
 } from '../document.models';
 import { selectRange } from '@/modules/drive-collaboration/drive-folders.models';
-import { useQuery } from '@tanstack/solid-query';
-import {
-  folderTreeQuery,
-  folderPath,
-} from '@/modules/drive-collaboration/drive-collaboration.services';
 import { DocumentManagementDropdown } from './document-management-dropdown.component';
 
 // Last checkbox clicked per table, the start of a shift-click range.
@@ -136,24 +131,17 @@ export const locationColumn: ColumnDef<Document> = {
   header: () => <span class="sr-only sm:not-sr-only">Location</span>,
   enableSorting: false,
   cell: (data) => {
-    const organizationId = data.row.original.organizationId;
-    const folders = useQuery(() => ({
-      ...folderTreeQuery(organizationId),
-    }));
-    const folder = () =>
-      folders.data?.folders.find((item) => item.id === data.row.original.homeFolderId);
+    const { organizationId, homeFolderId, homeFolderPath } = data.row.original;
     return (
-      <Show when={folder()}>
-        {(current) => (
+      <Show when={homeFolderId && homeFolderPath}>
+        {(path) => (
           <A
-            href={`/organizations/${organizationId}/documents?folder=${current().id}`}
+            href={`/organizations/${organizationId}/documents?folder=${homeFolderId}`}
             class="hidden sm:flex items-center gap-1.5 max-w-56 text-sm text-muted-foreground hover:text-foreground"
-            title={folderPath(current(), folders.data?.folders ?? [])}
+            title={path()}
           >
             <div class="i-tabler-folder size-4 shrink-0" />
-            <span class="truncate">
-              {folderPath(current(), folders.data?.folders ?? []).replace(/^Home \/ /, '')}
-            </span>
+            <span class="truncate">{path().replace(/^Home \/ /, '')}</span>
           </A>
         )}
       </Show>
@@ -285,6 +273,7 @@ export const DocumentsPaginatedList: Component<{
   setPagination?: Setter<Pagination>;
   extraColumns?: ColumnDef<Document>[];
   showPagination?: boolean;
+  pageSizeOptions?: number[];
   enableBatchSelection?: boolean;
   getRowSelection?: Accessor<RowSelectionState>;
   setRowSelection?: Setter<RowSelectionState>;
@@ -466,7 +455,7 @@ export const DocumentsPaginatedList: Component<{
                 <Select
                   value={table.getState().pagination.pageSize}
                   onChange={(value) => value && table.setPageSize(value)}
-                  options={[15, 50, 100]}
+                  options={props.pageSizeOptions ?? [15, 50, 100]}
                   itemComponent={(props) => (
                     <SelectItem item={props.item}>{props.item.rawValue}</SelectItem>
                   )}

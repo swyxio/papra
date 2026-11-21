@@ -8,6 +8,7 @@ export type Document = {
   organizationId: string;
   currentVersionId?: string;
   homeFolderId?: string;
+  homeFolderPath?: string | null;
   isShortcut?: boolean;
   name: string;
   mimeType: string;
