@@ -1,12 +1,17 @@
-import { A } from '@solidjs/router';
+import { A, useParams } from '@solidjs/router';
 import { authPagesPaths } from '@/modules/auth/auth.constants';
 import { AppLayout } from '@/modules/ui/layouts/organization.layout';
 import { Button } from '@/modules/ui/components/button';
 import type { ParentComponent } from 'solid-js';
 import type { UserMe } from '../users.types';
-import { useQuery } from '@tanstack/solid-query';
+import { useQuery, useQueryClient } from '@tanstack/solid-query';
 import { createContext, Show, useContext } from 'solid-js';
-import { fetchCurrentUser } from '../users.services';
+import { currentUserQueryKey, fetchCurrentUser } from '../users.services';
+import {
+  fetchOrganization,
+  organizationQueryOptions,
+} from '@/modules/organizations/organizations.services';
+import { isHttpErrorWithStatusCode } from '@/modules/shared/http/http-errors';
 
 const currentUserContext = createContext<{
   user: UserMe;
@@ -25,9 +30,34 @@ export function useCurrentUser() {
 }
 
 export const CurrentUserProvider: ParentComponent = (props) => {
+  const params = useParams<{ organizationId?: string }>();
+  const client = useQueryClient();
   const query = useQuery(() => ({
-    queryKey: ['users', 'me'],
-    queryFn: fetchCurrentUser,
+    queryKey: currentUserQueryKey,
+    staleTime: 5_000,
+    queryFn: async ({ signal }) => {
+      const organizationId = params.organizationId;
+      if (organizationId && !client.getQueryData(currentUserQueryKey)) {
+        try {
+          const { user, organization } = await fetchOrganization({
+            organizationId,
+            includeUser: true,
+            signal,
+          });
+          const { queryKey } = organizationQueryOptions(organizationId);
+          if (!signal.aborted && !client.getQueryData(queryKey)) {
+            client.setQueryData(queryKey, { organization });
+          }
+          if (user) return { user };
+        } catch (error) {
+          // A signed-in user may follow an inaccessible workspace URL. Load the
+          // account so the workspace layout can handle that route as before.
+          if (![403, 404].some((statusCode) => isHttpErrorWithStatusCode({ error, statusCode })))
+            throw error;
+        }
+      }
+      return fetchCurrentUser({ signal });
+    },
   }));
 
   return (

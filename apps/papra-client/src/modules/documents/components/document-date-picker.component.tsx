@@ -11,6 +11,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/modules/ui/components
 import { createToast } from '@/modules/ui/components/sonner';
 import { invalidateOrganizationDocumentsQuery } from '../documents.composables';
 import { updateDocument } from '../documents.services';
+import { patchCachedDocument } from '../document-list.queries';
 
 export function DocumentDatePicker(props: { document: Document; organizationId: string }) {
   const { t, formatDate } = useI18n();
@@ -23,7 +24,8 @@ export function DocumentDatePicker(props: { document: Document; organizationId: 
         organizationId: props.organizationId,
         documentDate: date,
       }),
-    onSuccess: async () => {
+    onSuccess: async ({ document }) => {
+      patchCachedDocument(document);
       await invalidateOrganizationDocumentsQuery({ organizationId: props.organizationId });
     },
     onError: (error) => {

@@ -13,8 +13,9 @@ import {
 } from './db';
 import {
   ensureDocumentAccess,
-  permittedDocumentPredicateSQL,
-  canReadFolder,
+  documentPermissionPredicate,
+  folderAccess,
+  organizationAccess,
   canWriteFolder,
   organizationHomeFolderId,
 } from './collaboration';
@@ -24,6 +25,7 @@ import { mediaResponse, requestVideoPreview, previewDownload, downloadPreviewByt
 import type { MediaDocument } from './video';
 import { abortBackupMultipartsForPurge, enqueueVersion, enqueueRecordingNotes } from './jobs';
 import { keywordPredicate } from './keyword';
+import { privateCacheNotModified } from './private-cache';
 import { modifiedBySQL, modifiedAtSQL, actorNameSQL } from './document-attribution';
 import { fetchTranscript } from './transcripts';
 import { canSummarizeTranscript, readRecordingNotes } from './recording-notes';
@@ -84,13 +86,16 @@ export async function documentFilter(
   mode: 'read' | 'write' = 'read',
   folderId?: string,
 ) {
-  const access = await permittedDocumentPredicateSQL(env, user, org, 'd', mode),
-    bindings: any[] = [org, deleted, ...access.bindings];
-  let sql = `d.organization_id=? AND d.is_deleted=? AND (${access.sql})`;
+  if (folderId !== undefined && (typeof folderId !== 'string' || !folderId))
+    throw error(400, 'Invalid folder');
+  const scoped =
+    folderId === undefined ? undefined : await folderAccess(env, user, folderId, 'read');
+  if (scoped && scoped.folder.organization_id !== org) throw error(404, 'Folder not found');
+  const access = scoped?.access ?? (await organizationAccess(env, user, org));
+  const predicate = documentPermissionPredicate(user, org, 'd', mode, access);
+  const bindings: any[] = [org, deleted, ...predicate.bindings];
+  let sql = `d.organization_id=? AND d.is_deleted=? AND (${predicate.sql})`;
   if (folderId !== undefined) {
-    if (typeof folderId !== 'string' || !folderId) throw error(400, 'Invalid folder');
-    const folder = await canReadFolder(env, user, folderId);
-    if (folder.organization_id !== org) throw error(404, 'Folder not found');
     sql +=
       ' AND (d.home_folder_id=? OR EXISTS(SELECT 1 FROM document_shortcuts s WHERE s.document_id=d.id AND s.folder_id=?))';
     bindings.push(folderId, folderId);
@@ -100,7 +105,7 @@ export async function documentFilter(
     sql += ` AND (${keyword.sql})`;
     bindings.push(...keyword.bindings);
   }
-  return { sql, bindings };
+  return { sql, bindings, access };
 }
 async function deletePrefix(bucket: R2Bucket, prefix: string) {
   let cursor: string | undefined;
@@ -160,22 +165,58 @@ export async function purgeExpiredTrash(env: Env) {
   );
   for (const d of docs) await purge(env, d);
 }
+async function listRevisions(env: Env, organizationId: string, folderId?: string) {
+  // Shortcuts can refer to files in any home folder in the space.
+  return first(
+    env,
+    `SELECT
+    (SELECT revision FROM drive_document_list_revisions WHERE organization_id=?1 AND scope=?2) AS folder,
+    (SELECT revision FROM drive_document_list_revisions WHERE organization_id=?1 AND scope='metadata') AS metadata,
+    (SELECT revision FROM drive_contributor_revision WHERE id=1) AS contributors,
+    CASE WHEN ?2='all' OR EXISTS(SELECT 1 FROM document_shortcuts WHERE folder_id=?2)
+      THEN (SELECT revision FROM drive_document_list_revisions WHERE organization_id=?1 AND scope='all')
+    END AS workspace`,
+    organizationId,
+    folderId ?? 'all',
+  );
+}
 export function registerDocumentRoutes(app: App) {
   for (const deleted of [0, 1])
     app.get(deleted ? `${base}/deleted` : base, async (c) => {
       const started = performance.now();
-      const q = c.req.query(),
-        f = await documentFilter(
+      const q = c.req.query();
+      const organizationId = c.req.param('org');
+      const countOnly = q.count === 'only';
+      const counted = q.count !== 'none';
+      const [f, revisions] = await Promise.all([
+        documentFilter(
           c.env,
           c.get('identity'),
-          c.req.param('org'),
+          organizationId,
           q.searchQuery || '',
           deleted,
           'read',
           q.folderId,
         ),
-        size = Math.min(100, Math.max(1, Number(q.pageSize) || 20)),
-        page = Math.max(0, Number(q.pageIndex) || 0),
+        (countOnly || !counted) && !deleted
+          ? listRevisions(c.env, organizationId, q.folderId)
+          : undefined,
+      ]);
+      if (
+        revisions &&
+        (await privateCacheNotModified(c, ['document-list', c.req.url, f.access, revisions]))
+      )
+        return c.body(null, 304);
+      const count = async () =>
+        c.env.DB.prepare(`SELECT count(*) n FROM documents d WHERE ${f.sql}`)
+          .bind(...f.bindings)
+          .all<{ n: number }>();
+      if (countOnly) return c.json({ documentsCount: (await count()).results[0]!.n });
+      const size = Math.min(100, Math.max(1, Math.trunc(Number(q.pageSize)) || 20)),
+        page = Math.min(
+          Math.floor(Number.MAX_SAFE_INTEGER / 100),
+          Math.max(0, Math.trunc(Number(q.pageIndex)) || 0),
+        ),
         sort =
           (
             {
@@ -209,25 +250,25 @@ export function registerDocumentRoutes(app: App) {
           ...(q.folderId ? [q.folderId] : []),
           ...(includeFolderPath ? [folderPathRoot, folderPathRoot] : []),
           ...f.bindings,
-          size,
+          counted ? size : size + 1,
           page * size,
         )
         .all();
       const rowsReady = performance.now();
-      const count = await c.env.DB.prepare(`SELECT count(*) n FROM documents d WHERE ${f.sql}`)
-        .bind(...f.bindings)
-        .all<{ n: number }>();
-      const countReady = performance.now();
-      const documents = await formatDocuments(c.env, rows.results);
+      const [documents, total] = await Promise.all([
+        formatDocuments(c.env, counted ? rows.results : rows.results.slice(0, size)),
+        counted ? count() : undefined,
+      ]);
       c.header(
         'Server-Timing',
         [
           ['filter', filterReady - started],
           ['rows', rowsReady - filterReady],
           ['rows_sql', rows.meta.timings?.sql_duration_ms ?? rows.meta.duration],
-          ['count', countReady - rowsReady],
-          ['count_sql', count.meta.timings?.sql_duration_ms ?? count.meta.duration],
-          ['hydrate', performance.now() - countReady],
+          ...(total
+            ? [['count_sql', total.meta.timings?.sql_duration_ms ?? total.meta.duration]]
+            : []),
+          ['hydrate', performance.now() - rowsReady],
         ]
           .map(([name, duration]) => `${name};dur=${Number(duration).toFixed(1)}`)
           .join(', '),
@@ -235,7 +276,9 @@ export function registerDocumentRoutes(app: App) {
       );
       return c.json({
         documents,
-        documentsCount: count.results[0]!.n,
+        ...(total
+          ? { documentsCount: total.results[0]!.n }
+          : { hasMore: rows.results.length > size }),
       });
     });
   app.get(`${base}/statistics`, async (c) => {

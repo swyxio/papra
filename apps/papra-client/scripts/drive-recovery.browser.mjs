@@ -45,7 +45,12 @@ try {
   let wholeTreeRequests = 0;
   let parentViewRequests = 0;
   let parentDocumentRequests = 0;
+  let accountRequests = 0;
+  let startupRequests = 0;
+  let workspaceRequests = 0;
+  const user = { id: 'fixture', name: 'Fixture user', email: 'test@example.test' };
   let releaseHomeStats;
+  let releaseDocumentCount;
   const homeRequests = [];
   let folders = [
     makeFolder(homeId, null, 'Home'),
@@ -104,6 +109,9 @@ try {
               json: {
                 folder: { id: 'fld_parent', name: 'Shared fixture folder', parentId: null },
                 entries: [],
+                note: '',
+                stats: { files: 0, folders: 0, bytes: 0 },
+                intake: null,
                 hasMore: false,
               },
             })
@@ -123,13 +131,19 @@ try {
       assert.deepEqual(request.postDataBuffer(), fixtureBytes);
       return route.fulfill({ body: '' });
     }
-    if (path === '/api/users/me')
-      return route.fulfill({
-        json: { user: { id: 'fixture', name: 'Fixture user', email: 'test@example.test' } },
-      });
+    if (path === '/api/users/me') {
+      accountRequests++;
+      return route.fulfill({ json: { user } });
+    }
     if (path === '/api/organizations') return route.fulfill({ json: { organizations: [org] } });
-    if (path === '/api/organizations/org_test')
+    if (path === '/api/organizations/org_test') {
+      if (url.searchParams.get('includeUser') === 'true') {
+        startupRequests++;
+        return route.fulfill({ json: { organization: org, user } });
+      }
+      workspaceRequests++;
       return route.fulfill({ json: { organization: org } });
+    }
     if (path.endsWith('/subscription'))
       return route.fulfill({
         json: { plan: { id: 'fixture', limits: { maxFileSize: 1000 } }, subscription: null },
@@ -255,21 +269,30 @@ try {
     }
     if (path.startsWith('/api/') && path.endsWith('/documents')) {
       const folderId = url.searchParams.get('folderId');
+      const size = Number(url.searchParams.get('pageSize') ?? 20);
+      const index = Number(url.searchParams.get('pageIndex') ?? 0);
+      const count = url.searchParams.get('count');
+      const rowsOnly = (rows) => ({
+        documents: rows.slice(index * size, (index + 1) * size),
+        ...(count === 'none'
+          ? { hasMore: (index + 1) * size < rows.length }
+          : { documentsCount: rows.length }),
+      });
       if (url.searchParams.get('includeFolderPath') === 'true') {
-        const size = Number(url.searchParams.get('pageSize'));
-        const index = Number(url.searchParams.get('pageIndex'));
+        assert.equal(count, 'none');
         homeRequests.push({ size, index });
         const rows = Array.from({ length: 21 }, (_, i) =>
-          makeDocument(`doc_home_${i + 1}`, `Recent ${i + 1}.txt`, 42),
+          makeDocument('doc_home_' + (i + 1), 'Recent ' + (i + 1) + '.txt', 42),
         );
-        return route.fulfill({
-          json: {
-            documents: rows.slice(index * size, (index + 1) * size),
-            documentsCount: rows.length,
-          },
-        });
+        return route.fulfill({ json: rowsOnly(rows) });
       }
       if (folderId === 'fld_parent') {
+        if (count === 'only') {
+          await new Promise((resolve) => {
+            releaseDocumentCount = resolve;
+          });
+          return route.fulfill({ json: { documentsCount: documents.length } });
+        }
         parentDocumentRequests++;
         if (holdNextDocumentRefresh) {
           holdNextDocumentRefresh = false;
@@ -279,7 +302,7 @@ try {
         }
       }
       const rows = !folderId || folderId === 'fld_parent' ? documents : [];
-      return route.fulfill({ json: { documents: rows, documentsCount: rows.length } });
+      return route.fulfill({ json: rowsOnly(rows) });
     }
     if (path === '/api/config') return route.fulfill({ json: { config: {} } });
     if (path === '/api/auth/get-session') return route.fulfill({ json: null });
@@ -301,6 +324,7 @@ try {
   await uploader.goto(origin + documentsPath);
   await expect.poll(() => Boolean(releaseSummary)).toBe(true);
   await expect(uploader.getByRole('link', { name: 'existing', exact: true })).toBeVisible();
+  assert.deepEqual([startupRequests, accountRequests, workspaceRequests], [1, 0, 0]);
   await expect(uploader.getByText('Calculating folder size…')).toBeVisible();
   assert.equal(wholeTreeRequests, 0);
   releaseSummary();
@@ -397,6 +421,8 @@ try {
       );
     } else {
       await expect(observer).toHaveURL(/folder=fld_created$/);
+      // The uploader's folder remains open and its in-memory cache is fresh.
+      await expect(uploader.getByRole('button', { name: /^Created folder/ })).toBeVisible();
       await expect(observer.getByRole('button', { name, exact: true })).toHaveAttribute(
         'aria-current',
         'page',
@@ -429,8 +455,13 @@ try {
   process.stdout.write('Chrome verified the same-address guest view and revocation fallback.\n');
 
   const treesBeforeHome = wholeTreeRequests;
+  const startupBeforeHome = [startupRequests, accountRequests, workspaceRequests];
   await observer.goto(origin + '/orgs/org_test');
   await expect(observer.getByRole('link', { name: 'Recent 1', exact: true })).toBeVisible();
+  assert.deepEqual(
+    [startupRequests, accountRequests, workspaceRequests],
+    [startupBeforeHome[0] + 1, startupBeforeHome[1], startupBeforeHome[2]],
+  );
   await expect.poll(() => Boolean(releaseHomeStats)).toBe(true);
   assert.equal(wholeTreeRequests, treesBeforeHome);
   assert.deepEqual(homeRequests, [{ size: 20, index: 0 }]);
@@ -449,6 +480,25 @@ try {
   releaseHomeStats();
   process.stdout.write(
     'Chrome verified Home pagination, visible folder paths, and the lazy upload destination picker while statistics were pending.\n',
+  );
+
+  while (documents.length < 19) {
+    documents.push(
+      makeDocument('doc_extra_' + documents.length, 'extra-' + documents.length + '.txt', 42),
+    );
+  }
+  await observer.goto(origin + documentsPath);
+  await expect.poll(() => Boolean(releaseDocumentCount)).toBe(true);
+  await expect(observer.getByRole('link', { name: 'existing', exact: true })).toBeVisible();
+  await expect(observer.getByRole('button', { name: 'Go to next page' })).toBeEnabled();
+  await expect(observer.getByRole('button', { name: 'Go to last page' })).toBeDisabled();
+  releaseDocumentCount();
+  await expect(observer.getByText('Page 1 of 2', { exact: true })).toBeVisible();
+  await observer.getByRole('button', { name: 'Go to last page' }).click();
+  await expect(observer.getByText('Page 2 of 2', { exact: true })).toBeVisible();
+  await expect(observer.locator('tbody tr')).toHaveCount(4);
+  process.stdout.write(
+    'Chrome showed and paginated folder rows while the exact total was blocked.\n',
   );
 } catch (error) {
   for (const page of [uploader, observer]) {

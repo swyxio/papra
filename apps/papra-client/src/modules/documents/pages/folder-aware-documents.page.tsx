@@ -1,14 +1,18 @@
 import { useParams, useSearchParams } from '@solidjs/router';
-import { useQuery } from '@tanstack/solid-query';
+import { useQuery, useQueryClient } from '@tanstack/solid-query';
 import { createEffect, Match, Switch } from 'solid-js';
 import { SharedFolderPage } from '@/modules/document-share-links/pages/shared-folder.page';
 import { useLastOrganization } from '@/modules/organizations/composables/use-last-organization';
-import { organizationQueryOptions } from '@/modules/organizations/organizations.services';
+import {
+  fetchOrganization,
+  organizationQueryOptions,
+} from '@/modules/organizations/organizations.services';
 import { isHttpErrorWithStatusCode } from '@/modules/shared/http/http-errors';
 import { Button } from '@/modules/ui/components/button';
 import { OrganizationLayout } from '@/modules/ui/layouts/organization.layout';
 import { PublicLayout } from '@/modules/ui/layouts/public.layout';
 import { CurrentUserProvider } from '@/modules/users/composables/useCurrentUser';
+import { currentUserQueryKey } from '@/modules/users/users.services';
 import { DocumentsPage } from './documents.page';
 
 function WorkspaceDocumentsPage(props: { organizationId: string }) {
@@ -26,12 +30,24 @@ function WorkspaceDocumentsPage(props: { organizationId: string }) {
 export function FolderAwareDocumentsPage() {
   const params = useParams<{ organizationId: string }>();
   const [search] = useSearchParams();
+  const client = useQueryClient();
   const isFolderLink = () => typeof search.folder === 'string' && Boolean(search.folder);
   // Membership selects the shell. Folder and file endpoints enforce access to the requested folder.
   const workspace = useQuery(() => ({
     ...organizationQueryOptions(params.organizationId, false),
     enabled: isFolderLink(),
     retry: false,
+    queryFn: async ({ signal }) => {
+      const { organization, user } = await fetchOrganization({
+        organizationId: params.organizationId,
+        includeUser: !client.getQueryData(currentUserQueryKey),
+        redirectOnUnauthorized: false,
+        signal,
+      });
+      if (user && !signal.aborted && !client.getQueryData(currentUserQueryKey))
+        client.setQueryData(currentUserQueryKey, { user });
+      return { organization };
+    },
   }));
   const guest = () =>
     [401, 403, 404].some((statusCode) =>

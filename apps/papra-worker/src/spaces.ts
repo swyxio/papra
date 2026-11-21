@@ -1,26 +1,29 @@
 import { canReviewFeedback } from './auth';
-import type { App } from './types';
+import type { App, Env, Identity } from './types';
 import { all, first, run, id, error, camel, admin } from './db';
 import {
   ensureOrganizationMember,
   ensureDocumentAccess,
   documentPermissionPredicate,
+  readOrganizationForMember,
 } from './collaboration';
 
 const base = '/api/organizations';
+async function readCurrentUser(env: Env, identity: Identity) {
+  const user = await first(env, 'SELECT * FROM users WHERE id=?', identity.userId);
+  return {
+    ...camel(user!),
+    emailVerified: true,
+    maxOrganizationCount: 4,
+    twoFactorEnabled: false,
+    permissions: canReviewFeedback(identity) ? ['feedback:review'] : [],
+  };
+}
+
 export function registerSpaceRoutes(app: App) {
-  app.get('/api/users/me', async (c) => {
-    const u = await first(c.env, 'SELECT * FROM users WHERE id=?', c.get('identity').userId);
-    return c.json({
-      user: {
-        ...camel(u!),
-        emailVerified: true,
-        maxOrganizationCount: 4,
-        twoFactorEnabled: false,
-        permissions: canReviewFeedback(c.get('identity')) ? ['feedback:review'] : [],
-      },
-    });
-  });
+  app.get('/api/users/me', async (c) =>
+    c.json({ user: await readCurrentUser(c.env, c.get('identity')) }),
+  );
   app.put('/api/users/me', async (c) => {
     const b = await c.req.json();
     if (typeof b.name !== 'string' || !b.name.trim() || b.name.length > 200)
@@ -89,11 +92,16 @@ export function registerSpaceRoutes(app: App) {
     throw error(403, 'Spaces are assigned from your verified Google account');
   });
   app.get(`${base}/:org`, async (c) => {
-    await ensureOrganizationMember(c.env, c.get('identity'), c.req.param('org')!);
+    const identity = c.get('identity');
+    if (identity.serviceScope) throw error(403, 'A user session is required');
+    const [space, user] = await Promise.all([
+      readOrganizationForMember(c.env, identity, c.req.param('org')),
+      c.req.query('includeUser') === 'true' ? readCurrentUser(c.env, identity) : undefined,
+    ]);
+    c.header('Cache-Control', 'private, no-store');
     return c.json({
-      organization: camel(
-        (await first(c.env, 'SELECT * FROM organizations WHERE id=?', c.req.param('org')!))!,
-      ),
+      organization: camel(space.organization),
+      ...(user ? { user } : {}),
     });
   });
   app.get(`${base}/:org/members`, async (c) => {

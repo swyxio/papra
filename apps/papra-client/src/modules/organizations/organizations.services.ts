@@ -1,4 +1,5 @@
 import type { AsDto } from '../shared/http/http-client.types';
+import type { UserMe } from '../users/users.types';
 import type {
   Organization,
   OrganizationInvitation,
@@ -68,18 +69,28 @@ export async function updateOrganization({
 export async function fetchOrganization({
   organizationId,
   redirectOnUnauthorized = true,
+  includeUser,
+  signal,
 }: {
   organizationId: string;
   redirectOnUnauthorized?: boolean;
+  includeUser?: boolean;
+  signal?: AbortSignal;
 }) {
-  const { organization } = await apiClient<{ organization: AsDto<Organization> }>({
+  const { organization, user } = await apiClient<{
+    organization: AsDto<Organization>;
+    user?: UserMe;
+  }>({
     path: `/api/organizations/${organizationId}`,
     method: 'GET',
     redirectOnUnauthorized,
+    query: { includeUser },
+    signal,
   });
 
   return {
     organization: coerceDates(organization),
+    ...(user ? { user } : {}),
   };
 }
 
