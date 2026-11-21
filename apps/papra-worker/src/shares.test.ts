@@ -968,11 +968,15 @@ test('a folder link grants anonymous, read-only access to the current unrestrict
   expect((await request(manage.replace('/shared/', '/fld_home_team/'), 'POST')).status).toBe(404);
   expect((await request(manage.replace('/shared/', '/restricted/'), 'POST')).status).toBe(409);
 
-  const created = await request(manage, 'POST');
-  expect(created.status).toBe(201);
-  const { link } = await created.json<{ link: { token: string; url: string } }>();
+  expect(await (await request(manage)).json()).toEqual({ canShare: true, link: null });
+  const [firstCopy, secondCopy] = await Promise.all([
+    request(manage, 'POST'),
+    request(manage, 'POST'),
+  ]);
+  expect([firstCopy.status, secondCopy.status].sort()).toEqual([200, 201]);
+  const { link } = await firstCopy.json<{ link: { token: string; url: string } }>();
   expect(link.url).toBe(`https://drive.example/sf/${link.token}`);
-  expect((await request(manage, 'POST')).status).toBe(409);
+  expect(await secondCopy.json()).toEqual({ link });
   expect(await (await request(manage)).json()).toEqual({ canShare: true, link });
 
   const folder = `/api/share-links/folder/${link.token}`;
