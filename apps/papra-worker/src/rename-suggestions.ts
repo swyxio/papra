@@ -35,6 +35,18 @@ function cleanFilenamePart(value: string) {
     .trim();
 }
 
+function removeRepeatedShotCue(title: string, cue: string) {
+  const words = cue.split(' ');
+  const normalizedTitle = title.toLowerCase();
+  // The title can repeat just the wardrobe or framing at the end of a longer cue.
+  for (let first = 0; cue && first < Math.max(1, words.length - 1); first++) {
+    const repeated = words.slice(first).join(' ').toLowerCase();
+    if (normalizedTitle === repeated || normalizedTitle.endsWith(` ${repeated}`))
+      return title.slice(0, -repeated.length).replace(/[\s_-]+$/g, '');
+  }
+  return title;
+}
+
 export function cleanSuggestedName(suggested: string, current: string, shotCue = '') {
   const ext = extension(current);
   let name = cleanFilenamePart(suggested);
@@ -59,8 +71,7 @@ export function cleanSuggestedName(suggested: string, current: string, shotCue =
     .replace(/\s+/g, ' ')
     .replace(/(?: +[-_] +){2,}/g, ' - ')
     .replace(/^[\s_-]+|[\s_-]+$/g, '');
-  if (cue && (name === cue || name.toLowerCase().endsWith(` ${cue.toLowerCase()}`)))
-    name = name.slice(0, -cue.length).replace(/[\s_-]+$/g, '');
+  name = removeRepeatedShotCue(name, cue);
   name = name.slice(0, Math.max(0, 120 - (suffix ? suffix.length + 3 : 0))).trim();
   const filename = [name, suffix].filter(Boolean).join(' - ');
   return filename ? filename + ext : '';

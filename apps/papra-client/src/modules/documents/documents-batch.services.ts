@@ -1,4 +1,5 @@
 import { apiClient } from '../shared/http/api-client';
+import { createRenamePreviewTiming } from './rename-preview-timing';
 
 export type BatchTargetFilter = { documentIds: string[] } | { query: string; folderId?: string };
 
@@ -74,22 +75,43 @@ export async function suggestDocumentNames({
   descriptionRevision,
   onProgress,
   signal,
+  isRetry,
 }: {
   organizationId: string;
   documentIds: string[];
   descriptionRevision?: { feedback: string; draft: string };
-  onProgress: (event: RenameProgressEvent) => void;
+  onProgress: (event: RenameProgressEvent) => number | void;
   signal: AbortSignal;
+  isRetry?: boolean;
 }) {
-  const response = await apiClient<unknown, 'stream'>({
-    method: 'POST',
-    path: `/api/organizations/${organizationId}/documents/batch/suggest-names`,
-    headers: { Accept: 'application/x-ndjson' },
-    responseType: 'stream',
-    body: { documentIds, descriptionRevision },
-    retry: 0,
-    signal,
+  const timing = createRenamePreviewTiming({
+    operation: descriptionRevision ? 'revise' : isRetry ? 'retry' : 'suggest',
+    fileCount: new Set(documentIds).size,
   });
+  try {
+    const response = await apiClient<unknown, 'stream'>({
+      method: 'POST',
+      path: `/api/organizations/${organizationId}/documents/batch/suggest-names`,
+      headers: { Accept: 'application/x-ndjson' },
+      responseType: 'stream',
+      body: { documentIds, descriptionRevision },
+      retry: 0,
+      signal,
+    });
+    await readRenameProgress(response, (event) => {
+      if (!signal.aborted) timing.observe(event, onProgress(event));
+    });
+    timing.finish(signal.aborted ? 'cancelled' : 'complete');
+  } catch (error) {
+    timing.finish(signal.aborted ? 'cancelled' : 'interrupted');
+    throw error;
+  }
+}
+
+async function readRenameProgress(
+  response: ReadableStream<Uint8Array>,
+  onProgress: (event: RenameProgressEvent) => void,
+) {
   const reader = response.getReader();
   const decoder = new TextDecoder();
   let buffer = '';

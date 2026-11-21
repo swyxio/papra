@@ -81,6 +81,19 @@ test('shot cues appear in filenames only when a video has preview frames', () =>
   expect(cleanSuggestedName('x'.repeat(120), source.name, 'Wide Two-Shot')).toHaveLength(124);
 });
 
+test('removes a repeated trailing wardrobe phrase while preserving the session and angle', () => {
+  expect(
+    cleanSuggestedName(
+      'Studio Interview Black Tee Single',
+      'Untitled CAM 1 01.mp4',
+      'Front Three-Quarter Black Tee Single',
+    ),
+  ).toBe('Studio Interview - CAM 1 01 - Front Three-Quarter Black Tee Single.mp4');
+  expect(cleanSuggestedName('New Single', 'CAM 2.mp4', 'Blue Shirt Single')).toBe(
+    'New Single - CAM 2 - Blue Shirt Single.mp4',
+  );
+});
+
 test('recording excerpts include speech from the beginning, middle, and end', () => {
   const recording =
     'Opening Credits ' +
