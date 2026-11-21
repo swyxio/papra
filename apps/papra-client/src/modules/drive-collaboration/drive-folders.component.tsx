@@ -1,4 +1,4 @@
-import type { DriveFolder } from './drive-collaboration.services';
+import type { DriveFolderMetadata, FolderView } from './drive-collaboration.services';
 import type { Accessor, Component, Setter } from 'solid-js';
 import { A, useSearchParams } from '@solidjs/router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/solid-query';
@@ -24,7 +24,11 @@ import { createToast } from '../ui/components/sonner';
 import {
   documentDriveBase,
   driveBase,
-  fetchFolders,
+  folderQueryKey,
+  folderSummaryQuery,
+  folderTreeQuery,
+  folderViewQuery,
+  homeFolderId,
   folderIsDescendant,
   folderPath,
 } from './drive-collaboration.services';
@@ -40,17 +44,14 @@ import {
   saveDocumentsZip,
   zipProgressText,
 } from '../documents/components/drive-zip-download';
-import { getHttpErrorMessage } from '../shared/http/http-errors';
+import { getHttpErrorMessage, isHttpErrorWithStatusCode } from '../shared/http/http-errors';
 
 export const DocumentFolderPicker: Component<{ organizationId: string; documentId: string }> = (
   props,
 ) => {
   const client = useQueryClient();
   const [shortcutFolder, setShortcutFolder] = createSignal('');
-  const folders = useQuery(() => ({
-    queryKey: ['organizations', props.organizationId, 'folders'],
-    queryFn: async () => fetchFolders(props.organizationId),
-  }));
+  const folders = useQuery(() => folderTreeQuery(props.organizationId));
   const key = () => [
     'organizations',
     props.organizationId,
@@ -330,34 +331,54 @@ export const DriveFolders: Component<{
   const [rename, setRename] = createSignal('');
   const [moveFilesOpen, setMoveFilesOpen] = createSignal(false);
   const [showCreate, setShowCreate] = createSignal(false);
-  const key = () => ['organizations', props.organizationId, 'folders'];
-  const folders = useQuery(() => ({
-    queryKey: key(),
-    queryFn: async () => fetchFolders(props.organizationId),
+  const [manageOpen, setManageOpen] = createSignal(false);
+  const [folderDialog, setFolderDialog] = createSignal<{
+    kind: 'rename' | 'move';
+    folder: DriveFolderMetadata;
+    value: string;
+  }>();
+  const key = () => folderQueryKey(props.organizationId);
+  const folderId = () =>
+    typeof params.folder === 'string' ? params.folder : homeFolderId(props.organizationId);
+  const viewOptions = (id = folderId()) => folderViewQuery(props.organizationId, id);
+  const view = useQuery(() => ({
+    ...viewOptions(),
+    enabled: !isPendingFolderId(folderId()),
   }));
-  const homeId = () => folders.data?.folders.find((folder) => folder.isHome)?.id;
-  const folderId = () => (typeof params.folder === 'string' ? params.folder : homeId());
-  const current = () => folders.data?.folders.find((folder) => folder.id === folderId());
+  const folderAccessLost = (error: unknown) =>
+    [401, 403, 404].some((statusCode) => isHttpErrorWithStatusCode({ error, statusCode }));
+  const viewData = () => (view.isPending || folderAccessLost(view.error) ? undefined : view.data);
+  const folderStats = useQuery(() => ({
+    ...folderSummaryQuery(props.organizationId, folderId()),
+    enabled: !isPendingFolderId(folderId()) && Boolean(viewData()),
+  }));
+  const summary = (id: string) =>
+    !viewData() || folderStats.isPending || folderAccessLost(folderStats.error)
+      ? undefined
+      : folderStats.data?.folders.find((folder) => folder.id === id);
+  const treeOptions = () => folderTreeQuery(props.organizationId);
+  const tree = useQuery(() => ({
+    ...treeOptions(),
+    enabled: manageOpen() || folderDialog()?.kind === 'move',
+  }));
+  const treeFolders = () => (tree.isPending || tree.isError ? [] : (tree.data?.folders ?? []));
+  const current = () => viewData()?.folders.find((folder) => folder.id === folderId());
   const children = () =>
-    folders.data?.folders.filter(
-      (folder) => folder.parentId === folderId() && !isPendingFolderId(folder.id),
-    ) ?? [];
+    viewData()?.folders.filter((folder) => folder.parentId === folderId()) ?? [];
   createEffect(() => {
-    if (folders.data && folderId() && !current()) setParams({ folder: undefined });
+    if (
+      view.isError &&
+      isHttpErrorWithStatusCode({ error: view.error, statusCode: 404 }) &&
+      params.folder
+    )
+      setParams({ folder: undefined });
   });
   const invalidate = () => {
     void client.invalidateQueries({ queryKey: key() });
     void client.invalidateQueries({
       queryKey: ['organizations', props.organizationId, 'documents'],
     });
-    void client.invalidateQueries({ queryKey: ['organizations', props.organizationId, 'folders'] });
   };
-  type FolderList = NonNullable<typeof folders.data>;
-  const editFolders = (edit: (list: DriveFolder[]) => DriveFolder[]) =>
-    client.setQueryData<FolderList>(
-      key(),
-      (data) => data && { ...data, folders: edit(data.folders) },
-    );
   const [settledPlaceholder, setSettledPlaceholder] = createSignal<{
     id: string;
     refresh: boolean;
@@ -369,39 +390,43 @@ export const DriveFolders: Component<{
         path: `${driveBase(props.organizationId)}/folders`,
         body: { name: draft.name, parentId: draft.parentId },
       }),
-    onMutate: async (draft) => {
-      await client.cancelQueries({ queryKey: key() });
-      const parent = folders.data?.folders.find((folder) => folder.id === draft.parentId);
+    onMutate: (draft) => {
+      const parent = current();
       const timestamp = new Date().toISOString();
-      editFolders((list) => [
-        ...list,
-        {
-          id: draft.pendingId,
-          parentId: draft.parentId,
-          name: draft.name,
-          isHome: false,
-          isRestricted: false,
-          canWrite: false,
-          createdAt: timestamp,
-          updatedAt: timestamp,
-          documentsCount: 0,
-          documentsSize: 0,
-          shortcutsCount: 0,
-          lastActivityAt: null,
-          effectiveRestricted: parent?.effectiveRestricted ?? false,
-        },
-      ]);
+      const data = viewData();
+      client.setQueryData<FolderView>(viewOptions(draft.pendingId).queryKey, {
+        folders: [
+          ...ancestors(),
+          {
+            id: draft.pendingId,
+            parentId: draft.parentId,
+            name: draft.name,
+            isHome: false,
+            isRestricted: false,
+            canWrite: false,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            effectiveRestricted: parent?.effectiveRestricted ?? false,
+          },
+        ],
+        canManageAccess: !!data?.canManageAccess,
+        isPersonal: !!data?.isPersonal,
+      });
       setName('');
       setShowCreate(false);
       openFolder(draft.pendingId);
     },
     onSuccess: (result, draft) => {
-      editFolders((list) => [
-        ...list,
-        ...list
-          .filter((folder) => folder.id === draft.pendingId)
-          .map((folder) => ({ ...folder, id: result.folder.id, canWrite: true })),
-      ]);
+      const pending = client.getQueryData<FolderView>(viewOptions(draft.pendingId).queryKey);
+      if (pending)
+        client.setQueryData<FolderView>(viewOptions(result.folder.id).queryKey, {
+          ...pending,
+          folders: pending.folders.map((folder) =>
+            folder.id === draft.pendingId
+              ? { ...folder, id: result.folder.id, canWrite: true }
+              : folder,
+          ),
+        });
       if (folderId() === draft.pendingId)
         setParams({ folder: result.folder.id }, { replace: true });
       setSettledPlaceholder({ id: draft.pendingId, refresh: true });
@@ -423,7 +448,7 @@ export const DriveFolders: Component<{
     const settled = settledPlaceholder();
     if (!settled || folderId() === settled.id) return;
     setSettledPlaceholder(undefined);
-    editFolders((list) => list.filter((folder) => folder.id !== settled.id));
+    client.removeQueries({ queryKey: viewOptions(settled.id).queryKey, exact: true });
     if (settled.refresh) invalidate();
   });
   const submitCreate = () => {
@@ -454,15 +479,8 @@ export const DriveFolders: Component<{
       }),
   }));
   const { confirm } = useConfirmModal();
-  const subtreeOf = (root: DriveFolder) => {
-    const all = folders.data?.folders ?? [];
-    const result = [root];
-    for (let index = 0; index < result.length; index++)
-      result.push(...all.filter((folder) => folder.parentId === result[index]!.id));
-    return result;
-  };
   const remove = useMutation(() => ({
-    mutationFn: async (folder: DriveFolder) =>
+    mutationFn: async (folder: DriveFolderMetadata) =>
       apiClient<{ trashedDocuments: number }>({
         method: 'DELETE',
         path: `${driveBase(props.organizationId)}/folders/${folder.id}?contents=trash`,
@@ -472,7 +490,7 @@ export const DriveFolders: Component<{
       void client.invalidateQueries({
         queryKey: ['organizations', props.organizationId, 'uploads'],
       });
-      if (subtreeOf(folder).some((entry) => entry.id === folderId()))
+      if (ancestors().some((entry) => entry.id === folder.id))
         setParams({ folder: folder.parentId ?? undefined });
       createToast({
         type: 'success',
@@ -488,10 +506,20 @@ export const DriveFolders: Component<{
         message: `Could not delete folder: ${getHttpErrorMessage(error)}`,
       }),
   }));
-  const deleteFolder = async (folder: DriveFolder) => {
-    const subtree = subtreeOf(folder);
+  const deleteFolder = async (folder: DriveFolderMetadata) => {
+    let folders;
+    try {
+      folders = (await client.fetchQuery(treeOptions())).folders;
+    } catch (error) {
+      createToast({
+        type: 'error',
+        message: `Could not load folder contents: ${getHttpErrorMessage(error)}`,
+      });
+      return;
+    }
+    const subtree = folders.filter((entry) => folderIsDescendant(entry, folder.id, folders));
     const files = subtree.reduce((total, entry) => total + entry.documentsCount, 0);
-    const parent = folders.data?.folders.find((entry) => entry.id === folder.parentId);
+    const parent = folders.find((entry) => entry.id === folder.parentId);
     const confirmed = await confirm({
       title: `Delete "${folder.name}"?`,
       message:
@@ -503,11 +531,6 @@ export const DriveFolders: Component<{
     });
     if (confirmed) remove.mutate(folder);
   };
-  const [folderDialog, setFolderDialog] = createSignal<{
-    kind: 'rename' | 'move';
-    folder: DriveFolder;
-    value: string;
-  }>();
   const editFolder = useMutation(() => ({
     mutationFn: async (input: { id: string; changes: { name?: string; parentId?: string } }) =>
       apiClient({
@@ -532,29 +555,34 @@ export const DriveFolders: Component<{
     while (folder && !visited.has(folder.id)) {
       visited.add(folder.id);
       result.unshift(folder);
-      folder = folders.data?.folders.find((candidate) => candidate.id === folder!.parentId);
+      folder = viewData()?.folders.find((candidate) => candidate.id === folder!.parentId);
     }
     return result;
   };
-  const contentsLabel = (folder: DriveFolder) => {
-    const subfolders =
-      folders.data?.folders.filter((candidate) => candidate.parentId === folder.id).length ?? 0;
-    return `${folder.documentsCount} ${folder.documentsCount === 1 ? 'file' : 'files'} · ${subfolders} ${subfolders === 1 ? 'subfolder' : 'subfolders'}`;
+  const contentsLabel = (id: string) => {
+    const counts = summary(id);
+    if (!counts) return '';
+    const subfolders = counts.subfoldersCount;
+    return `${counts.documentsCount} ${counts.documentsCount === 1 ? 'file' : 'files'} · ${subfolders} ${subfolders === 1 ? 'subfolder' : 'subfolders'}`;
   };
   const [downloading, setDownloading] = createSignal<{ id: string; status: string }>();
-  const downloadFolder = async (folder: DriveFolder) => {
+  const downloadFolder = async (folder: DriveFolderMetadata) => {
     if (downloading()) return;
     setDownloading({ id: folder.id, status: 'Preparing download…' });
-    const tree = folderTree(folder.id, folders.data?.folders ?? []);
+    let entries: ReturnType<typeof folderTree> = [];
     try {
       const result = await saveDocumentsZip({
         organizationId: props.organizationId,
         fileName: `${folder.name}.zip`,
-        directories: tree.map((entry) => entry.directory).filter(Boolean),
+        directories: async () => {
+          const { folders } = await client.fetchQuery(treeOptions());
+          entries = folderTree(folder.id, folders);
+          return entries.map((entry) => entry.directory).filter(Boolean);
+        },
         onProgress: (progress) =>
           setDownloading({ id: folder.id, status: zipProgressText(progress) }),
         collect: async (add) => {
-          for (const { folder: entry, directory } of tree)
+          for (const { folder: entry, directory } of entries)
             for await (const document of listFolderDocuments(props.organizationId, entry.id))
               await add(document, directory);
         },
@@ -572,7 +600,7 @@ export const DriveFolders: Component<{
   };
   let selectionAnchor: string | undefined;
   let shiftKey = false;
-  const toggleFolder = (folder: DriveFolder, selected: boolean) => {
+  const toggleFolder = (folder: DriveFolderMetadata, selected: boolean) => {
     const anchorId = shiftKey ? selectionAnchor : undefined;
     selectionAnchor = folder.id;
     const ids = children()
@@ -635,7 +663,7 @@ export const DriveFolders: Component<{
                 <ShareFolder
                   organizationId={props.organizationId}
                   folderId={id}
-                  canManagePublic={Boolean(folders.data?.canManageAccess)}
+                  canManagePublic={Boolean(viewData()?.canManageAccess)}
                 />
               )}
             </Show>
@@ -652,10 +680,13 @@ export const DriveFolders: Component<{
               when={
                 !isPendingFolderId(folderId()) &&
                 !current()?.isHome &&
-                (current()?.canWrite || folders.data?.canManageAccess)
+                (current()?.canWrite || viewData()?.canManageAccess)
               }
             >
-              <details class="relative shrink-0 text-sm">
+              <details
+                class="relative shrink-0 text-sm"
+                onToggle={(event) => setManageOpen(event.currentTarget.open)}
+              >
                 <summary class="cursor-pointer rounded-md border px-3 py-2">Manage folder</summary>
                 <div class="absolute right-0 z-20 mt-2 w-80 max-w-[calc(100vw-4rem)] space-y-3 rounded-lg border bg-background p-3 shadow-lg">
                   <Show when={current() && !current()?.isHome && current()?.canWrite}>
@@ -683,23 +714,19 @@ export const DriveFolders: Component<{
                         aria-label="Move current folder"
                         class="w-full max-w-80 border rounded-md bg-background p-2 text-sm"
                         value={current()?.parentId ?? ''}
-                        disabled={update.isPending}
+                        disabled={update.isPending || tree.isPending || tree.isError}
                         onChange={(event) => update.mutate({ parentId: event.currentTarget.value })}
                       >
                         <For
-                          each={folders.data?.folders.filter(
+                          each={treeFolders().filter(
                             (candidate) =>
                               candidate.canWrite &&
-                              !folderIsDescendant(
-                                candidate,
-                                folderId()!,
-                                folders.data?.folders ?? [],
-                              ),
+                              !folderIsDescendant(candidate, folderId()!, treeFolders()),
                           )}
                         >
                           {(candidate) => (
                             <option value={candidate.id}>
-                              {folderPath(candidate, folders.data?.folders ?? [])}
+                              {folderPath(candidate, treeFolders())}
                             </option>
                           )}
                         </For>
@@ -713,13 +740,18 @@ export const DriveFolders: Component<{
                     >
                       Delete folder
                     </Button>
+                    <Show when={tree.isError}>
+                      <button class="text-xs underline" onClick={() => void tree.refetch()}>
+                        Retry loading destinations
+                      </button>
+                    </Show>
                   </Show>
                   <Show
                     when={
                       current() &&
                       !current()?.isHome &&
-                      folders.data?.canManageAccess &&
-                      !folders.data.isPersonal
+                      viewData()?.canManageAccess &&
+                      !viewData()?.isPersonal
                     }
                   >
                     <FolderAccessPanel
@@ -770,27 +802,46 @@ export const DriveFolders: Component<{
           {(folder) => (
             <p class="text-xs text-muted-foreground">
               <Show when={folder().effectiveRestricted}>Restricted access · </Show>
-              {contentsLabel(folder())}
-              <Show when={folder().shortcutsCount > 0}>
-                {' '}
-                · {folder().shortcutsCount} shortcuts
-              </Show>{' '}
-              · {formatBytes({ bytes: folder().documentsSize })}
+              <Show
+                when={summary(folder().id)}
+                fallback={
+                  !isPendingFolderId(folderId()) &&
+                  (folderStats.isError ? (
+                    <button class="underline" onClick={() => void folderStats.refetch()}>
+                      Retry folder sizes
+                    </button>
+                  ) : (
+                    'Calculating folder size…'
+                  ))
+                }
+              >
+                {(counts) => (
+                  <>
+                    {contentsLabel(folder().id)}
+                    <Show when={counts().shortcutsCount > 0}>
+                      {' '}
+                      · {counts().shortcutsCount} shortcuts
+                    </Show>
+                    {' · '}
+                    {formatBytes({ bytes: counts().documentsSize })}
+                  </>
+                )}
+              </Show>
             </p>
           )}
         </Show>
         <Show when={current() && !isPendingFolderId(folderId()) && folderId()} keyed>
           {(id) => <FolderUploads organizationId={props.organizationId} folderId={id} />}
         </Show>
-        <Show when={folders.isPending}>
+        <Show when={view.isPending && !isPendingFolderId(folderId())}>
           <p class="text-sm text-muted-foreground" role="status">
             Loading folders…
           </p>
         </Show>
-        <Show when={folders.isError}>
+        <Show when={view.isError}>
           <p role="alert" class="text-sm">
             Could not load folders.{' '}
-            <button class="underline" onClick={() => void folders.refetch()}>
+            <button class="underline" onClick={() => void view.refetch()}>
               Retry
             </button>
           </p>
@@ -837,19 +888,28 @@ export const DriveFolders: Component<{
                     <div class="min-w-0 flex-1">
                       <span class="block truncate text-sm font-medium">{folder.name}</span>
                       <span class="block text-xs text-muted-foreground">
-                        {contentsLabel(folder)}
-                        <Show when={folder.shortcutsCount > 0}>
-                          {' '}
-                          · {folder.shortcutsCount} shortcuts
-                        </Show>{' '}
-                        · {formatBytes({ bytes: folder.documentsSize })}
+                        <Show when={summary(folder.id)}>
+                          {(counts) => (
+                            <>
+                              {contentsLabel(folder.id)}
+                              <Show when={counts().shortcutsCount > 0}>
+                                {' '}
+                                · {counts().shortcutsCount} shortcuts
+                              </Show>
+                              {' · '}
+                              {formatBytes({ bytes: counts().documentsSize })}
+                            </>
+                          )}
+                        </Show>
                         <Show when={folder.effectiveRestricted}> · Restricted access</Show>
                       </span>
                     </div>
-                    <Show when={folder.lastActivityAt}>
-                      <span class="hidden sm:block shrink-0 text-xs text-muted-foreground">
-                        {new Date(folder.lastActivityAt!).toLocaleDateString()}
-                      </span>
+                    <Show when={summary(folder.id)?.lastActivityAt}>
+                      {(at) => (
+                        <span class="hidden sm:block shrink-0 text-xs text-muted-foreground">
+                          {new Date(at()).toLocaleDateString()}
+                        </span>
+                      )}
                     </Show>
                     <span class="i-tabler-chevron-right size-4 shrink-0 text-muted-foreground" />
                   </button>
@@ -964,20 +1024,14 @@ export const DriveFolders: Component<{
                     }
                   >
                     <For
-                      each={folders.data?.folders.filter(
+                      each={treeFolders().filter(
                         (candidate) =>
                           candidate.canWrite &&
-                          !folderIsDescendant(
-                            candidate,
-                            state().folder.id,
-                            folders.data?.folders ?? [],
-                          ),
+                          !folderIsDescendant(candidate, state().folder.id, treeFolders()),
                       )}
                     >
                       {(candidate) => (
-                        <option value={candidate.id}>
-                          {folderPath(candidate, folders.data?.folders ?? [])}
-                        </option>
+                        <option value={candidate.id}>{folderPath(candidate, treeFolders())}</option>
                       )}
                     </For>
                   </select>
@@ -990,7 +1044,11 @@ export const DriveFolders: Component<{
                   >
                     Cancel
                   </Button>
-                  <Button type="submit" isLoading={editFolder.isPending}>
+                  <Button
+                    type="submit"
+                    isLoading={editFolder.isPending}
+                    disabled={state().kind === 'move' && (tree.isPending || tree.isError)}
+                  >
                     {state().kind === 'rename' ? 'Rename' : 'Move'}
                   </Button>
                 </DialogFooter>

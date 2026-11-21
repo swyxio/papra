@@ -151,6 +151,7 @@ test('folder members can see unfinished upload reports only in folders they can 
       {
         id: active,
         folderId: 'fld_home_org',
+        folderPath: 'Home',
         canRemove: expect.any(Boolean),
         fileName: 'active.mov',
         size: 10,
@@ -163,6 +164,7 @@ test('folder members can see unfinished upload reports only in folders they can 
       {
         id: unreported,
         folderId: 'fld_home_org',
+        folderPath: 'Home',
         canRemove: expect.any(Boolean),
         fileName: 'unreported.mov',
         size: 10,

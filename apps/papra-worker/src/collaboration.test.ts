@@ -200,6 +200,65 @@ async function fixture() {
 }
 
 describe('D1 collaboration authorization and actual routes', () => {
+  test('scoped folder reloads revalidate before reading summaries and react to content and access changes', async () => {
+    const f = await fixture();
+    const view = `${f.base}/folders/${f.secret}/view`;
+    const summary = `${f.base}/folders/${f.secret}/summary`;
+    const get = async (path: string, user: string, etag?: string) =>
+      f.app.request(
+        path,
+        {
+          headers: { 'x-test-user': user, ...(etag ? { 'If-None-Match': etag } : {}) },
+        },
+        f.env,
+      );
+    const first = await get(view, 'reader');
+    const tag = first.headers.get('ETag')!;
+    expect(first.status).toBe(200);
+    expect(tag).toMatch(/^"[0-9a-f]{64}"$/);
+    expect(first.headers.get('Cache-Control')).toBe('private, no-cache');
+    expect(first.headers.get('Vary')).toContain('Cookie');
+    const data = await first.json<{
+      folders: { id: string; canWrite: boolean; effectiveRestricted: boolean }[];
+    }>();
+    expect(data.folders.map((folder) => folder.id).sort()).toEqual(
+      [f.home, f.secret, f.deep].sort(),
+    );
+    expect(data.folders.find((folder) => folder.id === f.secret)).toMatchObject({
+      canWrite: false,
+      effectiveRestricted: true,
+    });
+    expect(await (await get(view, 'reader', tag)).text()).toBe('');
+    expect((await get(view, 'reader', `"other", W/${tag}`)).status).toBe(304);
+    expect((await get(view, 'owner', tag)).status).toBe(200);
+    expect((await get(view, 'blocked', tag)).status).toBe(404);
+
+    const counters = await get(summary, 'reader');
+    expect(counters.status).toBe(200);
+    const summaryTag = counters.headers.get('ETag')!;
+    const payload = await counters.json<{ folders: { id: string; documentsSize: number }[] }>();
+    expect(payload.folders.find((folder) => folder.id === f.secret)).toMatchObject({
+      documentsCount: 1,
+      documentsSize: 2048,
+      subfoldersCount: 1,
+    });
+    expect((await get(summary, 'reader', summaryTag)).status).toBe(304);
+    await f.DB.prepare("UPDATE documents SET is_deleted=1 WHERE id='doc_deep'").run();
+    const edited = await get(summary, 'reader', summaryTag);
+    expect(edited.status).toBe(200);
+    expect(edited.headers.get('ETag')).not.toBe(summaryTag);
+    expect(await edited.json()).toMatchObject({
+      folders: expect.arrayContaining([
+        expect.objectContaining({ id: f.secret, documentsSize: 1024 }),
+      ]),
+    });
+    await f.DB.prepare('DELETE FROM folder_acl WHERE folder_id=? AND user_id=?')
+      .bind(f.secret, 'reader')
+      .run();
+    expect((await get(view, 'reader', tag)).status).toBe(404);
+    expect((await get(summary, 'reader', summaryTag)).status).toBe(404);
+  });
+
   test('space and folder summaries count only live readable original files, with shortcuts separate', async () => {
     const f = await fixture();
     await f.DB.prepare('UPDATE documents SET updated_at=200 WHERE id=?').bind('doc_secret').run();

@@ -65,16 +65,32 @@ export async function updateOrganization({
   };
 }
 
-export async function fetchOrganization({ organizationId }: { organizationId: string }) {
+export async function fetchOrganization({
+  organizationId,
+  redirectOnUnauthorized = true,
+}: {
+  organizationId: string;
+  redirectOnUnauthorized?: boolean;
+}) {
   const { organization } = await apiClient<{ organization: AsDto<Organization> }>({
     path: `/api/organizations/${organizationId}`,
     method: 'GET',
+    redirectOnUnauthorized,
   });
 
   return {
     organization: coerceDates(organization),
   };
 }
+
+export const organizationQueryOptions = (
+  organizationId: string,
+  redirectOnUnauthorized = true,
+) => ({
+  queryKey: ['organizations', organizationId],
+  queryFn: async () => fetchOrganization({ organizationId, redirectOnUnauthorized }),
+  staleTime: 5_000,
+});
 
 export async function deleteOrganization({ organizationId }: { organizationId: string }) {
   await apiClient({

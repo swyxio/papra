@@ -55,7 +55,7 @@ export async function captureSnapshot(DB: D1Database, date: string) {
   await DB.batch([
     DB.prepare(`CREATE TABLE IF NOT EXISTS ${prefix}capture AS SELECT ${Date.now()} captured_at`),
     DB.prepare(
-      `CREATE TABLE IF NOT EXISTS ${prefix}schema AS SELECT type,name,tbl_name,sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE '_backup_%' AND name NOT LIKE '_cf_%' AND (tbl_name IN (${quoted},'auth_oauth_states','feedback_transfer_failures','documents_fts') OR name='documents_fts') AND name NOT GLOB 'documents_fts_*' ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 ELSE 2 END,rowid`,
+      `CREATE TABLE IF NOT EXISTS ${prefix}schema AS SELECT type,name,tbl_name,sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE '_backup_%' AND name NOT LIKE '_cf_%' AND (tbl_name IN (${quoted},'auth_oauth_states','feedback_transfer_failures','documents_fts','folder_cache_revisions') OR name='documents_fts') AND name NOT GLOB 'documents_fts_*' ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 ELSE 2 END,rowid`,
     ),
     ...SNAPSHOT_TABLES.map((table) =>
       DB.prepare(

@@ -4,7 +4,7 @@ import type { JSX } from 'solid-js';
 import type { DriveFolder } from '@/modules/drive-collaboration/drive-collaboration.services';
 import { createSignal, For, Show } from 'solid-js';
 import {
-  fetchFolders,
+  folderTreeQuery,
   driveBase,
   folderPath,
 } from '@/modules/drive-collaboration/drive-collaboration.services';
@@ -37,8 +37,7 @@ export function GoogleDocsImport(props: {
   let requestKey = operationKey();
   let requestFingerprint = '';
   const folders = useQuery(() => ({
-    queryKey: ['organizations', props.organizationId, 'folders'],
-    queryFn: async () => fetchFolders(props.organizationId),
+    ...folderTreeQuery(props.organizationId),
     enabled: open(),
   }));
   const createFolderMutation = useMutation(() => ({
@@ -50,7 +49,7 @@ export function GoogleDocsImport(props: {
         retry: 0,
       }),
     onSuccess: async ({ folder }) => {
-      client.setQueryData<Awaited<ReturnType<typeof fetchFolders>>>(
+      client.setQueryData<Awaited<ReturnType<ReturnType<typeof folderTreeQuery>['queryFn']>>>(
         ['organizations', props.organizationId, 'folders'],
         (current) =>
           current

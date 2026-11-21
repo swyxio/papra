@@ -8,6 +8,7 @@ const root = fileURLToPath(new URL('../dist/', import.meta.url));
 const origin = 'https://drive-recovery.example.test';
 const documentsPath = '/orgs/org_test/documents?folder=fld_parent';
 const org = { id: 'org_test', name: 'Fixture space', role: 'admin' };
+const homeId = 'fld_home_org_test';
 const fixtureBytes = Buffer.from('Synthetic upload for recovery checks');
 const browser = await chromium.launch({ channel: 'chrome' });
 const errors = [];
@@ -31,13 +32,34 @@ try {
   context.setDefaultTimeout(7000);
   uploader = await context.newPage();
   observer = await context.newPage();
+  let guest;
+  let guestStatus = 401;
+  let publicLinkEnabled = true;
   for (const page of [uploader, observer])
     page.on('pageerror', (error) => errors.push(error.message));
   let releaseFolder;
+  let releaseSummary;
+  let releaseDocumentRefresh;
+  let holdNextDocumentRefresh = false;
+  let heldSummary = false;
+  let wholeTreeRequests = 0;
+  let parentViewRequests = 0;
+  let parentDocumentRequests = 0;
   let folders = [
-    makeFolder('fld_home', null, 'Home'),
-    makeFolder('fld_parent', 'fld_home', 'Fixture parent'),
+    makeFolder(homeId, null, 'Home'),
+    makeFolder('fld_parent', homeId, 'Fixture parent'),
   ];
+  const makeDocument = (id, name, size) => ({
+    id,
+    name,
+    size,
+    originalSize: size,
+    organizationId: org.id,
+    createdAt: '2026-11-19T12:00:00Z',
+    updatedAt: '2026-11-19T12:00:00Z',
+    mimeType: 'text/plain',
+  });
+  const documents = [makeDocument('doc_existing', 'existing.txt', 42)];
   let uploadStarted = false;
   let completed = false;
   let putCalls = 0;
@@ -68,6 +90,20 @@ try {
     const path = url.pathname;
     const method = request.method();
     if (url.origin !== origin) return route.abort();
+    if (guest && request.frame().page() === guest) {
+      if (path === '/api/organizations/org_test')
+        return route.fulfill({ status: guestStatus, json: {} });
+      if (path === '/api/share-links/folders/org_test/fld_parent')
+        return publicLinkEnabled
+          ? route.fulfill({
+              json: {
+                folder: { id: 'fld_parent', name: 'Shared fixture folder', parentId: null },
+                entries: [],
+                hasMore: false,
+              },
+            })
+          : route.fulfill({ status: 404, json: {} });
+    }
     if (path === '/test-storage/stalled') {
       putCalls++;
       return new Promise((resolve) => {
@@ -93,8 +129,51 @@ try {
       return route.fulfill({
         json: { plan: { id: 'fixture', limits: { maxFileSize: 1000 } }, subscription: null },
       });
+    const scopedFolder = path.match(/\/folders\/([^/]+)\/(view|summary)$/);
+    if (method === 'GET' && scopedFolder) {
+      const [, id, kind] = scopedFolder;
+      const folder = folders.find((item) => item.id === id);
+      if (!folder) return route.fulfill({ status: 404, json: {} });
+      const children = folders.filter((item) => item.parentId === id);
+      if (kind === 'view') {
+        if (id === 'fld_parent') parentViewRequests++;
+        const breadcrumbs = [folder];
+        for (let parentId = folder.parentId; parentId; ) {
+          const parent = folders.find((item) => item.id === parentId);
+          breadcrumbs.unshift(parent);
+          parentId = parent.parentId;
+        }
+        return route.fulfill({
+          json: {
+            folders: [...breadcrumbs, ...children],
+            canManageAccess: true,
+            isPersonal: false,
+          },
+        });
+      }
+      if (id === 'fld_parent' && !heldSummary) {
+        heldSummary = true;
+        await new Promise((resolve) => {
+          releaseSummary = resolve;
+        });
+      }
+      return route.fulfill({
+        json: {
+          folders: [folder, ...children].map((item) => ({
+            ...item,
+            documentsCount: item.id === 'fld_parent' ? documents.length : 0,
+            documentsSize:
+              item.id === 'fld_parent' ? documents.reduce((total, doc) => total + doc.size, 0) : 0,
+            subfoldersCount: folders.filter((child) => child.parentId === item.id).length,
+          })),
+        },
+      });
+    }
     if (path.endsWith('/folders')) {
-      if (method === 'GET') return route.fulfill({ json: { folders } });
+      if (method === 'GET') {
+        wholeTreeRequests++;
+        return route.fulfill({ json: { folders } });
+      }
       const draft = request.postDataJSON();
       await new Promise((resolve) => {
         releaseFolder = resolve;
@@ -117,7 +196,14 @@ try {
         json: {
           uploads:
             uploadStarted && !completed
-              ? [{ id: 'upload_fixture', fileName, folderId: 'fld_parent' }]
+              ? [
+                  {
+                    id: 'upload_fixture',
+                    fileName,
+                    folderId: 'fld_parent',
+                    folderPath: 'Home / Fixture parent',
+                  },
+                ]
               : [],
         },
       });
@@ -137,21 +223,15 @@ try {
       completionStatuses.push(status);
       if (status === 429) return route.fulfill({ status, json: { message: 'Fixture rate limit' } });
       completed = true;
+      const document = makeDocument('doc_fixture', fileName, fixtureBytes.length);
+      documents.push(document);
       return route.fulfill({
         json: {
           results: [
             {
               uploadId: 'upload_fixture',
               status,
-              document: {
-                id: 'doc_fixture',
-                organizationId: org.id,
-                name: fileName,
-                createdAt: '2026-11-19T12:00:00Z',
-                updatedAt: '2026-11-19T12:00:00Z',
-                mimeType: 'text/plain',
-                size: fixtureBytes.length,
-              },
+              document,
             },
           ],
         },
@@ -160,8 +240,20 @@ try {
     if (path.endsWith('/service-credentials')) return route.fulfill({ json: { credentials: [] } });
     if (path.endsWith('/documents/processing')) return route.fulfill({ json: { results: [] } });
     if (path.endsWith('/document-views')) return route.fulfill({ json: { documentViews: [] } });
-    if (path.startsWith('/api/') && path.endsWith('/documents'))
-      return route.fulfill({ json: { documents: [], documentsCount: 0 } });
+    if (path.startsWith('/api/') && path.endsWith('/documents')) {
+      const folderId = url.searchParams.get('folderId');
+      if (folderId === 'fld_parent') {
+        parentDocumentRequests++;
+        if (holdNextDocumentRefresh) {
+          holdNextDocumentRefresh = false;
+          await new Promise((resolve) => {
+            releaseDocumentRefresh = resolve;
+          });
+        }
+      }
+      const rows = !folderId || folderId === 'fld_parent' ? documents : [];
+      return route.fulfill({ json: { documents: rows, documentsCount: rows.length } });
+    }
     if (path === '/api/config') return route.fulfill({ json: { config: {} } });
     if (path === '/api/auth/get-session') return route.fulfill({ json: null });
     if (path.startsWith('/api/')) return route.fulfill({ status: 404, json: {} });
@@ -180,6 +272,40 @@ try {
 
   await uploader.clock.install();
   await uploader.goto(origin + documentsPath);
+  await expect.poll(() => Boolean(releaseSummary)).toBe(true);
+  await expect(uploader.getByRole('link', { name: 'existing', exact: true })).toBeVisible();
+  await expect(uploader.getByText('Calculating folder size…')).toBeVisible();
+  assert.equal(wholeTreeRequests, 0);
+  releaseSummary();
+  await expect(uploader.getByText(/1 file · 0 subfolders/)).toBeVisible();
+  const home = uploader
+    .getByRole('navigation', { name: 'Folder breadcrumbs' })
+    .getByRole('button', { name: 'Home', exact: true });
+  const openParent = uploader.getByRole('button', { name: /^Fixture parent/ });
+  await home.click();
+  await openParent.click();
+  await expect(uploader.getByRole('link', { name: 'existing', exact: true })).toBeVisible();
+  assert.equal(parentViewRequests, 1);
+  assert.equal(parentDocumentRequests, 1);
+  assert.equal(wholeTreeRequests, 0);
+  process.stdout.write(
+    'Chrome rendered files before recursive totals and reused fresh folder data on return.\n',
+  );
+  await home.click();
+  await openParent.waitFor();
+  documents.push(makeDocument('doc_remote_edit', 'remote-edit.txt', 24));
+  holdNextDocumentRefresh = true;
+  await uploader.clock.fastForward(46_000);
+  await openParent.click();
+  await expect.poll(() => Boolean(releaseDocumentRefresh)).toBe(true);
+  await expect(uploader.getByRole('link', { name: 'existing', exact: true })).toBeVisible();
+  releaseDocumentRefresh();
+  await expect(uploader.getByRole('link', { name: 'remote-edit', exact: true })).toBeVisible();
+  await expect(uploader.getByText(/2 files · 0 subfolders/)).toBeVisible();
+  assert.equal(wholeTreeRequests, 0);
+  process.stdout.write(
+    'Chrome kept cached rows visible during a stale refresh and picked up edits.\n',
+  );
   await observer.goto(origin + documentsPath);
   await uploader.getByRole('button', { name: 'Import a document' }).click();
   const chooser = uploader.waitForEvent('filechooser');
@@ -215,7 +341,7 @@ try {
     .toBe(2);
   await uploader.clock.fastForward(16_000);
   await expect.poll(() => completed, { timeout: 8000 }).toBe(true);
-  await expect(uploader.getByRole('link', { name: /^recovery\.txt/ })).toBeVisible();
+  await expect(uploader.getByRole('link', { name: 'recovery', exact: true })).toBeVisible();
   assert.deepEqual(completionStatuses, [429, 429, 429, 429, 200]);
   assert.deepEqual(statusResponses, [200, 502, 502, 200]);
   assert.equal(putCalls, 2, 'API error recovery must not resend the stored file');
@@ -262,6 +388,18 @@ try {
   process.stdout.write(
     'The observer tab stayed clear of false Interrupted notices during backoff.\n',
   );
+  guest = await context.newPage();
+  for (const status of [401, 403]) {
+    guestStatus = status;
+    await guest.goto(origin + documentsPath);
+    await expect(guest.getByRole('heading', { name: 'Shared fixture folder' })).toBeVisible();
+    await expect(guest).toHaveURL(origin + documentsPath);
+    await expect(guest.getByRole('button', { name: 'New folder', exact: true })).toHaveCount(0);
+  }
+  publicLinkEnabled = false;
+  await guest.reload();
+  await expect(guest.getByRole('heading', { name: 'Folder unavailable' })).toBeVisible();
+  process.stdout.write('Chrome verified the same-address guest view and revocation fallback.\n');
 } catch (error) {
   for (const page of [uploader, observer]) {
     if (!page) continue;

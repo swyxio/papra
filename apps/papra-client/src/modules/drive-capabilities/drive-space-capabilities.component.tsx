@@ -1,5 +1,6 @@
+import { useQueryClient } from '@tanstack/solid-query';
 import { createEffect, createResource, createSignal, For, Show } from 'solid-js';
-import { fetchFolders, folderPath } from '../drive-collaboration/drive-collaboration.services';
+import { folderPath, folderTreeQuery } from '../drive-collaboration/drive-collaboration.services';
 import { Button } from '../ui/components/button';
 import {
   createServiceCredential,
@@ -9,9 +10,10 @@ import {
 import { DriveError, DriveEvidence, driveFieldClass } from './drive-evidence.component';
 
 export function DriveSpaceCapabilities(props: { organizationId: string }) {
+  const client = useQueryClient();
   const [folders] = createResource(
     () => props.organizationId,
-    async (organizationId) => fetchFolders(organizationId),
+    async (organizationId) => client.fetchQuery(folderTreeQuery(organizationId)),
   );
   const [credentials, { refetch }] = createResource(
     () => props.organizationId,

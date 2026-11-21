@@ -150,6 +150,7 @@ export async function purgeExpiredTrash(env: Env) {
 export function registerDocumentRoutes(app: App) {
   for (const deleted of [0, 1])
     app.get(deleted ? `${base}/deleted` : base, async (c) => {
+      const started = performance.now();
       const q = c.req.query(),
         f = await documentFilter(
           c.env,
@@ -176,27 +177,40 @@ export function registerDocumentRoutes(app: App) {
             } as Record<string, string>
           )[q.sortField] || 'd.created_at',
         direction = q.sortOrder === 'asc' ? 'ASC' : 'DESC';
-      const rows = await all(
-        c.env,
+      const filterReady = performance.now();
+      const rows = await c.env.DB.prepare(
         `SELECT d.*,${q.folderId ? 'CASE WHEN d.home_folder_id=? THEN 0 ELSE 1 END' : '0'} is_shortcut,coalesce(v.size,0) original_size FROM documents d LEFT JOIN versions v ON v.id=d.current_version_id WHERE ${f.sql} ORDER BY ${sort} ${direction},d.id LIMIT ? OFFSET ?`,
-        ...(q.folderId ? [q.folderId] : []),
-        ...f.bindings,
-        size,
-        page * size,
+      )
+        .bind(...(q.folderId ? [q.folderId] : []), ...f.bindings, size, page * size)
+        .all();
+      const rowsReady = performance.now();
+      const count = await c.env.DB.prepare(`SELECT count(*) n FROM documents d WHERE ${f.sql}`)
+        .bind(...f.bindings)
+        .all<{ n: number }>();
+      const countReady = performance.now();
+      const documents = await Promise.all(
+        rows.results.map(async (d) => ({
+          ...(await formatDocument(c.env, d)),
+          isShortcut: !!d.is_shortcut,
+        })),
       );
-      const count = await first(
-        c.env,
-        `SELECT count(*) n FROM documents d WHERE ${f.sql}`,
-        ...f.bindings,
+      c.header(
+        'Server-Timing',
+        [
+          ['filter', filterReady - started],
+          ['rows', rowsReady - filterReady],
+          ['rows_sql', rows.meta.timings?.sql_duration_ms ?? rows.meta.duration],
+          ['count', countReady - rowsReady],
+          ['count_sql', count.meta.timings?.sql_duration_ms ?? count.meta.duration],
+          ['hydrate', performance.now() - countReady],
+        ]
+          .map(([name, duration]) => `${name};dur=${Number(duration).toFixed(1)}`)
+          .join(', '),
+        { append: true },
       );
       return c.json({
-        documents: await Promise.all(
-          rows.map(async (d) => ({
-            ...(await formatDocument(c.env, d)),
-            isShortcut: !!d.is_shortcut,
-          })),
-        ),
-        documentsCount: count!.n,
+        documents,
+        documentsCount: count.results[0]!.n,
       });
     });
   app.get(`${base}/statistics`, async (c) => {

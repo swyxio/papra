@@ -21,7 +21,7 @@ import {
 } from '../components/dropdown-menu';
 import { useI18n } from '@/modules/i18n/i18n.provider';
 import {
-  fetchOrganization,
+  organizationQueryOptions,
   fetchOrganizations,
 } from '@/modules/organizations/organizations.services';
 import { queryClient } from '@/modules/shared/query/query-client';
@@ -134,9 +134,8 @@ const OrganizationLayoutSideNav: Component<{ accountReady: boolean }> = (props) 
   }));
 
   const organizationQuery = useQuery(() => ({
-    queryKey: ['organizations', params.organizationId],
+    ...organizationQueryOptions(params.organizationId),
     enabled: props.accountReady && Boolean(params.organizationId),
-    queryFn: async () => fetchOrganization({ organizationId: params.organizationId }),
   }));
 
   createEffect(
@@ -250,9 +249,8 @@ export const AppLayout: ParentComponent<{ accountReady?: boolean }> = (props) =>
   const { t } = useI18n();
 
   const query = useQuery(() => ({
-    queryKey: ['organizations', params.organizationId],
+    ...organizationQueryOptions(params.organizationId),
     enabled: accountReady() && Boolean(params.organizationId),
-    queryFn: async () => fetchOrganization({ organizationId: params.organizationId }),
   }));
 
   createEffect(

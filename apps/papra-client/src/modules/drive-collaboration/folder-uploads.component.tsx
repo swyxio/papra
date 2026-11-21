@@ -2,16 +2,16 @@ import { formatBytes } from '@corentinth/chisels';
 import { useSearchParams } from '@solidjs/router';
 import { useQuery, useQueryClient } from '@tanstack/solid-query';
 import { createEffect, createSignal, For, on, Show } from 'solid-js';
-import { uploadFolderPaths } from '../documents/upload-scheduling.services';
 import { useConfirmModal } from '../shared/confirm';
 import { apiClient } from '../shared/http/api-client';
 import { getHttpErrorMessage } from '../shared/http/http-errors';
 import { createToast } from '../ui/components/sonner';
-import { driveBase, fetchFolders } from './drive-collaboration.services';
+import { driveBase } from './drive-collaboration.services';
 
 type FolderUpload = {
   id: string;
   folderId: string;
+  folderPath: string;
   canRemove: boolean;
   fileName: string;
   size: number;
@@ -47,11 +47,6 @@ export function FolderUploads(props: { organizationId: string; folderId: string 
   }));
   const [, setParams] = useSearchParams();
   const { confirm } = useConfirmModal();
-  const folders = useQuery(() => ({
-    queryKey: [...key, 'folders'],
-    queryFn: async () => fetchFolders(props.organizationId),
-  }));
-  const paths = () => uploadFolderPaths(folders.data?.folders ?? []);
   const [hidden, setHidden] = createSignal(readHidden());
   const hide = (id: string) => {
     const next = [...hidden(), id].slice(-500);
@@ -93,11 +88,14 @@ export function FolderUploads(props: { organizationId: string; folderId: string 
   };
   createEffect(
     on(
-      () => data()?.uploads,
+      () => (uploads.isPending ? undefined : uploads.data?.uploads),
       (current, previous) => {
         if (current && previous?.some((upload) => !current.some(({ id }) => id === upload.id))) {
           void client.invalidateQueries({ queryKey: [...key, 'documents'] });
-          void client.invalidateQueries({ queryKey: [...key, 'folders'], exact: true });
+          void client.invalidateQueries({
+            queryKey: [...key, 'folders'],
+            predicate: (query) => !query.queryKey.includes('upload-activity'),
+          });
         }
       },
     ),
@@ -167,7 +165,7 @@ export function FolderUploads(props: { organizationId: string; folderId: string 
                       setParams({ folder: upload.folderId, scope: undefined, page: undefined })
                     }
                   >
-                    {paths()[upload.folderId] || 'this folder'}
+                    {upload.folderPath}
                   </button>
                 </p>
                 <div class="flex flex-wrap gap-3 text-xs">

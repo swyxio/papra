@@ -1,7 +1,7 @@
 import type { DocumentSelectionAnchor } from '../documents/components/document-preview.component';
 import { apiClient } from '../shared/http/api-client';
 
-export type DriveFolder = {
+export type DriveFolderMetadata = {
   id: string;
   parentId: string | null;
   name: string;
@@ -10,12 +10,21 @@ export type DriveFolder = {
   canWrite: boolean;
   createdAt: string;
   updatedAt: string;
+  effectiveRestricted: boolean;
+};
+export type DriveFolderCounts = {
   documentsCount: number;
   documentsSize: number;
   shortcutsCount: number;
   lastActivityAt: string | null;
-  effectiveRestricted: boolean;
 };
+export type DriveFolder = DriveFolderMetadata & DriveFolderCounts;
+export type FolderView = {
+  folders: DriveFolderMetadata[];
+  canManageAccess: boolean;
+  isPersonal: boolean;
+};
+type FolderSummary = DriveFolderCounts & { id: string; subfoldersCount: number };
 export type DriveComment = {
   id: string;
   parentId: string | null;
@@ -31,11 +40,37 @@ export type DriveComment = {
 export const driveBase = (organizationId: string) => `/api/organizations/${organizationId}`;
 export const documentDriveBase = (organizationId: string, documentId: string) =>
   `${driveBase(organizationId)}/documents/${documentId}`;
-export const fetchFolders = async (organizationId: string, redirectOnUnauthorized = true) =>
+const fetchFolders = async (organizationId: string) =>
   apiClient<{ folders: DriveFolder[]; canManageAccess: boolean; isPersonal: boolean }>({
     path: `${driveBase(organizationId)}/folders`,
-    redirectOnUnauthorized,
   });
+export const homeFolderId = (organizationId: string) => `fld_home_${organizationId}`;
+export const folderQueryKey = (organizationId: string) => [
+  'organizations',
+  organizationId,
+  'folders',
+];
+// Local mutations invalidate this prefix immediately. Other edits are rechecked on return.
+export const FOLDER_FRESHNESS_MS = 45_000;
+export const folderTreeQuery = (organizationId: string) => ({
+  queryKey: folderQueryKey(organizationId),
+  queryFn: async () => fetchFolders(organizationId),
+  staleTime: FOLDER_FRESHNESS_MS,
+});
+export const folderViewQuery = (organizationId: string, folderId: string) => ({
+  queryKey: [...folderQueryKey(organizationId), 'view', folderId],
+  queryFn: async () =>
+    apiClient<FolderView>({ path: `${driveBase(organizationId)}/folders/${folderId}/view` }),
+  staleTime: FOLDER_FRESHNESS_MS,
+});
+export const folderSummaryQuery = (organizationId: string, folderId: string) => ({
+  queryKey: [...folderQueryKey(organizationId), 'summary', folderId],
+  queryFn: async () =>
+    apiClient<{ folders: FolderSummary[] }>({
+      path: `${driveBase(organizationId)}/folders/${folderId}/summary`,
+    }),
+  staleTime: FOLDER_FRESHNESS_MS,
+});
 export function folderPath(folder: DriveFolder, folders: DriveFolder[]): string {
   const names = [folder.name];
   const visited = new Set([folder.id]);

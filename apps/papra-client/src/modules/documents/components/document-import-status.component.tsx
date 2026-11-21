@@ -13,7 +13,7 @@ import type { Document } from '../documents.types';
 import type { TransferProgress } from '../drive-multipart.services';
 import { safely } from '@corentinth/chisels';
 import { A, useSearchParams } from '@solidjs/router';
-import { useQuery } from '@tanstack/solid-query';
+import { useQuery, useQueryClient } from '@tanstack/solid-query';
 import pLimit from 'p-limit';
 import {
   createContext,
@@ -44,6 +44,10 @@ import { ReportProblem } from '@/modules/feedback/report.component';
 import { errorObservation, errorProof } from '@/modules/feedback/feedback.services';
 import { Button } from '@/modules/ui/components/button';
 import { createToast } from '@/modules/ui/components/sonner';
+import {
+  folderTreeQuery,
+  homeFolderId,
+} from '@/modules/drive-collaboration/drive-collaboration.services';
 import { isPendingFolderId } from '@/modules/drive-collaboration/drive-folders.models';
 import { invalidateOrganizationDocumentsQuery } from '../documents.composables';
 import { uploadDocument } from '../documents.services';
@@ -125,6 +129,7 @@ type Task = {
 
 export const DocumentUploadProvider: ParentComponent<{ organizationId: string }> = (props) => {
   const [searchParams] = useSearchParams();
+  const client = useQueryClient();
   const throttledInvalidateOrganizationDocumentsQuery = throttle(
     invalidateOrganizationDocumentsQuery,
     500,
@@ -151,7 +156,6 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
       return createSignal<string[]>([]);
     }
   })();
-  const [folderLabels, setFolderLabels] = createSignal<Record<string, string>>({});
   const updateTaskStatus = (
     args:
       | { file: File; status: 'success'; document: Document }
@@ -181,20 +185,12 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
 
   const interruptedQuery = useQuery(() => ({
     queryKey: ['organizations', props.organizationId, 'uploads'],
-    queryFn: async () => {
-      const [result, { folders }] = await Promise.all([
-        apiClient<{ uploads: { id: string; fileName: string; folderId?: string }[] }>({
-          method: 'GET',
-          path: `/api/organizations/${props.organizationId}/uploads`,
-        }),
-        apiClient<{ folders: { id: string; parentId: string | null; name: string }[] }>({
-          method: 'GET',
-          path: `/api/organizations/${props.organizationId}/folders`,
-        }),
-      ]);
-      setFolderLabels(uploadFolderPaths(folders));
-      return result;
-    },
+    queryFn: async () =>
+      apiClient<{
+        uploads: { id: string; fileName: string; folderId?: string; folderPath?: string }[];
+      }>({
+        path: `/api/organizations/${props.organizationId}/uploads`,
+      }),
     refetchOnWindowFocus: true,
   }));
   const [uploadActivityRevision, setUploadActivityRevision] = createSignal(0);
@@ -356,12 +352,11 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
     // Folder creation precedes parallel file transfers; only conflicting-name decisions are serialized.
     const folders = new Map<string, string>();
     try {
-      const list = await apiClient<{
-        folders: { id: string; parentId: string | null; name: string; isHome: boolean }[];
-      }>({ method: 'GET', path: `/api/organizations/${organizationId}/folders` });
-      folders.set('', folderId || list.folders.find((f) => f.isHome)!.id);
-      const labels = uploadFolderPaths(list.folders);
-      setFolderLabels(labels);
+      const tree = await client.fetchQuery(folderTreeQuery(organizationId));
+      const destinations: { id: string; parentId: string | null; name: string }[] = [
+        ...tree.folders,
+      ];
+      folders.set('', folderId || homeFolderId(organizationId));
       setTasks((tasks) =>
         tasks.map((task) =>
           files.includes(task.file) ? { ...task, folderId: folders.get('') } : task,
@@ -375,7 +370,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
             const parentId = folders.get(path)!;
             path = path ? `${path}/${name}` : name;
             if (folders.has(path)) continue;
-            let folder = list.folders.find(
+            let folder = destinations.find(
               (f) => f.parentId === parentId && f.name.toLowerCase() === name.toLowerCase(),
             );
             if (!folder) {
@@ -387,14 +382,13 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
                 body: { name, parentId },
               });
               folder = result.folder;
-              list.folders.push(folder);
+              destinations.push(folder);
             }
             folders.set(path, folder.id);
           }
         }
       if (folderImport) void invalidateOrganizationDocumentsQuery({ organizationId });
-      const destinationLabels = uploadFolderPaths(list.folders);
-      setFolderLabels(destinationLabels);
+      const destinationLabels = uploadFolderPaths(destinations);
       setTasks((tasks) =>
         tasks.map((task) => {
           if (!files.includes(task.file)) return task;
@@ -816,10 +810,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
           </div>
           <p class="break-words">
             {visibleInterrupted()
-              ?.map(
-                (upload) =>
-                  `${folderLabels()[upload.folderId || ''] || 'Destination folder'} / ${upload.fileName}`,
-              )
+              ?.map((upload) => `${upload.folderPath || 'Destination folder'} / ${upload.fileName}`)
               .join(', ')}
           </p>
           <p class="mt-1 text-muted-foreground">
@@ -922,7 +913,7 @@ export const DocumentUploadProvider: ParentComponent<{ organizationId: string }>
                       {visibleInterrupted()
                         ?.map(
                           (upload) =>
-                            `${folderLabels()[upload.folderId || ''] || 'Destination folder'} / ${upload.fileName}`,
+                            `${upload.folderPath || 'Destination folder'} / ${upload.fileName}`,
                         )
                         .join(', ')}
                     </p>
