@@ -56,6 +56,7 @@ export type RenameSuggestion = {
   name: string;
   description: string;
   hasContent: boolean;
+  hasVisuals?: boolean;
   hasNotes: boolean;
 };
 

@@ -96,8 +96,8 @@ export const DocumentRenameSuggestionsDialog: Component<{
         <DialogHeader>
           <DialogTitle>Suggested names</DialogTitle>
           <DialogDescription>
-            AI read each file's text or transcript and suggested a name and description. Edit or
-            untick any before applying.
+            Suggestions use each file’s name, folder, text, and any available video frames. Select
+            the names you want to apply and edit them as needed.
           </DialogDescription>
         </DialogHeader>
         <Show when={suggest.isPending}>
@@ -119,20 +119,22 @@ export const DocumentRenameSuggestionsDialog: Component<{
           <div class="max-h-[60vh] overflow-y-auto divide-y rounded-md border">
             <Index each={rows()}>
               {(row) => (
-                <div class="flex gap-3 p-3">
-                  <input
-                    type="checkbox"
-                    class="mt-2 size-4"
-                    aria-label={`Rename ${row().currentName}`}
-                    checked={row().apply}
-                    onChange={(event) =>
-                      update(row().documentId, { apply: event.currentTarget.checked })
-                    }
-                  />
-                  <div class="min-w-0 flex-1 space-y-1">
-                    <div class="truncate text-xs text-muted-foreground" title={row().currentName}>
+                <div class="p-3">
+                  <label class="flex w-fit max-w-full cursor-pointer items-center gap-2 rounded px-1 py-1.5 hover:bg-muted">
+                    <input
+                      type="checkbox"
+                      class="size-6 shrink-0 cursor-pointer accent-primary focus-visible:ring-2 focus-visible:ring-ring"
+                      aria-label={`Rename ${row().currentName}`}
+                      checked={row().apply}
+                      onChange={(event) =>
+                        update(row().documentId, { apply: event.currentTarget.checked })
+                      }
+                    />
+                    <span class="truncate text-sm font-medium" title={row().currentName}>
                       {row().currentName}
-                    </div>
+                    </span>
+                  </label>
+                  <div class="min-w-0 space-y-1 pl-9">
                     <input
                       aria-label={`New name for ${row().currentName}`}
                       class="w-full rounded-md border bg-background px-2 py-1 text-sm font-medium"
@@ -144,10 +146,15 @@ export const DocumentRenameSuggestionsDialog: Component<{
                     />
                     <p class="text-xs text-muted-foreground">
                       {row().description}
-                      <Show when={!row().hasContent}>
+                      <Show when={row().hasVisuals}>
                         <span class="ml-1 italic">
-                          (no text or transcript yet; based on metadata)
+                          {row().hasContent
+                            ? '(preview frames and transcript)'
+                            : '(preview frames and metadata)'}
                         </span>
+                      </Show>
+                      <Show when={!row().hasContent && !row().hasVisuals}>
+                        <span class="ml-1 italic">(filename and folder only)</span>
                       </Show>
                     </p>
                   </div>
@@ -155,10 +162,10 @@ export const DocumentRenameSuggestionsDialog: Component<{
               )}
             </Index>
           </div>
-          <label class="flex items-center gap-2 text-sm">
+          <label class="flex cursor-pointer items-center gap-2 rounded px-1 py-1.5 text-sm hover:bg-muted">
             <input
               type="checkbox"
-              class="size-4"
+              class="size-6 shrink-0 cursor-pointer accent-primary focus-visible:ring-2 focus-visible:ring-ring"
               checked={saveNotes()}
               onChange={(event) => setSaveNotes(event.currentTarget.checked)}
             />

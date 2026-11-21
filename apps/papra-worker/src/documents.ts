@@ -18,7 +18,12 @@ import { fetchTranscript } from './transcripts';
 import { canSummarizeTranscript, readRecordingNotes } from './recording-notes';
 import { reserveDocumentAnswer } from './ai-gateway';
 import type { RenameSource } from './rename-suggestions';
-import { MAX_RENAME_BATCH, excerptOf, suggestDocumentNames } from './rename-suggestions';
+import {
+  MAX_RENAME_BATCH,
+  excerptOf,
+  readRenameFrames,
+  suggestDocumentNames,
+} from './rename-suggestions';
 
 const base = '/api/organizations/:org/documents';
 const smallFileLimit = 32 * 1024 ** 2;
@@ -578,24 +583,35 @@ export function registerDocumentRoutes(app: App) {
       }
       return names.join(' / ');
     };
-    const sources: RenameSource[] = [],
-      withNotes = new Set<string>();
-    for (const doc of [...new Set(ids as string[])]) {
-      const d = await document(c.env, c.get('identity'), c.req.param('org'), doc, 'write');
+    const documents = [];
+    for (const id of new Set(ids as string[])) {
+      const d = await document(c.env, c.get('identity'), c.req.param('org'), id, 'write');
+      if (d.is_deleted) throw error(404, 'Document not found');
+      documents.push(d);
+    }
+    if (!(await reserveDocumentAnswer(c.env, documents.length)))
+      throw error(429, 'Daily AI limit reached');
+    const sources: RenameSource[] = [];
+    const withNotes = new Set<string>();
+    for (const d of documents) {
       if ((d.notes as string | null)?.trim()) withNotes.add(d.id);
+      const video = d.mime_type.startsWith('video/');
+      const media = video || d.mime_type.startsWith('audio/');
       let text = d.content as string | null;
-      if (!text?.trim() && d.current_version_id)
-        text = (await fetchTranscript(c.env, d.current_version_id))?.text ?? '';
+      if ((media || !text?.trim()) && d.current_version_id)
+        text = (await fetchTranscript(c.env, d.current_version_id))?.text || text;
       sources.push({
         id: d.id,
         name: d.name,
         mimeType: d.mime_type,
         folder: path(d.home_folder_id),
-        excerpt: excerptOf(text),
+        excerpt: excerptOf(text, media),
+        frames:
+          video && d.current_version_id
+            ? await readRenameFrames(c.env, d.current_version_id)
+            : undefined,
       });
     }
-    if (!(await reserveDocumentAnswer(c.env, sources.length)))
-      throw error(429, 'Daily AI limit reached');
     const suggestions = await suggestDocumentNames(c.env, sources);
     return c.json({
       suggestions: suggestions.map((s) => {
@@ -604,6 +620,7 @@ export function registerDocumentRoutes(app: App) {
           ...s,
           currentName: source.name,
           hasContent: Boolean(source.excerpt),
+          hasVisuals: Boolean(source.frames?.length),
           hasNotes: withNotes.has(s.documentId),
         };
       }),
