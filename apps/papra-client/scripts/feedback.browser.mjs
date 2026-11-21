@@ -249,7 +249,7 @@ try {
     .poll(() => decision)
     .toEqual({ generation: 3, action: 'approve-pr', prNumber: 17, headSha: sha });
   await page.goto(origin + '/orgs/org_test');
-  await page.getByRole('button', { name: 'Import a document' }).click();
+  await page.getByRole('button', { name: 'New / Import' }).click();
   const chooser = page.waitForEvent('filechooser');
   await page.getByRole('menuitem', { name: 'Upload files' }).click();
   await (
