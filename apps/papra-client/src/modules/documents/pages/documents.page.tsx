@@ -35,10 +35,8 @@ import {
   modifiedByColumn,
   modifiedAtColumn,
   sizeColumn,
-  documentDateColumn,
   DocumentsPaginatedList,
   standardActionsColumn,
-  tagsColumn,
 } from '../components/documents-list.component';
 import { batchTrashDocuments, batchUpdateDocumentTags } from '../documents-batch.services';
 import {
@@ -144,36 +142,6 @@ export const DocumentsPage: Component = () => {
     queryKey: ['organizations', params.organizationId, 'custom-properties'],
     queryFn: async () => fetchCustomPropertyDefinitions({ organizationId: params.organizationId }),
   }));
-  const propertyDisplay = (value: unknown): string => {
-    if (value === null || value === undefined) return 'Not set';
-    if (Array.isArray(value)) return value.map(propertyDisplay).join(', ');
-    if (typeof value === 'object')
-      return String(
-        (value as { name?: string; email?: string }).name ||
-          (value as { email?: string }).email ||
-          '',
-      );
-    return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
-      ? String(value)
-      : '';
-  };
-  const propertiesColumn = {
-    id: 'properties',
-    header: 'Properties',
-    enableSorting: false,
-    cell: (data: { row: { original: Document } }) => (
-      <div class="space-y-1 text-xs">
-        <For each={data.row.original.customProperties?.filter((p) => p.value !== null)}>
-          {(property) => (
-            <div class="max-w-56 break-words">
-              <span class="text-muted-foreground">{property.name}: </span>
-              {propertyDisplay(property.value)}
-            </div>
-          )}
-        </For>
-      </div>
-    ),
-  };
   const addPropertyFilter = () => {
     const quoted = propertyValue().replaceAll('\\', '\\\\').replaceAll('"', '\\"');
     setSearchQuery(`${getSearchQuery().trim()} property.${propertyId()}:"${quoted}"`.trim());
@@ -821,7 +789,7 @@ export const DocumentsPage: Component = () => {
                         getSelectAllMatchingQuery() ||
                         getSelectedIds().length > MAX_RENAME_SUGGESTIONS
                       }
-                      title={`AI suggests names from each file's text or transcript (up to ${MAX_RENAME_SUGGESTIONS} files)`}
+                      title={`Suggest names using file details, text and available video frames (up to ${MAX_RENAME_SUGGESTIONS} files)`}
                     >
                       <div class="i-tabler-sparkles size-4 mr-2" />
                       Suggest names
@@ -930,9 +898,6 @@ export const DocumentsPage: Component = () => {
               getSorting={getSorting}
               setSorting={setSorting}
               extraColumns={[
-                tagsColumn,
-                propertiesColumn,
-                documentDateColumn,
                 uploadedByColumn,
                 modifiedByColumn,
                 sizeColumn,
