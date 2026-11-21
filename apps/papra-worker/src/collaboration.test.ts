@@ -1105,6 +1105,49 @@ test('passage comments retain version anchors and inherit them in replies, with 
   ).toBe(404);
 });
 
+test('A file page keeps per-document metadata, order, and permitted folder paths', async () => {
+  const f = await fixture();
+  await f.DB.exec(`
+    INSERT INTO tags(id,organization_id,name,created_at,updated_at) VALUES('tag_public','org_team','Public tag',1,1),('tag_deep','org_team','Deep tag',1,1);
+    INSERT INTO documents_tags VALUES('doc_public','tag_public'),('doc_deep','tag_deep');
+    INSERT INTO custom_properties(id,organization_id,name,type,options,created_at,updated_at) VALUES('status','org_team','Status','select','[{"id":"done","name":"Done"}]',1,1);
+    INSERT INTO document_custom_properties VALUES('doc_deep','status','"done"');
+  `);
+  const path = `${f.base}/documents?includeFolderPath=true&sortField=name&sortOrder=asc`;
+  const reader = await f.request(path + '&pageSize=2&pageIndex=0', 'GET', undefined, 'reader');
+  expect(reader.status).toBe(200);
+  expect(await reader.json()).toMatchObject({
+    documentsCount: 3,
+    documents: [
+      { id: 'doc_secret', tags: [], customProperties: [], homeFolderPath: 'Home / fld_secret' },
+      {
+        id: 'doc_deep',
+        tags: [{ id: 'tag_deep' }],
+        customProperties: [{ key: 'status', value: { optionId: 'done', name: 'Done' } }],
+        homeFolderPath: 'Home / fld_secret / fld_deep',
+      },
+    ],
+  });
+  const blocked = await f.request(path, 'GET', undefined, 'blocked');
+  expect(await blocked.json()).toMatchObject({
+    documentsCount: 1,
+    documents: [{ id: 'doc_public', tags: [{ id: 'tag_public' }], homeFolderPath: 'Home' }],
+  });
+  f.identities.reader!.serviceScope = {
+    organizationId: f.team,
+    folderId: f.secret,
+    permissions: ['read'],
+  };
+  const scoped = await f.request(path, 'GET', undefined, 'reader');
+  expect(await scoped.json()).toMatchObject({
+    documentsCount: 2,
+    documents: [
+      { id: 'doc_secret', homeFolderPath: 'fld_secret' },
+      { id: 'doc_deep', homeFolderPath: 'fld_secret / fld_deep' },
+    ],
+  });
+});
+
 test('Document attribution follows human edits, supports people search/sort and preserves ACLs', async () => {
   const f = await fixture();
   await f.DB.exec(

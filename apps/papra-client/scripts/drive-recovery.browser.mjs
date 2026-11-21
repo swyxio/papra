@@ -45,6 +45,8 @@ try {
   let wholeTreeRequests = 0;
   let parentViewRequests = 0;
   let parentDocumentRequests = 0;
+  let releaseHomeStats;
+  const homeRequests = [];
   let folders = [
     makeFolder(homeId, null, 'Home'),
     makeFolder('fld_parent', homeId, 'Fixture parent'),
@@ -55,6 +57,9 @@ try {
     size,
     originalSize: size,
     organizationId: org.id,
+    homeFolderId: 'fld_parent',
+    homeFolderPath: 'Home / Fixture parent',
+    tags: [],
     createdAt: '2026-11-19T12:00:00Z',
     updatedAt: '2026-11-19T12:00:00Z',
     mimeType: 'text/plain',
@@ -240,8 +245,30 @@ try {
     if (path.endsWith('/service-credentials')) return route.fulfill({ json: { credentials: [] } });
     if (path.endsWith('/documents/processing')) return route.fulfill({ json: { results: [] } });
     if (path.endsWith('/document-views')) return route.fulfill({ json: { documentViews: [] } });
+    if (path.endsWith('/documents/statistics')) {
+      await new Promise((resolve) => {
+        releaseHomeStats = resolve;
+      });
+      return route.fulfill({
+        json: { organizationStats: { documentsCount: 21, documentsSize: 4096 } },
+      });
+    }
     if (path.startsWith('/api/') && path.endsWith('/documents')) {
       const folderId = url.searchParams.get('folderId');
+      if (url.searchParams.get('includeFolderPath') === 'true') {
+        const size = Number(url.searchParams.get('pageSize'));
+        const index = Number(url.searchParams.get('pageIndex'));
+        homeRequests.push({ size, index });
+        const rows = Array.from({ length: 21 }, (_, i) =>
+          makeDocument(`doc_home_${i + 1}`, `Recent ${i + 1}.txt`, 42),
+        );
+        return route.fulfill({
+          json: {
+            documents: rows.slice(index * size, (index + 1) * size),
+            documentsCount: rows.length,
+          },
+        });
+      }
       if (folderId === 'fld_parent') {
         parentDocumentRequests++;
         if (holdNextDocumentRefresh) {
@@ -400,6 +427,29 @@ try {
   await guest.reload();
   await expect(guest.getByRole('heading', { name: 'Folder unavailable' })).toBeVisible();
   process.stdout.write('Chrome verified the same-address guest view and revocation fallback.\n');
+
+  const treesBeforeHome = wholeTreeRequests;
+  await observer.goto(origin + '/orgs/org_test');
+  await expect(observer.getByRole('link', { name: 'Recent 1', exact: true })).toBeVisible();
+  await expect.poll(() => Boolean(releaseHomeStats)).toBe(true);
+  assert.equal(wholeTreeRequests, treesBeforeHome);
+  assert.deepEqual(homeRequests, [{ size: 20, index: 0 }]);
+  await expect(observer.locator('tbody tr')).toHaveCount(20);
+  await expect(
+    observer.getByRole('link', { name: 'Fixture parent', exact: true }).first(),
+  ).toHaveAttribute('title', 'Home / Fixture parent');
+  await observer.getByRole('button', { name: 'Go to next page' }).click();
+  await expect(observer.getByRole('link', { name: 'Recent 21', exact: true })).toBeVisible();
+  assert.deepEqual(homeRequests.at(-1), { size: 20, index: 1 });
+  await observer.getByRole('button', { name: 'Change upload destination' }).click();
+  await expect(observer.getByLabel('Upload to')).toBeEnabled();
+  await observer.getByLabel('Upload to').selectOption('fld_parent');
+  await expect(observer).toHaveURL(/folder=fld_parent/);
+  assert.equal(wholeTreeRequests, treesBeforeHome + 1);
+  releaseHomeStats();
+  process.stdout.write(
+    'Chrome verified Home pagination, visible folder paths, and the lazy upload destination picker while statistics were pending.\n',
+  );
 } catch (error) {
   for (const page of [uploader, observer]) {
     if (!page) continue;
