@@ -566,6 +566,71 @@ try {
   await expect(askPanel).toBeHidden();
   await expect(mobileAsk).toBeFocused();
   process.stdout.write('Chrome verified footer order and Ask panel focus at 390px.\n');
+
+  const shareUrl = origin + documentsPath;
+  let sharedLink = null;
+  let finishPublishing;
+  let publishRequests = 0;
+  await uploader.route(
+    `${origin}/api/organizations/org_test/folders/fld_parent/share-links`,
+    async (route) => {
+      if (route.request().method() === 'POST') {
+        publishRequests++;
+        await new Promise((resolve) => {
+          finishPublishing = resolve;
+        });
+        sharedLink = { token: 'fixture_share', url: shareUrl };
+        return route.fulfill({ json: { link: sharedLink } });
+      }
+      return route.fulfill({
+        json: { canShare: true, isPublic: Boolean(sharedLink), inherited: false, link: sharedLink },
+      });
+    },
+  );
+  await uploader.addInitScript(() => {
+    window.fixtureClipboard = { writes: [], blocked: false };
+    Object.defineProperty(navigator, 'clipboard', {
+      value: {
+        async writeText(text) {
+          window.fixtureClipboard.writes.push(text);
+          if (window.fixtureClipboard.blocked) await new Promise(() => {});
+        },
+      },
+    });
+  });
+  await uploader.goto(shareUrl);
+  await uploader.getByRole('button', { name: 'Share folder', exact: true }).click();
+  await expect(uploader.getByRole('textbox', { name: 'Folder link' })).toHaveValue(shareUrl);
+  const copyLink = uploader.getByRole('button', { name: 'Copy link', exact: true });
+  const readClipboardWrites = () => uploader.evaluate(() => window.fixtureClipboard.writes);
+  await copyLink.click();
+  await expect(uploader.getByText('Enabling public access…', { exact: true })).toBeVisible();
+  await expect.poll(readClipboardWrites).toEqual([shareUrl]);
+  await expect.poll(() => publishRequests).toBe(1);
+  await copyLink.click();
+  await expect.poll(readClipboardWrites).toEqual([shareUrl, shareUrl]);
+  assert.equal(publishRequests, 1);
+  finishPublishing();
+  await expect(uploader.getByRole('button', { name: 'Turn off public access' })).toBeEnabled();
+
+  await uploader.evaluate(() => {
+    window.fixtureClipboard.blocked = true;
+  });
+  await copyLink.click();
+  await expect(copyLink).toBeEnabled();
+  await uploader.clock.fastForward(1501);
+  const clipboardFallback = uploader.getByText('Could not confirm the copy.', { exact: false });
+  await expect(clipboardFallback).toBeVisible();
+  await uploader.evaluate(() => {
+    window.fixtureClipboard.blocked = false;
+  });
+  await copyLink.click();
+  await expect(clipboardFallback).toBeHidden();
+  await expect.poll(readClipboardWrites).toEqual(Array(4).fill(shareUrl));
+  assert.equal(publishRequests, 1);
+  process.stdout.write(
+    'Chrome verified immediate folder link copy during publishing and retry after a stalled clipboard.\n',
+  );
 } catch (error) {
   for (const page of [uploader, observer]) {
     if (!page) continue;

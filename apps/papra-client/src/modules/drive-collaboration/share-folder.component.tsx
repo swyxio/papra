@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/solid-query';
-import { createSignal, Show } from 'solid-js';
+import { createSignal, onCleanup, Show } from 'solid-js';
 import { canonicalOrganizationUrl } from '../navigation/organization-urls';
 import { apiClient } from '../shared/http/api-client';
 import { getHttpErrorMessage } from '../shared/http/http-errors';
@@ -17,6 +17,7 @@ type FolderSharing = {
   link: FolderLink | null;
 };
 type Audience = 'public' | 'existing';
+const clipboardFeedbackMs = 1500;
 
 export function ShareFolder(props: {
   organizationId: string;
@@ -25,8 +26,13 @@ export function ShareFolder(props: {
 }) {
   const [audience, setAudience] = createSignal<Audience>();
   const [handoffOpen, setHandoffOpen] = createSignal(false);
-  const [copying, setCopying] = createSignal(false);
   const [copyFailed, setCopyFailed] = createSignal(false);
+  let copyAttempt = 0;
+  let copyTimer: ReturnType<typeof setTimeout> | undefined;
+  onCleanup(() => {
+    copyAttempt++;
+    clearTimeout(copyTimer);
+  });
   const client = useQueryClient();
   const path = () => `${driveBase(props.organizationId)}/folders/${props.folderId}/share-links`;
   const queryKey = () => ['folder-sharing', props.organizationId, props.folderId];
@@ -48,11 +54,9 @@ export function ShareFolder(props: {
   const publicActive = () => publicAllowed() && sharing.data?.isPublic === true;
   const selected = () =>
     publicAllowed() ? (publicActive() ? 'public' : (audience() ?? 'public')) : 'existing';
-  const selectedUrl = () =>
-    selected() === 'existing' || publicActive() ? internalUrl() : undefined;
-
   const create = useMutation(() => ({
-    mutationFn: async () => apiClient<{ link: FolderLink }>({ path: path(), method: 'POST' }),
+    mutationFn: async () =>
+      apiClient<{ link: FolderLink }>({ path: path(), method: 'POST', timeout: 15_000, retry: 0 }),
     onSuccess: ({ link }) => {
       client.setQueryData<FolderSharing>(queryKey(), (current) => ({
         canShare: true,
@@ -61,8 +65,12 @@ export function ShareFolder(props: {
         link,
       }));
     },
-    onError: () => {
+    onError: (error) => {
       void client.invalidateQueries({ queryKey: queryKey() });
+      createToast({
+        type: 'error',
+        message: `Could not confirm public access. ${getHttpErrorMessage(error)}`,
+      });
     },
   }));
   const revoke = useMutation(() => ({
@@ -85,44 +93,31 @@ export function ShareFolder(props: {
     onSettled: async () => client.invalidateQueries({ queryKey: queryKey() }),
   }));
 
-  const copy = async () => {
-    if (copying() || revoke.isPending) return;
+  const copyAddress = async () => {
+    const attempt = ++copyAttempt;
+    clearTimeout(copyTimer);
     setCopyFailed(false);
-    create.reset();
-    setCopying(true);
+    copyTimer = setTimeout(() => setCopyFailed(true), clipboardFeedbackMs);
     try {
-      const url = selectedUrl();
-      if (url) {
-        await navigator.clipboard.writeText(url);
-      } else {
-        void client.cancelQueries({ queryKey: queryKey() });
-        // This branch must start the clipboard write in the click handler. Its
-        // promised payload gets the canonical URL only after the Worker saves it.
-        await copyNewLink();
-      }
+      await navigator.clipboard.writeText(internalUrl());
+      if (attempt !== copyAttempt) return;
+      setCopyFailed(false);
       createToast({ type: 'success', message: 'Folder link copied' });
     } catch {
-      if (!create.error) setCopyFailed(true);
+      if (attempt === copyAttempt) setCopyFailed(true);
     } finally {
-      setCopying(false);
+      if (attempt === copyAttempt) clearTimeout(copyTimer);
     }
   };
 
-  const copyNewLink = async () => {
-    const ready = create.mutateAsync().then(({ link }) => link.url);
-    if (typeof ClipboardItem === 'function' && navigator.clipboard?.write) {
-      const text = ready.then((url) => new Blob([url], { type: 'text/plain' }));
-      // Some browsers reject clipboard access before consuming the payload.
-      void text.catch(() => {});
-      try {
-        await navigator.clipboard.write([new ClipboardItem({ 'text/plain': text })]);
-        return;
-      } catch {
-        await navigator.clipboard.writeText(await ready);
-        return;
-      }
+  const copy = () => {
+    if (revoke.isPending) return;
+    // The folder URL is stable. Write it during the click, independently of the access grant.
+    void copyAddress();
+    if (!create.isPending && selected() === 'public' && !publicActive()) {
+      void client.cancelQueries({ queryKey: queryKey() });
+      create.mutate();
     }
-    await navigator.clipboard.writeText(await ready);
   };
 
   return (
@@ -136,7 +131,7 @@ export function ShareFolder(props: {
           return;
         }
         setCopyFailed(false);
-        if (props.canManagePublic && !copying()) void client.prefetchQuery(query());
+        if (props.canManagePublic && !create.isPending) void client.prefetchQuery(query());
       }}
     >
       <PopoverTrigger as={Button} variant="outline" size="sm">
@@ -151,7 +146,7 @@ export function ShareFolder(props: {
             <select
               class="w-full rounded-md border bg-background px-2 py-1.5"
               value={selected()}
-              disabled={copying() || revoke.isPending}
+              disabled={create.isPending || revoke.isPending}
               onChange={(event) => {
                 setCopyFailed(false);
                 create.reset();
@@ -186,21 +181,17 @@ export function ShareFolder(props: {
             Public access is inherited from a parent folder.
           </p>
         </Show>
-        <Show when={selectedUrl()}>
-          {(url) => (
-            <input
-              type="text"
-              aria-label="Folder link"
-              class="min-w-0 w-full rounded-md border bg-background px-2 py-1.5 text-sm"
-              readonly
-              value={url()}
-              onFocus={(event) => event.currentTarget.select()}
-            />
-          )}
-        </Show>
+        <input
+          type="text"
+          aria-label="Folder link"
+          class="min-w-0 w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+          readonly
+          value={internalUrl()}
+          onFocus={(event) => event.currentTarget.select()}
+        />
         <Show when={create.isPending}>
           <p role="status" class="text-xs text-muted-foreground">
-            Saving public link…
+            Enabling public access…
           </p>
         </Show>
         <Show when={create.error || revoke.error}>
@@ -212,7 +203,7 @@ export function ShareFolder(props: {
         </Show>
         <Show when={copyFailed()}>
           <p role="alert" class="text-sm text-destructive">
-            Could not copy. Select the link above to copy it.
+            Could not confirm the copy. Select the link above to copy it.
           </p>
         </Show>
         <div class="flex flex-wrap items-center justify-between gap-2">
@@ -221,20 +212,14 @@ export function ShareFolder(props: {
               <Button
                 variant="ghost"
                 size="sm"
-                disabled={copying() || revoke.isPending}
+                disabled={create.isPending || revoke.isPending}
                 onClick={() => revoke.mutate(link().token)}
               >
                 Turn off public access
               </Button>
             )}
           </Show>
-          <Button
-            size="sm"
-            class="ml-auto"
-            isLoading={copying()}
-            disabled={revoke.isPending}
-            onClick={() => void copy()}
-          >
+          <Button size="sm" class="ml-auto" disabled={revoke.isPending} onClick={copy}>
             Copy link
           </Button>
         </div>
