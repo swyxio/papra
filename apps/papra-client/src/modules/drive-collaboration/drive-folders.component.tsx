@@ -628,16 +628,16 @@ export const DriveFolders: Component<{
               )}
             </Show>
             <Show
-              when={
-                folders.data?.canManageAccess &&
-                current() &&
-                !current()?.isHome &&
-                !isPendingFolderId(folderId()) &&
-                folderId()
-              }
+              when={current() && !current()?.isHome && !isPendingFolderId(folderId()) && folderId()}
               keyed
             >
-              {(id) => <ShareFolder organizationId={props.organizationId} folderId={id} />}
+              {(id) => (
+                <ShareFolder
+                  organizationId={props.organizationId}
+                  folderId={id}
+                  canManagePublic={Boolean(folders.data?.canManageAccess)}
+                />
+              )}
             </Show>
             <Show when={current()?.canWrite}>
               <Button size="sm" onClick={() => setShowCreate(!showCreate())}>

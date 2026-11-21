@@ -1,74 +1,169 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/solid-query';
 import { createSignal, Show } from 'solid-js';
+import { canonicalOrganizationUrl } from '../navigation/organization-urls';
 import { apiClient } from '../shared/http/api-client';
 import { getHttpErrorMessage } from '../shared/http/http-errors';
 import { Button } from '../ui/components/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
-  DialogTrigger,
-} from '../ui/components/dialog';
+import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '../ui/components/popover';
 import { createToast } from '../ui/components/sonner';
 import { driveBase } from './drive-collaboration.services';
 
 type FolderLink = { token: string; url: string };
 type FolderSharing = { canShare: boolean; link: FolderLink | null };
+type Audience = 'public' | 'existing';
 
-export function ShareFolder(props: { organizationId: string; folderId: string }) {
-  const [open, setOpen] = createSignal(false);
+export function ShareFolder(props: {
+  organizationId: string;
+  folderId: string;
+  canManagePublic: boolean;
+}) {
+  const [audience, setAudience] = createSignal<Audience>();
+  const [copying, setCopying] = createSignal(false);
+  const [copyFailed, setCopyFailed] = createSignal(false);
   const client = useQueryClient();
   const path = () => `${driveBase(props.organizationId)}/folders/${props.folderId}/share-links`;
   const queryKey = () => ['folder-sharing', props.organizationId, props.folderId];
-  const sharing = useQuery(() => ({
+  const query = () => ({
     queryKey: queryKey(),
-    enabled: open(),
-    queryFn: async () => apiClient<FolderSharing>({ path: path() }),
-  }));
-  const refresh = async () => client.invalidateQueries({ queryKey: queryKey() });
+    staleTime: 15_000,
+    queryFn: async () => apiClient<FolderSharing>({ path: path(), retry: 0 }),
+  });
+  // Warm the existing URL and permissions as soon as the folder toolbar appears.
+  const sharing = useQuery(() => ({ ...query(), enabled: props.canManagePublic }));
+  const internalUrl = () => {
+    const path = canonicalOrganizationUrl(`/organizations/${props.organizationId}/documents`);
+    const url = new URL(path, window.location.origin);
+    url.searchParams.set('folder', props.folderId);
+    return url.href;
+  };
+  const publicAllowed = () => props.canManagePublic && sharing.data?.canShare !== false;
+  const selected = () => (publicAllowed() ? (audience() ?? 'public') : 'existing');
+  const publicLink = () => sharing.data?.link;
+  const selectedUrl = () => (selected() === 'public' ? publicLink()?.url : internalUrl());
+
   const create = useMutation(() => ({
     mutationFn: async () => apiClient<{ link: FolderLink }>({ path: path(), method: 'POST' }),
-    onSettled: refresh,
+    onSuccess: ({ link }) => {
+      client.setQueryData<FolderSharing>(queryKey(), { canShare: true, link });
+    },
+    onError: () => {
+      void client.invalidateQueries({ queryKey: queryKey() });
+    },
   }));
   const revoke = useMutation(() => ({
     mutationFn: async (token: string) =>
       apiClient({ path: `${path()}/${token}`, method: 'DELETE' }),
-    onSettled: refresh,
+    onSuccess: (_, token) => {
+      client.setQueryData<FolderSharing>(queryKey(), (current) =>
+        current?.link?.token === token ? { ...current, link: null } : current,
+      );
+      createToast({ type: 'success', message: 'Public link revoked' });
+    },
+    onSettled: async () => client.invalidateQueries({ queryKey: queryKey() }),
   }));
-  const pending = () => create.isPending || revoke.isPending;
-  const copy = async (url: string) => {
+
+  const copy = async () => {
+    if (copying() || revoke.isPending) return;
+    setCopyFailed(false);
+    create.reset();
+    setCopying(true);
     try {
-      await navigator.clipboard.writeText(url);
+      const url = selectedUrl();
+      if (url) {
+        await navigator.clipboard.writeText(url);
+      } else {
+        void client.cancelQueries({ queryKey: queryKey() });
+        // This branch must start the clipboard write in the click handler. Its
+        // promised payload gets the canonical URL only after the Worker saves it.
+        await copyNewLink();
+      }
       createToast({ type: 'success', message: 'Folder link copied' });
     } catch {
-      createToast({ type: 'error', message: 'Could not copy. Select the link to copy it.' });
+      if (!create.error) setCopyFailed(true);
+    } finally {
+      setCopying(false);
     }
   };
 
+  const copyNewLink = async () => {
+    const ready = create.mutateAsync().then(({ link }) => link.url);
+    if (typeof ClipboardItem === 'function' && navigator.clipboard?.write) {
+      const text = ready.then((url) => new Blob([url], { type: 'text/plain' }));
+      // Some browsers reject clipboard access before consuming the payload.
+      void text.catch(() => {});
+      try {
+        await navigator.clipboard.write([new ClipboardItem({ 'text/plain': text })]);
+        return;
+      } catch {
+        await navigator.clipboard.writeText(await ready);
+        return;
+      }
+    }
+    await navigator.clipboard.writeText(await ready);
+  };
+
   return (
-    <Dialog open={open()} onOpenChange={setOpen}>
-      <DialogTrigger as={Button} variant="outline" size="sm">
+    <Popover
+      placement="bottom-end"
+      gutter={8}
+      flip
+      onOpenChange={(open) => {
+        if (!open) return;
+        setCopyFailed(false);
+        if (props.canManagePublic && !copying()) void client.prefetchQuery(query());
+      }}
+    >
+      <PopoverTrigger as={Button} variant="outline" size="sm">
         <div class="i-tabler-share size-4 mr-1.5" />
         Share folder
-      </DialogTrigger>
-      <DialogContent>
-        <DialogTitle>Share folder</DialogTitle>
-        <DialogDescription>
-          Anyone with the link can browse and download files without signing in. The link includes
-          new files and subfolders added later. Restricted folders and shortcuts stay private.
-        </DialogDescription>
-        <Show when={sharing.isPending}>
-          <p role="status" class="text-sm text-muted-foreground">
-            Loading sharing settings…
+      </PopoverTrigger>
+      <PopoverContent class="w-80 max-w-[calc(100vw-1.5rem)] space-y-3">
+        <PopoverTitle class="font-semibold">Share folder</PopoverTitle>
+        <Show when={props.canManagePublic}>
+          <label class="block space-y-1 text-sm">
+            <span>Who can open this link?</span>
+            <select
+              class="w-full rounded-md border bg-background px-2 py-1.5"
+              value={selected()}
+              disabled={copying() || revoke.isPending}
+              onChange={(event) => {
+                setCopyFailed(false);
+                create.reset();
+                setAudience(event.currentTarget.value === 'public' ? 'public' : 'existing');
+              }}
+            >
+              <option value="public" disabled={!publicAllowed()}>
+                Anyone with the link
+              </option>
+              <option value="existing">People with existing access</option>
+            </select>
+          </label>
+        </Show>
+        <p class="text-xs text-muted-foreground">
+          {selected() === 'public'
+            ? 'Unlisted, view and download, no expiration. Anyone you forward it to can open it without signing in.'
+            : 'Recipients sign in with an account that already has access to this folder.'}
+        </p>
+        <Show when={selected() === 'public'}>
+          <p class="text-xs text-muted-foreground">
+            Includes new files added later. Restricted folders and shortcuts stay private.
           </p>
         </Show>
-        <Show when={sharing.isError}>
-          <p role="alert" class="text-sm text-destructive">
-            {getHttpErrorMessage(sharing.error)}{' '}
-            <button type="button" class="underline" onClick={() => void sharing.refetch()}>
-              Try again
-            </button>
+        <Show when={selectedUrl()}>
+          {(url) => (
+            <input
+              type="text"
+              aria-label="Folder link"
+              class="min-w-0 w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+              readonly
+              value={url()}
+              onFocus={(event) => event.currentTarget.select()}
+            />
+          )}
+        </Show>
+        <Show when={create.isPending}>
+          <p role="status" class="text-xs text-muted-foreground">
+            Saving public link…
           </p>
         </Show>
         <Show when={create.error || revoke.error}>
@@ -78,53 +173,35 @@ export function ShareFolder(props: { organizationId: string; folderId: string })
             </p>
           )}
         </Show>
-        <Show when={sharing.data && !sharing.isError && sharing.data}>
-          {(settings) => (
-            <>
-              <Show when={!settings().canShare}>
-                <p class="text-sm text-muted-foreground">
-                  This folder is restricted. Public access is unavailable.
-                </p>
-              </Show>
-              <Show when={settings().link}>
-                {(link) => (
-                  <>
-                    <input
-                      type="text"
-                      aria-label="Public folder link"
-                      class="min-w-0 w-full rounded-md border bg-background px-3 py-2 text-sm"
-                      readonly
-                      value={link().url}
-                      onFocus={(event) => event.currentTarget.select()}
-                    />
-                    <div class="flex flex-wrap justify-end gap-2">
-                      <Button
-                        variant="outline"
-                        disabled={pending()}
-                        onClick={() => revoke.mutate(link().token)}
-                      >
-                        Revoke link
-                      </Button>
-                      <Show when={settings().canShare}>
-                        <Button disabled={pending()} onClick={() => void copy(link().url)}>
-                          Copy link
-                        </Button>
-                      </Show>
-                    </div>
-                  </>
-                )}
-              </Show>
-              <Show when={settings().canShare && !settings().link}>
-                <div class="flex justify-end">
-                  <Button isLoading={pending()} onClick={() => create.mutate()}>
-                    Create public link
-                  </Button>
-                </div>
-              </Show>
-            </>
-          )}
+        <Show when={copyFailed()}>
+          <p role="alert" class="text-sm text-destructive">
+            Could not copy. Select the link above to copy it.
+          </p>
         </Show>
-      </DialogContent>
-    </Dialog>
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <Show when={publicLink()}>
+            {(link) => (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={copying() || revoke.isPending}
+                onClick={() => revoke.mutate(link().token)}
+              >
+                Revoke public link
+              </Button>
+            )}
+          </Show>
+          <Button
+            size="sm"
+            class="ml-auto"
+            isLoading={copying()}
+            disabled={revoke.isPending}
+            onClick={() => void copy()}
+          >
+            Copy link
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }

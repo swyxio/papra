@@ -85,17 +85,15 @@ export function registerFolderShareRoutes(app: App) {
       c.req.param('folderId'),
     );
     if (!canShare) throw error(409, 'Restricted folders cannot be shared publicly');
-    const {
-      results: [link],
-    } = await c.env.DB.prepare(
-      `INSERT INTO folder_share_links(folder_id,token,created_by) VALUES (?,?,?)
-       ON CONFLICT(folder_id) DO NOTHING RETURNING token`,
-    )
-      .bind(folder.id, newShareId(2), identity.userId)
-      .all<{ token: string }>();
-    if (!link) throw error(409, 'A link already exists. Reopen sharing to see it.');
+    const [insert, read] = await c.env.DB.batch<{ token: string }>([
+      c.env.DB.prepare(
+        'INSERT INTO folder_share_links(folder_id,token,created_by) VALUES (?,?,?) ON CONFLICT(folder_id) DO NOTHING',
+      ).bind(folder.id, newShareId(2), identity.userId),
+      c.env.DB.prepare('SELECT token FROM folder_share_links WHERE folder_id=?').bind(folder.id),
+    ]);
+    const link = read.results[0]!;
     c.header('Cache-Control', 'private, no-store');
-    return c.json({ link: linkDto(c.env, link.token) }, 201);
+    return c.json({ link: linkDto(c.env, link.token) }, insert.meta.changes ? 201 : 200);
   });
   app.delete(`${managed}/:token`, async (c) => {
     const { folder } = await folderSharingAccess(
