@@ -2,6 +2,7 @@ import type { Context } from 'hono';
 import type { App, AppEnv, Env, Identity } from './types';
 import { HTTPException } from 'hono/http-exception';
 import { getDocument } from './db';
+import { privateCacheNotModified } from './private-cache';
 import { enqueueVersion } from './jobs';
 
 export type FolderRow = {
@@ -38,6 +39,14 @@ export type DriveDocumentRow = {
 };
 export type PermissionMode = 'read' | 'write';
 type OrganizationAccess = { role: string; personalOwnerId: string | null };
+type OrganizationRow = {
+  id: string;
+  name: string;
+  description: string | null;
+  personal_owner_id: string | null;
+  created_at: number;
+  updated_at: number;
+};
 type SqlPredicate = { sql: string; bindings: string[] };
 function fail(status: 400 | 403 | 404 | 409, message: string): never {
   throw new HTTPException(status, { message });
@@ -62,23 +71,33 @@ export async function ensureHomeFolder(
   return folderId;
 }
 
-async function organizationAccess(
+export async function readOrganizationForMember(
   env: Env,
   identity: Identity,
   organizationId: string,
-): Promise<OrganizationAccess> {
+) {
   if (identity.serviceScope && identity.serviceScope.organizationId !== organizationId)
     fail(403, 'Token is scoped to another space');
   const row = await env.DB.prepare(
-    'SELECT o.personal_owner_id,m.role FROM organizations o LEFT JOIN organization_members m ON m.organization_id=o.id AND m.user_id=? WHERE o.id=?',
+    'SELECT o.*,m.role FROM organizations o LEFT JOIN organization_members m ON m.organization_id=o.id AND m.user_id=? WHERE o.id=?',
   )
     .bind(identity.userId, organizationId)
-    .first<{ personal_owner_id: string | null; role: string | null }>();
+    .first<OrganizationRow & { role: string | null }>();
   if (!row) fail(404, 'Space not found');
   if (row.personal_owner_id && row.personal_owner_id !== identity.userId)
     fail(404, 'Space not found');
   if (!row.role) fail(403, 'You are not a member of this space');
-  return { role: row.role, personalOwnerId: row.personal_owner_id };
+  const { role, ...organization } = row;
+  return { role, organization };
+}
+
+export async function organizationAccess(
+  env: Env,
+  identity: Identity,
+  organizationId: string,
+): Promise<OrganizationAccess> {
+  const { role, organization } = await readOrganizationForMember(env, identity, organizationId);
+  return { role, personalOwnerId: organization.personal_owner_id };
 }
 export async function ensureOrganizationMember(
   env: Env,
@@ -116,7 +135,12 @@ async function folderAncestors(env: Env, folderId: string): Promise<FolderRow[]>
   }
   return chain;
 }
-async function folderAccess(env: Env, identity: Identity, folderId: string, mode: PermissionMode) {
+export async function folderAccess(
+  env: Env,
+  identity: Identity,
+  folderId: string,
+  mode: PermissionMode,
+) {
   if (identity.serviceScope && !identity.serviceScope.permissions.includes(mode))
     fail(403, 'Token does not permit this operation');
   const chain = await folderAncestors(env, folderId);
@@ -420,36 +444,12 @@ async function folderNotModified(
   access: OrganizationAccess,
   kind: 'view' | 'summary',
 ) {
-  const identity = context.get('identity');
-  const { env } = context;
-  const epoch = await env.DB.prepare(
+  const epoch = await context.env.DB.prepare(
     'SELECT revision FROM folder_cache_revisions WHERE organization_id=?',
   )
     .bind(folder.organization_id)
     .first<string>('revision');
-  context.header('Cache-Control', 'private, no-cache');
-  context.header('Vary', 'Cookie, Authorization', { append: true });
-  if (!epoch) return false;
-  const key = JSON.stringify([
-    env.SOURCE_SHA,
-    kind,
-    folder.id,
-    identity.userId,
-    identity.serviceScope,
-    access,
-    epoch,
-  ]);
-  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(key));
-  const etag =
-    '"' +
-    Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('') +
-    '"';
-  context.header('ETag', etag);
-  const validators = context.req
-    .header('If-None-Match')
-    ?.split(',')
-    .map((tag) => tag.trim().replace(/^W\//, ''));
-  return validators?.includes(etag) ?? false;
+  return epoch && privateCacheNotModified(context, [kind, folder.id, access, epoch]);
 }
 
 const scopedFolderSql = `WITH RECURSIVE subtree(id) AS (

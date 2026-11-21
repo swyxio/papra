@@ -4,7 +4,7 @@ import { useConfig } from '@/modules/config/config.provider';
 import { useI18n } from '@/modules/i18n/i18n.provider';
 import { downloadStoredFile } from '@/modules/shared/files/download';
 import { useConfirmModal } from '../shared/confirm';
-import { queryClient } from '../shared/query/query-client';
+import { refreshDriveQueries } from '../shared/query/query-client';
 import { createToast } from '../ui/components/sonner';
 import { deleteDocument, restoreDocument } from './documents.services';
 
@@ -13,9 +13,7 @@ export async function invalidateOrganizationDocumentsQuery({
 }: {
   organizationId: string;
 }) {
-  return queryClient.invalidateQueries({
-    queryKey: ['organizations', organizationId],
-  });
+  return refreshDriveQueries(organizationId);
 }
 
 function getConfirmMessage(documentName: string, retentionDays: number) {

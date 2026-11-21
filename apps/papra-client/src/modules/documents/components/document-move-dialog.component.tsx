@@ -1,13 +1,14 @@
 import type { Component } from 'solid-js';
 import type { BatchTargetFilter } from '../documents-batch.services';
 import { createEffect, createMemo, createSignal, For, on, Show } from 'solid-js';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/solid-query';
+import { useMutation, useQuery } from '@tanstack/solid-query';
 import {
   driveBase,
   folderTreeQuery,
   folderPath,
 } from '@/modules/drive-collaboration/drive-collaboration.services';
 import { blockedMoveTargets } from '@/modules/drive-collaboration/drive-folders.models';
+import { refreshDriveQueries } from '@/modules/shared/query/query-client';
 import { apiClient } from '@/modules/shared/http/api-client';
 import { getHttpErrorMessage } from '@/modules/shared/http/http-errors';
 import { Button } from '@/modules/ui/components/button';
@@ -32,7 +33,6 @@ export const DocumentMoveDialog: Component<{
   destinationFolderId?: string;
   onMoved?: () => void;
 }> = (props) => {
-  const client = useQueryClient();
   const [destination, setDestination] = createSignal('');
   const [search, setSearch] = createSignal('');
   const [page, setPage] = createSignal(0);
@@ -98,12 +98,12 @@ export const DocumentMoveDialog: Component<{
       }
       setFailedFolders(failed);
       if (failed.length) {
-        await client.invalidateQueries({ queryKey: ['organizations', props.organizationId] });
+        await refreshDriveQueries(props.organizationId);
         throw new Error('Some folders could not be moved');
       }
     },
     onSuccess: async () => {
-      await client.invalidateQueries({ queryKey: ['organizations', props.organizationId] });
+      await refreshDriveQueries(props.organizationId);
       props.onMoved?.();
       props.onOpenChange(false);
     },

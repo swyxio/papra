@@ -200,6 +200,30 @@ async function fixture() {
 }
 
 describe('D1 collaboration authorization and actual routes', () => {
+  test('workspace startup returns the current account only for an accessible workspace', async () => {
+    const f = await fixture();
+    const startup = `${f.base}?includeUser=true`;
+    const [account, space, combined] = await Promise.all([
+      f.request('/api/users/me', 'GET', undefined, 'reader'),
+      f.request(f.base, 'GET', undefined, 'reader'),
+      f.request(startup, 'GET', undefined, 'reader'),
+    ]);
+    expect(combined.status).toBe(200);
+    expect(combined.headers.get('Cache-Control')).toBe('private, no-store');
+    expect(await combined.json()).toEqual({
+      ...(await account.json<object>()),
+      ...(await space.json<object>()),
+    });
+    expect((await f.request(startup, 'GET', undefined, 'outsider')).status).toBe(403);
+    expect((await f.request(`/api/organizations/${f.personal}?includeUser=true`)).status).toBe(404);
+    f.identities.reader!.serviceScope = {
+      organizationId: f.team,
+      folderId: f.secret,
+      permissions: ['read'],
+    };
+    expect((await f.request(startup, 'GET', undefined, 'reader')).status).toBe(403);
+  });
+
   test('scoped folder reloads revalidate before reading summaries and react to content and access changes', async () => {
     const f = await fixture();
     const view = `${f.base}/folders/${f.secret}/view`;
@@ -388,6 +412,72 @@ describe('D1 collaboration authorization and actual routes', () => {
       .run();
     const revoked = (await (await f.request('/api/organizations')).json()) as any;
     expect(revoked.organizations.some((o: any) => o.id === f.team)).toBe(false);
+  });
+
+  test('file pages return rows without counting and revalidate within the current access scope', async () => {
+    const f = await fixture();
+    const base = f.base + '/documents';
+    const home = base + '?count=none&folderId=' + f.home;
+    const secret = base + '?count=none&folderId=' + f.secret;
+    const first = base + '?count=none&pageSize=1';
+    const get = async (path: string, user: string, etag?: string) =>
+      f.app.request(
+        path,
+        { headers: { 'x-test-user': user, ...(etag ? { 'If-None-Match': etag } : {}) } },
+        f.env,
+      );
+    const rows = await get(first, 'reader');
+    expect(rows.headers.get('Server-Timing')).not.toContain('count_sql');
+    expect(rows.headers.get('Cache-Control')).toBe('private, no-cache');
+    expect(await rows.json()).toEqual({ documents: [expect.anything()], hasMore: true });
+    expect(await (await get(base + '?count=only', 'reader')).json()).toEqual({ documentsCount: 3 });
+    expect(await (await get(first + '&pageIndex=2', 'reader')).json()).toEqual({
+      documents: [expect.anything()],
+      hasMore: false,
+    });
+    const homeTag = (await get(home, 'reader')).headers.get('ETag')!;
+    const secretTag = (await get(secret, 'reader')).headers.get('ETag')!;
+    expect((await get(home, 'reader', homeTag)).status).toBe(304);
+    expect((await get(home, 'owner', homeTag)).status).toBe(200);
+    expect((await get(home + '&sortOrder=asc', 'reader', homeTag)).status).toBe(200);
+
+    await f.DB.prepare("UPDATE documents SET name='Changed' WHERE id='doc_secret'").run();
+    expect((await get(home, 'reader', homeTag)).status).toBe(304);
+    const renamed = await get(secret, 'reader', secretTag);
+    expect(renamed.status).toBe(200);
+    expect(await renamed.json()).toMatchObject({ documents: [{ name: 'Changed' }] });
+    await f.DB.prepare("INSERT INTO tags VALUES('tag_cache',?,'Review',NULL,NULL,1,1)")
+      .bind(f.team)
+      .run();
+    const beforeTag = (await get(secret, 'reader')).headers.get('ETag')!;
+    await f.DB.prepare("INSERT INTO documents_tags VALUES('doc_secret','tag_cache')").run();
+    const tagged = await get(secret, 'reader', beforeTag);
+    expect(tagged.status).toBe(200);
+    expect(await tagged.json()).toMatchObject({ documents: [{ tags: [{ name: 'Review' }] }] });
+
+    await f.DB.prepare(
+      "INSERT INTO document_shortcuts VALUES('sct_cache','doc_secret',?,'owner',1)",
+    )
+      .bind(f.open)
+      .run();
+    const shortcut = base + '?count=none&folderId=' + f.open;
+    const shortcutTag = (await get(shortcut, 'reader')).headers.get('ETag')!;
+    await f.DB.prepare("UPDATE users SET name='Updated contributor' WHERE id='owner'").run();
+    expect((await get(shortcut, 'reader', shortcutTag)).status).toBe(200);
+    const beforeMove = (await get(shortcut, 'reader')).headers.get('ETag')!;
+    await f.DB.prepare("UPDATE documents SET home_folder_id=? WHERE id='doc_secret'")
+      .bind(f.deep)
+      .run();
+    expect((await get(shortcut, 'reader', beforeMove)).status).toBe(200);
+    const beforeRevoke = (await get(secret, 'reader')).headers.get('ETag')!;
+    const beforeShortcutRevoke = (await get(shortcut, 'reader')).headers.get('ETag')!;
+    await f.DB.prepare("DELETE FROM folder_acl WHERE folder_id=? AND user_id='reader'")
+      .bind(f.secret)
+      .run();
+    expect((await get(secret, 'reader', beforeRevoke)).status).toBe(404);
+    const shortcutAfterRevoke = await get(shortcut, 'reader', beforeShortcutRevoke);
+    expect(shortcutAfterRevoke.status).toBe(200);
+    expect(await shortcutAfterRevoke.json()).toEqual({ documents: [], hasMore: false });
   });
 
   test('folder-scoped file listing and all-matching batch actions preserve source permissions', async () => {

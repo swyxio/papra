@@ -38,16 +38,7 @@ export async function uploadDocument({
   });
 }
 
-export async function fetchOrganizationDocuments({
-  organizationId,
-  pageIndex,
-  pageSize,
-  searchQuery,
-  folderId,
-  includeFolderPath,
-  sortField,
-  sortOrder,
-}: {
+type DocumentListOptions = {
   organizationId: string;
   pageIndex: number;
   pageSize: number;
@@ -56,29 +47,66 @@ export async function fetchOrganizationDocuments({
   includeFolderPath?: boolean;
   sortField?: DocumentSearchSortField;
   sortOrder?: DocumentSearchSortOrder;
-}) {
-  const { documents, documentsCount } = await apiClient<{
-    documents: AsDto<Document>[];
-    documentsCount: number;
-  }>({
+};
+
+async function fetchDocumentList<T>(
+  {
+    organizationId,
+    ...query
+  }: Partial<DocumentListOptions> & {
+    organizationId: string;
+    count?: 'none' | 'only';
+  },
+  signal?: AbortSignal,
+) {
+  return apiClient<T>({
     method: 'GET',
     path: `/api/organizations/${organizationId}/documents`,
-    query: {
-      searchQuery,
-      folderId,
-      includeFolderPath,
-      pageIndex,
-      pageSize,
-      sortField,
-      sortOrder,
-    },
+    query,
+    signal,
   });
+}
 
+export async function fetchOrganizationDocuments(options: DocumentListOptions) {
+  const { documents, documentsCount } = await fetchDocumentList<{
+    documents: AsDto<Document>[];
+    documentsCount: number;
+  }>(options);
+  return { documents: documents.map(coerceDates), documentsCount };
+}
+
+export async function fetchOrganizationDocumentPage(
+  options: DocumentListOptions,
+  signal?: AbortSignal,
+) {
+  const { documents, hasMore, documentsCount } = await fetchDocumentList<{
+    documents: AsDto<Document>[];
+    hasMore?: boolean;
+    documentsCount?: number;
+  }>({ ...options, count: 'none' }, signal);
+  const offset = options.pageIndex * options.pageSize;
+  const nextPage = hasMore ?? offset + documents.length < (documentsCount ?? 0);
   return {
     documents: documents.map(coerceDates),
-    documentsCount,
+    hasMore: nextPage,
+    documentsCount:
+      documentsCount ??
+      (!nextPage && (offset === 0 || documents.length) ? offset + documents.length : undefined),
   };
 }
+
+export async function fetchOrganizationDocumentCount(
+  options: Pick<DocumentListOptions, 'organizationId' | 'folderId' | 'searchQuery'>,
+  signal: AbortSignal,
+) {
+  const { documentsCount } = await fetchDocumentList<{ documentsCount: number }>(
+    { ...options, count: 'only' },
+    signal,
+  );
+  return documentsCount;
+}
+
+export type { DocumentListOptions };
 
 export async function fetchOrganizationDeletedDocuments({
   organizationId,

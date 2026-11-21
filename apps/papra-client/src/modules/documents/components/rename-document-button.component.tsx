@@ -12,6 +12,7 @@ import { TextField, TextFieldLabel, TextFieldRoot } from '@/modules/ui/component
 import { getDocumentNameExtension, getDocumentNameWithoutExtension } from '../document.models';
 import { invalidateOrganizationDocumentsQuery } from '../documents.composables';
 import { updateDocument } from '../documents.services';
+import { patchCachedDocument } from '../document-list.queries';
 
 export const RenameDocumentDialog: Component<{
   documentId: string;
@@ -25,7 +26,8 @@ export const RenameDocumentDialog: Component<{
   const renameDocumentMutation = useMutation(() => ({
     mutationFn: async ({ name }: { name: string }) =>
       updateDocument({ documentId: props.documentId, organizationId: props.organizationId, name }),
-    onSuccess: async () => {
+    onSuccess: async ({ document }) => {
+      patchCachedDocument(document);
       createToast({
         message: t('documents.rename.success'),
         type: 'success',
