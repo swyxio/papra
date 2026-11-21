@@ -7,6 +7,7 @@ import { Button } from '../ui/components/button';
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '../ui/components/popover';
 import { createToast } from '../ui/components/sonner';
 import { driveBase } from './drive-collaboration.services';
+import { FolderHandoff } from './folder-handoff.component';
 
 type FolderLink = { token: string; url: string };
 type FolderSharing = {
@@ -23,6 +24,7 @@ export function ShareFolder(props: {
   canManagePublic: boolean;
 }) {
   const [audience, setAudience] = createSignal<Audience>();
+  const [handoffOpen, setHandoffOpen] = createSignal(false);
   const [copying, setCopying] = createSignal(false);
   const [copyFailed, setCopyFailed] = createSignal(false);
   const client = useQueryClient();
@@ -129,7 +131,10 @@ export function ShareFolder(props: {
       gutter={8}
       flip
       onOpenChange={(open) => {
-        if (!open) return;
+        if (!open) {
+          setHandoffOpen(false);
+          return;
+        }
         setCopyFailed(false);
         if (props.canManagePublic && !copying()) void client.prefetchQuery(query());
       }}
@@ -138,7 +143,7 @@ export function ShareFolder(props: {
         <div class="i-tabler-share size-4 mr-1.5" />
         Share folder
       </PopoverTrigger>
-      <PopoverContent class="w-80 max-w-[calc(100vw-1.5rem)] space-y-3">
+      <PopoverContent class="w-80 max-w-[calc(100vw-1.5rem)] max-h-[min(38rem,70dvh)] overflow-auto space-y-3">
         <PopoverTitle class="font-semibold">Share folder</PopoverTitle>
         <Show when={props.canManagePublic}>
           <label class="block space-y-1 text-sm">
@@ -233,6 +238,20 @@ export function ShareFolder(props: {
             Copy link
           </Button>
         </div>
+        <Show when={publicAllowed()}>
+          <details class="text-sm" onToggle={(event) => setHandoffOpen(event.currentTarget.open)}>
+            <summary class="cursor-pointer text-muted-foreground hover:text-foreground">
+              Handoff note and file requests
+            </summary>
+            <Show when={handoffOpen()}>
+              <FolderHandoff
+                path={path()}
+                organizationId={props.organizationId}
+                isPublic={publicActive()}
+              />
+            </Show>
+          </details>
+        </Show>
       </PopoverContent>
     </Popover>
   );

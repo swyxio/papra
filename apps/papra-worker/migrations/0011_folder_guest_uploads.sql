@@ -1,0 +1,3 @@
+CREATE TABLE IF NOT EXISTS folder_guest_uploads(id TEXT PRIMARY KEY NOT NULL,folder_id TEXT NOT NULL,organization_id TEXT NOT NULL,user_id TEXT,uploader TEXT NOT NULL,file_name TEXT NOT NULL,mime_type TEXT NOT NULL,size INTEGER NOT NULL,storage_key TEXT NOT NULL UNIQUE,multipart_id TEXT,status TEXT NOT NULL CHECK(status IN ('uploading','received','accepted','expired')),created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS folder_guest_uploads_folder_status ON folder_guest_uploads(folder_id,status,created_at);
+CREATE INDEX IF NOT EXISTS folder_guest_uploads_expiry ON folder_guest_uploads(status,created_at);

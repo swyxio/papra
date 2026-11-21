@@ -19,6 +19,7 @@ export async function downloadBytes(
   key: string,
   mime: string,
   name?: string,
+  disposition: 'attachment' | 'inline' = 'attachment',
 ) {
   const rangeHeader = request.headers.get('Range');
   const head = request.method === 'HEAD';
@@ -30,8 +31,8 @@ export async function downloadBytes(
     'Content-Type': mime,
     'Content-Length': String(object.size),
     'Content-Disposition': name
-      ? `attachment; filename*=UTF-8''${attachmentLabel(name)}`
-      : 'attachment',
+      ? `${disposition}; filename*=UTF-8''${attachmentLabel(name)}`
+      : disposition,
     'Cache-Control': 'private, no-store, no-transform',
     'Content-Security-Policy': "sandbox; default-src 'none'",
     'X-Content-Type-Options': 'nosniff',

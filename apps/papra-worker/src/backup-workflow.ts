@@ -20,6 +20,8 @@ export const SNAPSHOT_TABLES = [
   'document_views',
   'share_links',
   'folder_share_links',
+  'folder_handoffs',
+  'folder_guest_uploads',
   'service_tokens',
   'document_shortcuts',
   'comments',

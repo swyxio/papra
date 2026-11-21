@@ -126,6 +126,7 @@ async function fixture() {
     R2_ENDPOINT: 'https://r2.example',
     R2_BUCKET: 'private',
     SHARE_PASSWORD_LIMITER: { limit: async () => ({ success: true }) },
+    AUTH_LIMITER: { limit: async () => ({ success: true }) },
   } as unknown as Env;
   const app = new Hono<AppEnv>();
   app.onError((error, c) =>
@@ -1042,7 +1043,20 @@ test('a folder link grants anonymous, read-only access to the current unrestrict
   expect(listing.headers.get('cache-control')).toBe('private, no-store');
   expect(await listing.json()).toEqual({
     folder: { id: 'shared', name: 'Shared', parentId: null },
-    entries: [{ id: 'nested', name: 'Nested', kind: 'folder', versionId: null, size: null }],
+    entries: [
+      {
+        id: 'nested',
+        name: 'Nested',
+        kind: 'folder',
+        versionId: null,
+        size: null,
+        mimeType: null,
+        hasPreview: false,
+      },
+    ],
+    note: '',
+    stats: { files: 0, folders: 1, bytes: 0 },
+    intake: null,
     hasMore: false,
   });
   const child = await request(folder + '?folder=nested');
@@ -1105,4 +1119,108 @@ test('a folder link grants anonymous, read-only access to the current unrestrict
   expect((await request(download)).status).toBe(404);
   expect((await request(address)).status).toBe(404);
   expect((await request(exactDownload)).status).toBe(404);
+});
+
+test('handoff metadata, stored previews, and received files follow folder access', async () => {
+  const { DB, env, request } = await fixture();
+  await DB.batch([
+    DB.prepare(
+      "INSERT INTO folders(id,organization_id,parent_id,name,created_at,updated_at) VALUES('handoff','team','fld_home_team','Handoff',1,1)",
+    ),
+    DB.prepare(
+      "UPDATE documents SET home_folder_id='handoff',mime_type='video/mp4' WHERE id='open'",
+    ),
+    DB.prepare("UPDATE versions SET mime_type='video/mp4' WHERE id='v-open'"),
+    DB.prepare(
+      "INSERT INTO video_previews(version_id,quality,storage_key,size,sha256,created_at) VALUES('v-open','720-teaser-v2','preview/test.mp4',7,'test',1)",
+    ),
+  ]);
+  await env.FILES.put('preview/test.mp4', 'preview');
+  env.TRANSFER_JOBS =
+    env.VIDEO_JOBS =
+    env.TEXT_JOBS =
+    env.SEARCH_JOBS =
+    env.JOBS =
+      {
+        sendBatch: async () => {},
+      } as unknown as Queue;
+  const manage = '/api/organizations/team/folders/handoff/share-links';
+  const address = '/api/share-links/folders/team/handoff';
+  const video = `${address}/files/open/versions/v-open/preview`;
+  const settings = { note: 'Start with the wide angle.', fileLimit: 1, maxBytes: 1024 };
+  expect((await request(`${manage}/handoff`, 'PUT', settings, 'member')).status).toBe(403);
+  expect((await request(`${manage}/handoff`, 'PUT', settings)).status).toBe(204);
+  expect((await request(address)).status).toBe(404);
+  expect((await request(video)).status).toBe(404);
+  expect((await request(manage, 'POST')).status).toBe(201);
+  expect(await (await request(address)).json()).toMatchObject({
+    note: settings.note,
+    stats: { files: 1, folders: 0, bytes: 6 * 1024 ** 3 },
+    intake: { fileLimit: 1, maxBytes: 1024 },
+    entries: [{ id: 'open', mimeType: 'video/mp4', hasPreview: true }],
+  });
+  const runAI = vi.fn(async () => ({
+    choices: [{ message: { content: 'Start with open file.' }, finish_reason: 'stop' }],
+  }));
+  env.AI = { run: runAI } as unknown as Ai;
+  expect((await request(`${manage}/handoff/draft`, 'POST', undefined, 'member')).status).toBe(403);
+  expect(await (await request(`${manage}/handoff/draft`, 'POST')).json()).toEqual({
+    note: 'Start with open file.',
+  });
+  expect(runAI).toHaveBeenCalledTimes(1);
+  expect(await (await request(address)).json()).toMatchObject({ note: settings.note });
+  const preview = await request(video, 'GET', undefined, 'outsider', undefined, {
+    Range: 'bytes=1-3',
+  });
+  expect(preview.status).toBe(206);
+  expect(preview.headers.get('Content-Type')).toBe('video/mp4');
+  expect(preview.headers.get('Content-Disposition')).toBe('inline');
+  expect(await preview.text()).toBe('rev');
+  const file = { name: 'guest.txt', size: 5, mimeType: 'text/plain', sender: 'Guest' };
+  expect((await request(`${address}/intake`, 'POST', { ...file, size: 1025 })).status).toBe(413);
+  const starts = await Promise.all([
+    request(`${address}/intake`, 'POST', file),
+    request(`${address}/intake`, 'POST', file),
+  ]);
+  expect(starts.map(({ status }) => status).sort()).toEqual([201, 429]);
+  const { id } = await starts.find(({ status }) => status === 201)!.json<{ id: string }>();
+  const inbox = `${manage}/inbox`;
+  expect(await (await request(inbox)).json()).toEqual({ uploads: [] });
+  const row = await DB.prepare(
+    'SELECT storage_key,multipart_id FROM folder_guest_uploads WHERE id=?',
+  )
+    .bind(id)
+    .first<{ storage_key: string; multipart_id: string }>();
+  const path = `${address}/intake/${id}`;
+  expect((await request(`${path}/parts/1`, 'PUT', 'wrong length')).status).toBe(400);
+  expect((await request(`${path}/complete`, 'POST', [])).status).toBe(400);
+  const part = await env.FILES.resumeMultipartUpload(
+    row!.storage_key,
+    row!.multipart_id,
+  ).uploadPart(1, 'hello');
+  const parts = [{ partNumber: part.partNumber, etag: part.etag }];
+  const completed = await request(`${path}/complete`, 'POST', parts);
+  expect({ status: completed.status, body: await completed.text() }).toEqual({
+    status: 204,
+    body: '',
+  });
+  expect((await request(`${path}/complete`, 'POST', parts)).status).toBe(204);
+  expect((await request(inbox, 'GET', undefined, 'member')).status).toBe(403);
+  expect(await (await request(inbox)).json()).toMatchObject({
+    uploads: [{ id, name: file.name, uploader: 'Guest', verified: false, size: 5 }],
+  });
+  expect(await (await request(`${inbox}/${id}/download`)).text()).toBe('hello');
+  const guestDownload = `${address}/files/doc_${id}/versions/ver_${id}/download`;
+  expect((await request(guestDownload)).status).toBe(404);
+  const accepts = await Promise.all([
+    request(`${inbox}/${id}/accept`, 'POST'),
+    request(`${inbox}/${id}/accept`, 'POST'),
+  ]);
+  expect(accepts.map(({ status }) => status)).toEqual([204, 204]);
+  expect(await (await request(guestDownload)).text()).toBe('hello');
+  expect(await (await request(inbox)).json()).toEqual({ uploads: [] });
+  await DB.prepare("DELETE FROM folder_share_links WHERE folder_id='handoff'").run();
+  expect((await request(video)).status).toBe(404);
+  expect((await request(`${address}/intake`, 'POST', file)).status).toBe(404);
+  expect((await request(guestDownload)).status).toBe(404);
 });
