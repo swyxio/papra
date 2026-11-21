@@ -942,7 +942,7 @@ test('members publish their own uploads but lose public delegation with folder w
 });
 
 test('a folder link grants anonymous, read-only access to the current unrestricted subtree', async () => {
-  const { DB, env, request } = await fixture();
+  const { DB, env, request, identities } = await fixture();
   await DB.batch([
     DB.prepare(
       "INSERT INTO folders(id,organization_id,parent_id,name,created_at,updated_at) VALUES('shared','team','fld_home_team','Shared',1,1)",
@@ -979,6 +979,27 @@ test('a folder link grants anonymous, read-only access to the current unrestrict
   expect(await secondCopy.json()).toEqual({ link });
   expect(await (await request(manage)).json()).toEqual({ canShare: true, link });
 
+  const sharePage = `/sf/${link.token}`;
+  const unavailableTitle = 'Folder link unavailable — SwyxDrive';
+  expect(await pageMetadata(env, sharePage)).toEqual({
+    title: 'Shared — SwyxDrive',
+    description: 'Browse and download files in this shared folder on SwyxDrive.',
+    url: link.url,
+    image: 'https://drive.example/og-swyxdrive.png',
+    imageAlt: 'SwyxDrive — Documents, sharing & signing',
+  });
+  await DB.prepare('UPDATE folders SET name=? WHERE id=?').bind('New name & more', 'shared').run();
+  expect((await pageMetadata(env, sharePage + '/')).title).toBe('New name & more — SwyxDrive');
+  await DB.prepare("UPDATE folders SET name='Shared' WHERE id='shared'").run();
+  expect((await pageMetadata(env, '/sf/invalid-folder-link')).title).toBe(unavailableTitle);
+  for (const identity of [undefined, identities.owner]) {
+    expect(await pageMetadata(env, '/orgs/team/documents', identity, 'shared')).toEqual({
+      title: 'Private folder — SwyxDrive',
+      description: 'Sign in with an account that has access to view this folder.',
+      url: 'https://drive.example/orgs/team/documents?folder=shared',
+    });
+  }
+
   const folder = `/api/share-links/folder/${link.token}`;
   const listing = await request(folder);
   expect(listing.status).toBe(200);
@@ -1012,6 +1033,7 @@ test('a folder link grants anonymous, read-only access to the current unrestrict
   expect(await range.text()).toBe('file');
 
   await DB.prepare("UPDATE folders SET is_restricted=1 WHERE id='shared'").run();
+  expect((await pageMetadata(env, sharePage)).title).toBe(unavailableTitle);
   expect((await request(folder)).status).toBe(404);
   expect((await request(download)).status).toBe(404);
   await DB.prepare("UPDATE folders SET is_restricted=0 WHERE id='shared'").run();
@@ -1030,6 +1052,7 @@ test('a folder link grants anonymous, read-only access to the current unrestrict
     403,
   );
   expect((await request(manage + '/' + link.token, 'DELETE')).status).toBe(204);
+  expect((await pageMetadata(env, sharePage)).title).toBe(unavailableTitle);
   expect((await request(folder)).status).toBe(404);
   expect((await request(download)).status).toBe(404);
 });

@@ -140,7 +140,10 @@ app.all('*', async (c) => {
   const response = await c.env.ASSETS.fetch(c.req.raw);
   if (!response.headers.get('Content-Type')?.includes('text/html')) return response;
   const identity = isDocumentPage(c.req.path) ? await getIdentity(c.req.raw, c.env) : null;
-  return rewritePageMetadata(response, await pageMetadata(c.env, c.req.path, identity));
+  return rewritePageMetadata(
+    response,
+    await pageMetadata(c.env, c.req.path, identity, c.req.query('folder')),
+  );
 });
 app.onError((err, c) => {
   if (err instanceof HTTPException) return c.json({ message: err.message }, err.status);
