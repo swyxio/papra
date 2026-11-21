@@ -278,8 +278,16 @@ export const DocumentsPaginatedList: Component<{
   setRowSelection?: Setter<RowSelectionState>;
   getSorting?: Accessor<SortingState>;
   setSorting?: Setter<SortingState>;
+  previewedVideoId?: string;
+  onPreviewVideo?: (document: Document, trigger: HTMLButtonElement) => void;
 }> = (props) => {
   const { t } = useI18n();
+  const columnClass = (id: string) => {
+    if (id === 'name') return '';
+    if (id === 'select' || id === 'actions')
+      return cn('w-10', !props.previewedVideoId && 'sm:w-auto');
+    return props.previewedVideoId ? 'hidden' : 'hidden sm:table-cell';
+  };
   const table = createSolidTable({
     get data() {
       return props.documents ?? [];
@@ -303,7 +311,10 @@ export const DocumentsPaginatedList: Component<{
             <div class="min-w-0 flex-1 flex flex-col gap-1 truncate">
               <A
                 href={`/organizations/${data.row.original.organizationId}/documents/${data.row.original.id}`}
-                class="font-bold truncate block hover:underline"
+                class={cn(
+                  'font-bold block hover:underline',
+                  props.previewedVideoId ? 'whitespace-normal break-words' : 'truncate',
+                )}
                 title={data.row.original.name}
               >
                 {getDocumentNameWithoutExtension({
@@ -336,6 +347,26 @@ export const DocumentsPaginatedList: Component<{
                 </Show>
               </div>
             </div>
+            <Show
+              when={
+                props.onPreviewVideo &&
+                data.row.original.currentVersionId &&
+                data.row.original.mimeType.startsWith('video/')
+              }
+            >
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                class="shrink-0 px-2"
+                aria-label={`Preview ${data.row.original.name}`}
+                aria-pressed={props.previewedVideoId === data.row.original.id}
+                onClick={(event) => props.onPreviewVideo?.(data.row.original, event.currentTarget)}
+              >
+                <span class="i-tabler-player-play size-4" aria-hidden="true" />
+                <span class="ml-1 hidden sm:inline">Preview</span>
+              </Button>
+            </Show>
           </div>
         ),
       },
@@ -378,7 +409,7 @@ export const DocumentsPaginatedList: Component<{
             (props.getPagination?.().pageIndex ?? 0) > 0
           }
         >
-          <Table class="table-fixed sm:table-auto">
+          <Table class={props.previewedVideoId ? 'table-fixed' : 'table-fixed sm:table-auto'}>
             <TableHeader>
               <For each={table.getHeaderGroups()}>
                 {(headerGroup) => (
@@ -386,13 +417,7 @@ export const DocumentsPaginatedList: Component<{
                     <For each={headerGroup.headers}>
                       {(header) => {
                         return (
-                          <TableHead
-                            class={cn(
-                              !['select', 'name', 'actions'].includes(header.column.id) &&
-                                'hidden sm:table-cell',
-                              ['select', 'actions'].includes(header.column.id) && 'w-10 sm:w-auto',
-                            )}
-                          >
+                          <TableHead class={columnClass(header.column.id)}>
                             <Show when={!header.isPlaceholder}>
                               <Show
                                 when={header.column.getCanSort()}
@@ -435,13 +460,7 @@ export const DocumentsPaginatedList: Component<{
                     const cells = () => (
                       <For each={row.getVisibleCells()}>
                         {(cell) => (
-                          <TableCell
-                            class={cn(
-                              !['select', 'name', 'actions'].includes(cell.column.id) &&
-                                'hidden sm:table-cell',
-                              ['select', 'actions'].includes(cell.column.id) && 'w-10 sm:w-auto',
-                            )}
-                          >
+                          <TableCell class={columnClass(cell.column.id)}>
                             {flexRender(cell.column.columnDef.cell, cell.getContext())}
                           </TableCell>
                         )}

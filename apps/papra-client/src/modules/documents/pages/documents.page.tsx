@@ -36,6 +36,7 @@ import { createToast } from '@/modules/ui/components/sonner';
 import { Skeleton } from '@/modules/ui/components/skeleton';
 import { TextField, TextFieldRoot } from '@/modules/ui/components/textfield';
 import { DocumentMoveDialog } from '../components/document-move-dialog.component';
+import { SignedInFolderPreview } from '../components/signed-in-folder-preview.component';
 import { DocumentsBatchTagDialog } from '../components/documents-batch-tag-dialog.component';
 import {
   uploadedByColumn,
@@ -187,6 +188,27 @@ export const DocumentsPage: Component = () => {
     () => allFiles() || (Boolean(queryFolderId()) && !isPendingFolderId(queryFolderId())),
   );
   const { query: documentsQuery, data: documentsData } = listing;
+  const [previewedVideoId, setPreviewedVideoId] = createSignal<string>();
+  let previewTrigger: HTMLButtonElement | undefined;
+  const previewedVideo = createMemo(() =>
+    documentsData()?.documents.find(
+      (file) =>
+        file.id === previewedVideoId() &&
+        file.currentVersionId &&
+        file.mimeType.startsWith('video/'),
+    ),
+  );
+  const previewIdentity = createMemo(() => {
+    const file = previewedVideo();
+    return file && `${file.id}:${file.currentVersionId}`;
+  });
+  createEffect(() => {
+    if (previewedVideoId() && !previewedVideo()) setPreviewedVideoId(undefined);
+  });
+  const closePreview = () => {
+    setPreviewedVideoId(undefined);
+    previewTrigger?.focus();
+  };
   const [lastOpenedFolder, setLastOpenedFolder] = createSignal<string>();
   createEffect(() => {
     const folder = queryFolderId();
@@ -262,6 +284,7 @@ export const DocumentsPage: Component = () => {
       getListingScope,
       () => {
         clearSelection();
+        setPreviewedVideoId(undefined);
         setPagination((current) => ({ ...current, pageIndex: 0 }));
       },
       { defer: true },
@@ -797,27 +820,51 @@ export const DocumentsPage: Component = () => {
               </p>
             </Show>
             <Show when={documentsData()}>
-              <DocumentsPaginatedList
-                documents={documentsData()?.documents ?? []}
-                documentsCount={listing.total()}
-                hasMore={documentsData()?.hasMore}
-                onNextPageIntent={listing.prefetchNext}
-                getPagination={getPagination}
-                setPagination={setPagination}
-                enableBatchSelection
-                enableContextMenu
-                getRowSelection={getRowSelection}
-                setRowSelection={setRowSelection}
-                getSorting={getSorting}
-                setSorting={setSorting}
-                extraColumns={[
-                  uploadedByColumn,
-                  modifiedByColumn,
-                  sizeColumn,
-                  modifiedAtColumn,
-                  standardActionsColumn,
-                ]}
-              />
+              <div
+                classList={{
+                  'grid gap-5 items-start': Boolean(previewedVideo()),
+                  'xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]':
+                    Boolean(previewedVideo()) && !askOpen(),
+                }}
+              >
+                <Show when={previewIdentity()} keyed>
+                  {(_identity) => (
+                    <SignedInFolderPreview file={previewedVideo()!} onClose={closePreview} />
+                  )}
+                </Show>
+                <div class="min-w-0">
+                  <DocumentsPaginatedList
+                    documents={documentsData()?.documents ?? []}
+                    documentsCount={listing.total()}
+                    hasMore={documentsData()?.hasMore}
+                    onNextPageIntent={listing.prefetchNext}
+                    getPagination={getPagination}
+                    setPagination={setPagination}
+                    enableBatchSelection
+                    enableContextMenu
+                    getRowSelection={getRowSelection}
+                    setRowSelection={setRowSelection}
+                    getSorting={getSorting}
+                    setSorting={setSorting}
+                    previewedVideoId={previewedVideo()?.id}
+                    onPreviewVideo={(file, trigger) => {
+                      if (file.id === previewedVideoId()) {
+                        closePreview();
+                        return;
+                      }
+                      previewTrigger = trigger;
+                      setPreviewedVideoId(file.id);
+                    }}
+                    extraColumns={[
+                      uploadedByColumn,
+                      modifiedByColumn,
+                      sizeColumn,
+                      modifiedAtColumn,
+                      standardActionsColumn,
+                    ]}
+                  />
+                </div>
+              </div>
             </Show>
 
             <div
