@@ -47,17 +47,26 @@ export const SNAPSHOT_TABLES = [
   'feedback_runs',
   'feedback_events',
 ] as const;
+// Auth state and derived caches restore their schema and rebuild their data.
+const SCHEMA_ONLY_TABLES = [
+  'auth_oauth_states',
+  'feedback_transfer_failures',
+  'documents_fts',
+  'folder_cache_revisions',
+  'drive_document_list_revisions',
+  'drive_contributor_revision',
+] as const;
 export function snapshotPrefix(date: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('invalid_snapshot_date');
   return `_backup_${date.replaceAll('-', '')}_`;
 }
 export async function captureSnapshot(DB: D1Database, date: string) {
   const prefix = snapshotPrefix(date),
-    quoted = SNAPSHOT_TABLES.map((x) => `'${x}'`).join(',');
+    quoted = [...SNAPSHOT_TABLES, ...SCHEMA_ONLY_TABLES].map((x) => `'${x}'`).join(',');
   await DB.batch([
     DB.prepare(`CREATE TABLE IF NOT EXISTS ${prefix}capture AS SELECT ${Date.now()} captured_at`),
     DB.prepare(
-      `CREATE TABLE IF NOT EXISTS ${prefix}schema AS SELECT type,name,tbl_name,sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE '_backup_%' AND name NOT LIKE '_cf_%' AND (tbl_name IN (${quoted},'auth_oauth_states','feedback_transfer_failures','documents_fts','folder_cache_revisions') OR name='documents_fts') AND name NOT GLOB 'documents_fts_*' ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 ELSE 2 END,rowid`,
+      `CREATE TABLE IF NOT EXISTS ${prefix}schema AS SELECT type,name,tbl_name,sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE '_backup_%' AND name NOT LIKE '_cf_%' AND (tbl_name IN (${quoted}) OR name='documents_fts') AND name NOT GLOB 'documents_fts_*' ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 ELSE 2 END,rowid`,
     ),
     ...SNAPSHOT_TABLES.map((table) =>
       DB.prepare(
