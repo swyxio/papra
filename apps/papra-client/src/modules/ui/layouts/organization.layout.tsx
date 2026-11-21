@@ -330,6 +330,7 @@ export const OrganizationLayout: ParentComponent = (props) => {
 
 const OrganizationLayoutImportButton: Component = () => {
   const params = useParams();
+  const { t } = useI18n();
   const { uploadDocuments, promptImport, promptFolderImport } = useDocumentUpload();
 
   return (
@@ -339,9 +340,13 @@ const OrganizationLayoutImportButton: Component = () => {
         organizationId={params.organizationId}
         trigger={(openGoogleImport) => (
           <DropdownMenu>
-            <DropdownMenuTrigger as={Button} class="px-2.5 sm:px-4" aria-label="New / Import">
+            <DropdownMenuTrigger
+              as={Button}
+              class="px-2.5 sm:px-4"
+              aria-label={t('layout.menu.import-document')}
+            >
               <div class="i-tabler-upload size-4" />
-              <span class="hidden sm:inline ml-2">New / Import</span>
+              <span class="hidden sm:inline ml-2">{t('layout.menu.import-document')}</span>
               <div class="i-tabler-chevron-down size-4 ml-2" />
             </DropdownMenuTrigger>
             <DropdownMenuContent>
