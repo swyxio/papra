@@ -13,6 +13,7 @@ import { registerUploadRoutes } from './uploads';
 import { registerProcessingRoutes } from './processing';
 import { registerCollaborationRoutes } from './collaboration';
 import { registerShareRoutes } from './shares';
+import { expireGuestUploads, guestUploadPartBytes } from './folder-guest-uploads';
 import { registerFolderShareRoutes } from './folder-shares';
 import { registerSearchRoutes } from './search';
 import { consumeJobs, housekeeping } from './jobs';
@@ -29,7 +30,16 @@ export { ImageProcessorContainer, ContainerProxy } from '../native/container';
 export { MetadataBackupWorkflow } from './backup-workflow';
 const app = new Hono<AppEnv>();
 registerCanonicalOrigin(app);
-app.use('/api/*', bodyLimit({ maxSize: 1024 ** 2 }));
+const jsonBodyLimit = bodyLimit({ maxSize: 1024 ** 2 });
+const guestPartLimit = bodyLimit({ maxSize: guestUploadPartBytes });
+app.use('/api/*', async (c, next) =>
+  (c.req.method === 'PUT' &&
+    /^\/api\/share-links\/(?:folder\/[^/]+|folders\/[^/]+\/[^/]+)\/intake\/guest_[a-f0-9]{24}\/parts\/\d+$/.test(
+      c.req.path,
+    )
+    ? guestPartLimit
+    : jsonBodyLimit)(c, next),
+);
 app.use('/api/*', async (c, next) => {
   c.header('Cache-Control', 'no-store');
   c.header('X-Content-Type-Options', 'nosniff');
@@ -173,6 +183,7 @@ export default {
   scheduled: async (_event: ScheduledController, env: Env, ctx: ExecutionContext) => {
     ctx.waitUntil(processFeedbackWork(env));
     ctx.waitUntil(expireTransferFailures(env));
+    ctx.waitUntil(expireGuestUploads(env));
     ctx.waitUntil(Promise.all([housekeeping(env), purgeExpiredTrash(env), repairSigning(env)]));
   },
 };

@@ -13,7 +13,9 @@ import {
 
 export { folderTree } from './drive-export.services';
 
-type ZipDocument = Pick<Document, 'id' | 'name' | 'currentVersionId' | 'originalSize'>;
+type ZipDocument = Pick<Document, 'id' | 'name' | 'currentVersionId' | 'originalSize'> & {
+  downloadUrl?: string;
+};
 type SaveWindow = Window & {
   showSaveFilePicker?: (options: Record<string, unknown>) => Promise<{
     createWritable: () => Promise<WritableStream<Uint8Array> & { close: () => Promise<void> }>;
@@ -57,7 +59,7 @@ export async function saveDocumentsZip({
   collect,
   onProgress,
 }: {
-  organizationId: string;
+  organizationId?: string;
   fileName: string;
   directories?: string[] | (() => Promise<string[]>);
   collect: (add: (document: ZipDocument, directory?: string) => Promise<void>) => Promise<void>;
@@ -98,7 +100,8 @@ export async function saveDocumentsZip({
       await writer.add(
         names(directory, zipSafeName(document.name, document.id)),
         fetchExportStream(
-          versionDownloadHref(organizationId, document.id, document.currentVersionId),
+          document.downloadUrl ??
+            versionDownloadHref(organizationId!, document.id, document.currentVersionId),
           document.originalSize,
           undefined,
           onProgress &&
