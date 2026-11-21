@@ -4,7 +4,7 @@ import { createEffect, createMemo, createSignal, For, on, Show } from 'solid-js'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/solid-query';
 import {
   driveBase,
-  fetchFolders,
+  folderTreeQuery,
   folderPath,
 } from '@/modules/drive-collaboration/drive-collaboration.services';
 import { blockedMoveTargets } from '@/modules/drive-collaboration/drive-folders.models';
@@ -38,8 +38,7 @@ export const DocumentMoveDialog: Component<{
   const [page, setPage] = createSignal(0);
   const [selected, setSelected] = createSignal<string[]>([]);
   const folders = useQuery(() => ({
-    queryKey: ['organizations', props.organizationId, 'folders'],
-    queryFn: async () => fetchFolders(props.organizationId),
+    ...folderTreeQuery(props.organizationId),
     enabled: props.open,
   }));
   const files = useQuery(() => ({

@@ -1,4 +1,5 @@
-import type { App, Env, Identity } from './types';
+import type { Context } from 'hono';
+import type { App, AppEnv, Env, Identity } from './types';
 import { HTTPException } from 'hono/http-exception';
 import { getDocument } from './db';
 import { enqueueVersion } from './jobs';
@@ -152,6 +153,15 @@ export async function canWriteFolder(env: Env, identity: Identity, folderId: str
 }
 export async function canReadFolder(env: Env, identity: Identity, folderId: string) {
   return (await folderAccess(env, identity, folderId, 'read')).folder;
+}
+
+export async function readableFolderPath(env: Env, identity: Identity, folderId: string) {
+  const { chain } = await folderAccess(env, identity, folderId, 'read');
+  return chain
+    .slice()
+    .reverse()
+    .map(({ name }) => name)
+    .join(' / ');
 }
 
 export async function folderSharingAccess(
@@ -333,28 +343,231 @@ export async function recordDocumentActivity(
   return activityId;
 }
 
+type FolderSummaryRow = {
+  folder_id: string;
+  documents_count: number;
+  documents_size: number;
+  shortcuts_count: number;
+  last_activity_at: number | null;
+};
+
+async function folderSummaryRows(
+  env: Env,
+  org: string,
+  predicate: SqlPredicate,
+  folderIds?: string[],
+) {
+  const scoped = folderIds
+    ? `scope AS (SELECT value FROM json_each(?)), candidate_files AS (
+        SELECT d.id FROM scope JOIN documents d ON d.organization_id=? AND d.home_folder_id=scope.value AND d.is_deleted=0
+        UNION
+        SELECT s.document_id FROM scope JOIN document_shortcuts s ON s.folder_id=scope.value
+      ), `
+    : '';
+  const { results } = await env.DB.prepare(`
+      WITH ${scoped}visible_files AS (
+        SELECT d.id,d.home_folder_id,d.updated_at,coalesce(v.size,0) size
+        FROM ${folderIds ? 'candidate_files JOIN documents d ON d.id=candidate_files.id' : 'documents d'}
+        LEFT JOIN versions v ON v.id=d.current_version_id
+        WHERE d.organization_id=? AND d.is_deleted=0 AND (${predicate.sql})
+      ), entries AS (
+        SELECT home_folder_id folder_id,size,updated_at,0 is_shortcut FROM visible_files ${folderIds ? 'WHERE home_folder_id IN (SELECT value FROM scope)' : ''}
+        UNION ALL
+        SELECT s.folder_id,0,d.updated_at,1 FROM document_shortcuts s JOIN visible_files d ON d.id=s.document_id
+        WHERE s.folder_id<>d.home_folder_id ${folderIds ? 'AND s.folder_id IN (SELECT value FROM scope)' : ''}
+      )
+      SELECT folder_id,sum(CASE WHEN is_shortcut=0 THEN 1 ELSE 0 END) documents_count,
+        sum(size) documents_size,sum(is_shortcut) shortcuts_count,max(updated_at) last_activity_at
+      FROM entries GROUP BY folder_id`)
+    .bind(...(folderIds ? [JSON.stringify(folderIds), org] : []), org, ...predicate.bindings)
+    .all<FolderSummaryRow>();
+  return results;
+}
+
+function rollupFolderSummaries(folders: FolderRow[], rows: FolderSummaryRow[]) {
+  const summaries = new Map(rows.map((row) => [row.folder_id, row]));
+  // Roll up direct file bytes through the readable tree. A scoped token can start below home.
+  const sizes = new Map(
+    folders.map((folder) => [folder.id, summaries.get(folder.id)?.documents_size ?? 0]),
+  );
+  const children = new Map<string, FolderRow[]>();
+  const treeOrder: FolderRow[] = [];
+  for (const folder of folders) {
+    if (!folder.parent_id || !sizes.has(folder.parent_id)) {
+      treeOrder.push(folder);
+      continue;
+    }
+    const siblings = children.get(folder.parent_id) ?? [];
+    siblings.push(folder);
+    children.set(folder.parent_id, siblings);
+  }
+  for (let index = 0; index < treeOrder.length; index++) {
+    for (const child of children.get(treeOrder[index]!.id) ?? []) treeOrder.push(child);
+  }
+  for (const folder of treeOrder.reverse()) {
+    const parent = folder.parent_id;
+    if (parent && sizes.has(parent)) sizes.set(parent, sizes.get(parent)! + sizes.get(folder.id)!);
+  }
+
+  return { summaries, sizes, children };
+}
+
+// Check access before using a validator. The epoch changes in the same SQLite
+// transaction as tree, file, shortcut, size and ACL edits, including edits by jobs.
+async function folderNotModified(
+  context: Context<AppEnv>,
+  folder: FolderRow,
+  access: OrganizationAccess,
+  kind: 'view' | 'summary',
+) {
+  const identity = context.get('identity');
+  const { env } = context;
+  const epoch = await env.DB.prepare(
+    'SELECT revision FROM folder_cache_revisions WHERE organization_id=?',
+  )
+    .bind(folder.organization_id)
+    .first<string>('revision');
+  context.header('Cache-Control', 'private, no-cache');
+  context.header('Vary', 'Cookie, Authorization', { append: true });
+  if (!epoch) return false;
+  const key = JSON.stringify([
+    env.SOURCE_SHA,
+    kind,
+    folder.id,
+    identity.userId,
+    identity.serviceScope,
+    access,
+    epoch,
+  ]);
+  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(key));
+  const etag =
+    '"' +
+    Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('') +
+    '"';
+  context.header('ETag', etag);
+  const validators = context.req
+    .header('If-None-Match')
+    ?.split(',')
+    .map((tag) => tag.trim().replace(/^W\//, ''));
+  return validators?.includes(etag) ?? false;
+}
+
+const scopedFolderSql = `WITH RECURSIVE subtree(id) AS (
+  SELECT ? UNION
+  SELECT f.id FROM folders f JOIN subtree s ON coalesce(f.parent_id,'')=s.id WHERE f.organization_id=?
+)`;
+
 export function registerCollaborationRoutes(app: App) {
   const base = '/api/organizations/:organizationId';
+  app.get(`${base}/folders/:folderId/view`, async (context) => {
+    const { env } = context;
+    const identity = context.get('identity');
+    const org = context.req.param('organizationId');
+    const { folder, access, chain } = await folderAccess(
+      env,
+      identity,
+      context.req.param('folderId'),
+      'read',
+    );
+    if (folder.organization_id !== org) fail(404, 'Folder not found');
+    if (await folderNotModified(context, folder, access, 'view')) return context.body(null, 304);
+    const scopedRoot = identity.serviceScope?.folderId;
+    const breadcrumb = (
+      scopedRoot ? chain.slice(0, chain.findIndex((entry) => entry.id === scopedRoot) + 1) : chain
+    )
+      .slice()
+      .reverse();
+    const read = documentPermissionPredicate(identity, org, 'd', 'read', access);
+    const canWrite = !identity.serviceScope || identity.serviceScope.permissions.includes('write');
+    const write = canWrite
+      ? documentPermissionPredicate(identity, org, 'd', 'write', access)
+      : { sql: '0', bindings: [] };
+    const { results } = await env.DB.prepare(`
+      SELECT d.*,(${write.sql}) can_write FROM (
+        SELECT f.*,f.id AS home_folder_id FROM folders f WHERE f.organization_id=? AND coalesce(f.parent_id,'')=?
+        UNION ALL
+        SELECT f.*,f.id AS home_folder_id FROM json_each(?) chain JOIN folders f ON f.id=chain.value
+      ) d WHERE (${read.sql}) ORDER BY d.name COLLATE NOCASE,d.id`)
+      .bind(
+        ...write.bindings,
+        org,
+        folder.id,
+        JSON.stringify(breadcrumb.map(({ id }) => id)),
+        ...read.bindings,
+      )
+      .all<FolderRow & { can_write: number }>();
+    if (!results.some((entry) => entry.id === folder.id)) fail(404, 'Folder not found');
+    const ancestorRestrictions = new Map(
+      breadcrumb.map((entry) => [
+        entry.id,
+        chain.slice(chain.indexOf(entry)).some((ancestor) => ancestor.is_restricted),
+      ]),
+    );
+    const restricted = chain.some((entry) => entry.is_restricted);
+    const view = {
+      folders: results.map((entry) => ({
+        ...folderDto(entry),
+        canWrite: !!entry.can_write,
+        effectiveRestricted:
+          ancestorRestrictions.get(entry.id) ?? (restricted || !!entry.is_restricted),
+      })),
+      canManageAccess:
+        !identity.serviceScope && (elevated(access.role) || !!access.personalOwnerId),
+      isPersonal: !!access.personalOwnerId,
+    };
+    return context.json(view);
+  });
+  app.get(`${base}/folders/:folderId/summary`, async (context) => {
+    const { env } = context;
+    const identity = context.get('identity');
+    const org = context.req.param('organizationId');
+    const { folder, access } = await folderAccess(
+      env,
+      identity,
+      context.req.param('folderId'),
+      'read',
+    );
+    if (folder.organization_id !== org) fail(404, 'Folder not found');
+    if (await folderNotModified(context, folder, access, 'summary')) return context.body(null, 304);
+    const read = documentPermissionPredicate(identity, org, 'd', 'read', access);
+    const { results } = await env.DB.prepare(`${scopedFolderSql}
+      SELECT d.* FROM (SELECT f.*,f.id AS home_folder_id FROM subtree JOIN folders f ON f.id=subtree.id) d
+      WHERE d.organization_id=? AND (${read.sql})`)
+      .bind(folder.id, org, org, ...read.bindings)
+      .all<FolderRow>();
+    const rows = await folderSummaryRows(
+      env,
+      org,
+      read,
+      results.map(({ id }) => id),
+    );
+    const { summaries, sizes, children } = rollupFolderSummaries(results, rows);
+    return context.json({
+      folders: results
+        .filter((entry) => entry.id === folder.id || entry.parent_id === folder.id)
+        .map((entry) => ({
+          id: entry.id,
+          documentsCount: summaries.get(entry.id)?.documents_count ?? 0,
+          documentsSize: sizes.get(entry.id) ?? 0,
+          shortcutsCount: summaries.get(entry.id)?.shortcuts_count ?? 0,
+          subfoldersCount: children.get(entry.id)?.length ?? 0,
+          lastActivityAt: iso(summaries.get(entry.id)?.last_activity_at ?? null),
+        })),
+    });
+  });
   app.get(`${base}/folders`, async (context) => {
     const identity = context.get('identity');
     const org = context.req.param('organizationId');
-    await ensureOrganizationMember(context.env, identity, org);
-    const predicate = await permittedDocumentPredicateSQL(context.env, identity, org);
+    const access = await organizationAccess(context.env, identity, org);
+    const predicate = documentPermissionPredicate(identity, org, 'd', 'read', access);
     const { results } = await context.env.DB.prepare(
       `SELECT d.*,EXISTS (${ancestorCte('d')} SELECT 1 FROM permission_ancestors a WHERE a.is_restricted=1) effective_restricted FROM (SELECT f.*,f.id AS home_folder_id FROM folders f) d WHERE d.organization_id=? AND (${predicate.sql}) ORDER BY d.name COLLATE NOCASE`,
     )
       .bind(org, ...predicate.bindings)
       .all<FolderRow & { effective_restricted: number }>();
-    const access = await organizationAccess(context.env, identity, org);
     const writableIds = new Set<string>();
     if (!identity.serviceScope || identity.serviceScope.permissions.includes('write')) {
-      const writePredicate = await permittedDocumentPredicateSQL(
-        context.env,
-        identity,
-        org,
-        'd',
-        'write',
-      );
+      const writePredicate = documentPermissionPredicate(identity, org, 'd', 'write', access);
       const writable = await context.env.DB.prepare(
         `SELECT d.id FROM (SELECT f.*,f.id AS home_folder_id FROM folders f) d WHERE d.organization_id=? AND (${writePredicate.sql})`,
       )
@@ -362,52 +575,10 @@ export function registerCollaborationRoutes(app: App) {
         .all<{ id: string }>();
       for (const folder of writable.results) writableIds.add(folder.id);
     }
-    const summary = await context.env.DB.prepare(`
-      WITH visible_files AS (
-        SELECT d.id,d.home_folder_id,d.updated_at,coalesce(v.size,0) size
-        FROM documents d LEFT JOIN versions v ON v.id=d.current_version_id
-        WHERE d.organization_id=? AND d.is_deleted=0 AND (${predicate.sql})
-      ), entries AS (
-        SELECT home_folder_id folder_id,size,updated_at,0 is_shortcut FROM visible_files
-        UNION ALL
-        SELECT s.folder_id,0,d.updated_at,1 FROM document_shortcuts s JOIN visible_files d ON d.id=s.document_id
-        WHERE s.folder_id<>d.home_folder_id
-      )
-      SELECT folder_id,sum(CASE WHEN is_shortcut=0 THEN 1 ELSE 0 END) documents_count,
-        sum(size) documents_size,sum(is_shortcut) shortcuts_count,max(updated_at) last_activity_at
-      FROM entries GROUP BY folder_id`)
-      .bind(org, ...predicate.bindings)
-      .all<{
-        folder_id: string;
-        documents_count: number;
-        documents_size: number;
-        shortcuts_count: number;
-        last_activity_at: number | null;
-      }>();
-    const summaries = new Map(summary.results.map((row) => [row.folder_id, row]));
-    // Roll up direct file bytes through the readable tree. A scoped token can start below home.
-    const sizes = new Map(
-      results.map((folder) => [folder.id, summaries.get(folder.id)?.documents_size ?? 0]),
+    const { summaries, sizes } = rollupFolderSummaries(
+      results,
+      await folderSummaryRows(context.env, org, predicate),
     );
-    const children = new Map<string, FolderRow[]>();
-    const treeOrder: FolderRow[] = [];
-    for (const folder of results) {
-      if (!folder.parent_id || !sizes.has(folder.parent_id)) {
-        treeOrder.push(folder);
-        continue;
-      }
-      const siblings = children.get(folder.parent_id) ?? [];
-      siblings.push(folder);
-      children.set(folder.parent_id, siblings);
-    }
-    for (let index = 0; index < treeOrder.length; index++) {
-      for (const child of children.get(treeOrder[index]!.id) ?? []) treeOrder.push(child);
-    }
-    for (const folder of treeOrder.reverse()) {
-      const parent = folder.parent_id;
-      if (parent && sizes.has(parent))
-        sizes.set(parent, sizes.get(parent)! + sizes.get(folder.id)!);
-    }
 
     return context.json({
       folders: results.map((folder) => ({
@@ -545,7 +716,7 @@ export function registerCollaborationRoutes(app: App) {
     const now = Date.now();
     const results = await context.env.DB.batch([
       context.env.DB.prepare(
-        `${subtreeCte} UPDATE documents SET is_deleted=1,deleted_at=?,deleted_by=?,updated_at=?,home_folder_id=? WHERE organization_id=? AND is_deleted=0 AND home_folder_id IN (SELECT id FROM subtree) AND ${unrestricted}`,
+        `${subtreeCte} UPDATE documents SET is_deleted=1,deleted_at=?,deleted_by=?,updated_at=?,home_folder_id=? WHERE organization_id=? AND is_deleted=0 AND home_folder_id IN (SELECT id FROM subtree) AND ${unrestricted} RETURNING id`,
       ).bind(folder.id, now, identity.userId, now, folder.parent_id, org),
       context.env.DB.prepare(
         `${subtreeCte} UPDATE documents SET home_folder_id=? WHERE organization_id=? AND home_folder_id IN (SELECT id FROM subtree) AND ${unrestricted}`,
@@ -563,7 +734,7 @@ export function registerCollaborationRoutes(app: App) {
     // Search namespaces follow the home folder; reindex so restored files stay searchable.
     for (const { current_version_id } of rehomed)
       await enqueueVersion(context.env, current_version_id, 'index').catch(() => {});
-    return context.json({ success: true, trashedDocuments: results[0]?.meta.changes ?? 0 });
+    return context.json({ success: true, trashedDocuments: results[0].results.length });
   });
   app.get(`${base}/folders/:folderId/permissions`, async (context) => {
     const identity = context.get('identity');

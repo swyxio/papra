@@ -1,12 +1,17 @@
+import type { FolderView } from '@/modules/drive-collaboration/drive-collaboration.services';
 import { DriveSpaceCapabilities } from '@/modules/drive-capabilities';
-import { fetchFolders } from '@/modules/drive-collaboration/drive-collaboration.services';
+import {
+  FOLDER_FRESHNESS_MS,
+  folderViewQuery,
+  homeFolderId,
+} from '@/modules/drive-collaboration/drive-collaboration.services';
 import { isPendingFolderId } from '@/modules/drive-collaboration/drive-folders.models';
 import { DriveFolders } from '@/modules/drive-collaboration/drive-folders.component';
 import { DriveExport } from '../components/drive-export.component';
 import { saveDocumentsZip, zipProgressText } from '../components/drive-zip-download';
 import { useDownloadDocument } from '../documents.composables';
 import { apiClient } from '@/modules/shared/http/api-client';
-import { getHttpErrorMessage } from '@/modules/shared/http/http-errors';
+import { getHttpErrorMessage, isHttpErrorWithStatusCode } from '@/modules/shared/http/http-errors';
 import type { RowSelectionState, SortingState } from '@tanstack/solid-table';
 import type { Component, Setter } from 'solid-js';
 import type { Document } from '../documents.types';
@@ -58,15 +63,11 @@ const searchTips =
 export const DocumentsPage: Component = () => {
   const params = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const foldersQuery = useQuery(() => ({
-    queryKey: ['organizations', params.organizationId, 'folders'],
-    queryFn: async () => fetchFolders(params.organizationId),
-  }));
   const allFiles = () => searchParams.scope === 'all' || getSearchQuery().trim().length > 0;
   const selectedFolderId = () =>
     typeof searchParams.folder === 'string'
       ? searchParams.folder
-      : foldersQuery.data?.folders.find((folder) => folder.isHome)?.id;
+      : homeFolderId(params.organizationId);
   const queryFolderId = () => (allFiles() ? undefined : selectedFolderId());
   const setScope = (all: boolean) =>
     setSearchParams({ scope: all ? 'all' : undefined, query: undefined, page: undefined });
@@ -83,6 +84,7 @@ export const DocumentsPage: Component = () => {
   const [getTagDialogOpen, setTagDialogOpen] = createSignal(false);
   const [moveOpen, setMoveOpen] = createSignal(false);
   const [renameOpen, setRenameOpen] = createSignal(false);
+  const [showAutomation, setShowAutomation] = createSignal(false);
   const [getFolderSelection, setFolderSelection] = createSignal<Record<string, boolean>>({});
   const getSelectedFolderIds = createMemo(() => {
     const selection = getFolderSelection();
@@ -150,6 +152,7 @@ export const DocumentsPage: Component = () => {
 
   const documentsQuery = useQuery(() => ({
     enabled: allFiles() || (Boolean(queryFolderId()) && !isPendingFolderId(queryFolderId())),
+    staleTime: FOLDER_FRESHNESS_MS,
     queryKey: [
       'organizations',
       params.organizationId,
@@ -173,7 +176,12 @@ export const DocumentsPage: Component = () => {
 
   // Reading `data` while pending would suspend the router transition and hold the previous
   // folder on screen, so pending folders render skeletons immediately instead.
-  const documentsData = () => (documentsQuery.isPending ? undefined : documentsQuery.data);
+  const accessLost = () =>
+    [401, 403, 404].some((statusCode) =>
+      isHttpErrorWithStatusCode({ error: documentsQuery.error, statusCode }),
+    );
+  const documentsData = () =>
+    documentsQuery.isPending || accessLost() ? undefined : documentsQuery.data;
   const [lastOpenedFolder, setLastOpenedFolder] = createSignal<string>();
   createEffect(() => {
     const folder = queryFolderId();
@@ -357,9 +365,12 @@ export const DocumentsPage: Component = () => {
         return;
       }
     }
+    const view = queryClient.getQueryData<FolderView>(
+      folderViewQuery(params.organizationId, selectedFolderId()).queryKey,
+    );
     const folderName = allFiles()
       ? undefined
-      : foldersQuery.data?.folders.find((folder) => folder.id === queryFolderId())?.name;
+      : view?.folders.find((folder) => folder.id === selectedFolderId())?.name;
     const total = getEffectiveCount();
     setDownloadStatus('Preparing download…');
     try {
@@ -501,12 +512,19 @@ export const DocumentsPage: Component = () => {
             </div>
           </div>
         </details>
-        <details class="flex-1">
+        <details
+          class="flex-1"
+          onToggle={(event) => {
+            if (event.currentTarget.open) setShowAutomation(true);
+          }}
+        >
           <summary class="cursor-pointer hover:text-foreground">
             Semantic search, document answers and automation
           </summary>
           <div class="mt-4 text-foreground">
-            <DriveSpaceCapabilities organizationId={params.organizationId} />
+            <Show when={showAutomation()}>
+              <DriveSpaceCapabilities organizationId={params.organizationId} />
+            </Show>
           </div>
         </details>
       </div>
@@ -858,13 +876,12 @@ export const DocumentsPage: Component = () => {
               </For>
             </div>
           </Show>
-          <Show when={documentsQuery.isError || foldersQuery.isError}>
+          <Show when={documentsQuery.isError}>
             <p role="alert" class="my-4 text-sm">
               Could not load files.{' '}
               <button
                 class="underline"
                 onClick={() => {
-                  void foldersQuery.refetch();
                   void documentsQuery.refetch();
                 }}
               >
@@ -876,7 +893,6 @@ export const DocumentsPage: Component = () => {
             when={
               !documentsQuery.isPending &&
               !documentsQuery.isError &&
-              !foldersQuery.isError &&
               documentsData()?.documents.length === 0 &&
               !debouncedSearchQuery().trim()
             }

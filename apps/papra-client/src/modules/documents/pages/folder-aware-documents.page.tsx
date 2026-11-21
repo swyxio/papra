@@ -2,8 +2,8 @@ import { useParams, useSearchParams } from '@solidjs/router';
 import { useQuery } from '@tanstack/solid-query';
 import { createEffect, Match, Switch } from 'solid-js';
 import { SharedFolderPage } from '@/modules/document-share-links/pages/shared-folder.page';
-import { fetchFolders } from '@/modules/drive-collaboration/drive-collaboration.services';
 import { useLastOrganization } from '@/modules/organizations/composables/use-last-organization';
+import { organizationQueryOptions } from '@/modules/organizations/organizations.services';
 import { isHttpErrorWithStatusCode } from '@/modules/shared/http/http-errors';
 import { Button } from '@/modules/ui/components/button';
 import { OrganizationLayout } from '@/modules/ui/layouts/organization.layout';
@@ -27,22 +27,19 @@ export function FolderAwareDocumentsPage() {
   const params = useParams<{ organizationId: string }>();
   const [search] = useSearchParams();
   const isFolderLink = () => typeof search.folder === 'string' && Boolean(search.folder);
-  // Use the same folder query as the workspace view, which keeps in-app
-  // navigation instant and lets a signed-in visitor without membership use the public view.
-  const folders = useQuery(() => ({
-    queryKey: ['organizations', params.organizationId, 'folders'],
+  // Membership selects the shell. Folder and file endpoints enforce access to the requested folder.
+  const workspace = useQuery(() => ({
+    ...organizationQueryOptions(params.organizationId, false),
     enabled: isFolderLink(),
-    queryFn: async () => fetchFolders(params.organizationId, false),
     retry: false,
-    staleTime: 5_000,
   }));
   const guest = () =>
     [401, 403, 404].some((statusCode) =>
-      isHttpErrorWithStatusCode({ error: folders.error, statusCode }),
+      isHttpErrorWithStatusCode({ error: workspace.error, statusCode }),
     );
   return (
     <Switch>
-      <Match when={!isFolderLink() || folders.data}>
+      <Match when={!isFolderLink() || (!guest() && !workspace.isPending && workspace.data)}>
         <WorkspaceDocumentsPage organizationId={params.organizationId} />
       </Match>
       <Match when={guest()}>
@@ -50,17 +47,17 @@ export function FolderAwareDocumentsPage() {
           <SharedFolderPage organizationId={params.organizationId} />
         </PublicLayout>
       </Match>
-      <Match when={folders.isError}>
+      <Match when={workspace.isError}>
         <PublicLayout>
           <main class="mx-auto max-w-4xl space-y-3 p-4 sm:p-8">
             <p role="alert">Could not open this folder.</p>
-            <Button variant="outline" onClick={() => void folders.refetch()}>
+            <Button variant="outline" onClick={() => void workspace.refetch()}>
               Try again
             </Button>
           </main>
         </PublicLayout>
       </Match>
-      <Match when={folders.isPending}>
+      <Match when={workspace.isPending}>
         <PublicLayout>
           <p role="status" class="mx-auto max-w-4xl p-4 sm:p-8 text-muted-foreground">
             Opening folder…

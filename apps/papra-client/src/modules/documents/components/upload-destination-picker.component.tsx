@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/solid-query';
 import { createSignal, For, Show } from 'solid-js';
 import {
   driveBase,
-  fetchFolders,
+  folderTreeQuery,
   folderPath,
 } from '@/modules/drive-collaboration/drive-collaboration.services';
 import { apiClient } from '@/modules/shared/http/api-client';
@@ -16,8 +16,7 @@ export const UploadDestinationPicker: Component<{ organizationId: string }> = (p
   const [creating, setCreating] = createSignal(false);
   const [name, setName] = createSignal('');
   const folders = useQuery(() => ({
-    queryKey: ['organizations', props.organizationId, 'folders'],
-    queryFn: async () => fetchFolders(props.organizationId),
+    ...folderTreeQuery(props.organizationId),
   }));
   const destination = () =>
     typeof params.folder === 'string'

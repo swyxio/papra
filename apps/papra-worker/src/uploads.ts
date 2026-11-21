@@ -4,6 +4,7 @@ import { all, first, id, error, formatDocument, getDocument } from './db';
 import {
   ensureDocumentAccess,
   canReadFolder,
+  readableFolderPath,
   canWriteFolder,
   ensureOrganizationMember,
   organizationHomeFolderId,
@@ -57,6 +58,17 @@ async function owned(env: Env, user: Identity, org: string, upload: string) {
   if (folder.organization_id !== org) throw error(403, 'Folder access denied');
   if (u.replacement) await ensureDocumentAccess(env, user, u.document_id, 'write');
   return u;
+}
+function uploadFolderPaths(env: Env, identity: Identity) {
+  const paths = new Map<string, Promise<string | null>>();
+  return async (folderId: string) => {
+    if (!paths.has(folderId))
+      paths.set(
+        folderId,
+        readableFolderPath(env, identity, folderId).catch(() => null),
+      );
+    return paths.get(folderId)!;
+  };
 }
 async function prepareCompletion(env: Env, user: Identity, u: Record<string, any>) {
   if (u.status === 'complete') return [];
@@ -177,18 +189,7 @@ export function registerUploadRoutes(app: App) {
       folder.id,
       org,
     );
-    const access = new Map<string, Promise<boolean>>();
-    const readable = async (folderId: string) => {
-      if (!access.has(folderId))
-        access.set(
-          folderId,
-          canReadFolder(c.env, identity, folderId).then(
-            () => true,
-            () => false,
-          ),
-        );
-      return access.get(folderId)!;
-    };
+    const folderPath = uploadFolderPaths(c.env, identity);
     const writable = new Map<string, Promise<boolean>>();
     const canRemove = async (row: { user_id: string; folder_id: string }) => {
       if (row.user_id === identity.userId) return true;
@@ -205,7 +206,8 @@ export function registerUploadRoutes(app: App) {
     const rows = [];
     for (const row of candidates) {
       if (rows.length > 100) break;
-      if (await readable(row.folder_id)) rows.push({ ...row, removable: await canRemove(row) });
+      const path = await folderPath(row.folder_id);
+      if (path) rows.push({ ...row, path, removable: await canRemove(row) });
     }
     c.header('Cache-Control', 'private, no-store');
     return c.json({
@@ -213,6 +215,7 @@ export function registerUploadRoutes(app: App) {
         id: row.id,
         folderId: row.folder_id,
         canRemove: row.removable,
+        folderPath: row.path,
         fileName: row.file_name,
         size: row.size,
         createdAt: row.created_at,
@@ -269,11 +272,12 @@ export function registerUploadRoutes(app: App) {
       c.get('identity').userId,
       c.req.param('org'),
     );
+    const folderPath = uploadFolderPaths(c.env, c.get('identity'));
     const visible = [];
     for (const u of uploads) {
       try {
         await owned(c.env, c.get('identity'), c.req.param('org'), u.id);
-        visible.push(dto(u));
+        visible.push({ ...dto(u), folderPath: await folderPath(u.folder_id) });
       } catch {}
     }
     return c.json({ uploads: visible });

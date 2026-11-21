@@ -41,7 +41,7 @@ import {
 import { selectRange } from '@/modules/drive-collaboration/drive-folders.models';
 import { useQuery } from '@tanstack/solid-query';
 import {
-  fetchFolders,
+  folderTreeQuery,
   folderPath,
 } from '@/modules/drive-collaboration/drive-collaboration.services';
 import { DocumentManagementDropdown } from './document-management-dropdown.component';
@@ -138,8 +138,7 @@ export const locationColumn: ColumnDef<Document> = {
   cell: (data) => {
     const organizationId = data.row.original.organizationId;
     const folders = useQuery(() => ({
-      queryKey: ['organizations', organizationId, 'folders'],
-      queryFn: async () => fetchFolders(organizationId),
+      ...folderTreeQuery(organizationId),
     }));
     const folder = () =>
       folders.data?.folders.find((item) => item.id === data.row.original.homeFolderId);

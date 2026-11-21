@@ -59,7 +59,7 @@ export async function saveDocumentsZip({
 }: {
   organizationId: string;
   fileName: string;
-  directories?: string[];
+  directories?: string[] | (() => Promise<string[]>);
   collect: (add: (document: ZipDocument, directory?: string) => Promise<void>) => Promise<void>;
   onProgress?: (progress: ZipProgress) => void;
 }) {
@@ -78,12 +78,12 @@ export async function saveDocumentsZip({
     : new ZipWriter(blobWriter!, { zip64: true });
   const progress = { done: 0, skipped: 0 };
   const seen = new Set<string>();
-  const names = createZipEntryNamer(directories);
   let bytes = 0;
   try {
     onProgress?.({ ...progress, phase: 'listing' });
-    for (const directory of directories)
-      await writer.add(directory, undefined, { directory: true });
+    const paths = typeof directories === 'function' ? await directories() : directories;
+    const names = createZipEntryNamer(paths);
+    for (const directory of paths) await writer.add(directory, undefined, { directory: true });
     await collect(async (document, directory = '') => {
       if (seen.has(document.id)) return;
       seen.add(document.id);
