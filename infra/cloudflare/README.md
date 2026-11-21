@@ -52,7 +52,9 @@ The initial D1 schema is `apps/papra-worker/schema.sql`. It initializes a new em
 
 ## Recovery
 
-Daily Workflow snapshots write a complete manifest only after every table page and row count matches the captured clone. Each version has a separate original backup copy and an independent streamed checksum receipt. Restore metadata into a new D1 database, keep the same document/version IDs, restore backup originals to their recorded primary keys, then repoint bindings and verify permissions, FTS, permanent links and file hashes before using the restored deployment. D1 Time Travel is an additional provider recovery path.
+Daily Workflow snapshots claim one D1 staging slot in the same transaction that captures the tables. A retry of the same date can reuse its capture. If a snapshot stalls, diagnose and resume that exact Workflow instance. The slot prevents another date from allocating a full copy while the first is unresolved. Each exported page is checksum-validated on write to private R2, and the complete manifest records the page hashes and table counts. The slot and its staging tables are retired together after the complete manifest is saved.
+
+For a retained historical capture, export the exact dated set to private R2 and verify full readback, table checksums, and an isolated restore before retiring its staging tables. Use a reviewed set of exact table names for cleanup. Keep the snapshot archive and verification receipt alongside each other. Each version has a separate original backup copy and an independent streamed checksum receipt. Restore metadata into a new D1 database, keep the same document/version IDs, restore backup originals to their recorded primary keys, then repoint bindings and verify permissions, FTS, permanent links and file hashes before using the restored deployment. D1 Time Travel is an additional provider recovery path.
 
 Secrets and Google callback configuration must remain stable across recovery. A metadata manifest is not proof of successful restoration; consult executed restore receipts in VERIFICATION.md. Do not publish or deploy a partially restored snapshot.
 

@@ -2,7 +2,12 @@ import { Miniflare } from 'miniflare';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, test, vi } from 'vitest';
-import { captureSnapshot, exportSnapshotPage, SNAPSHOT_TABLES } from './backup-workflow';
+import {
+  captureSnapshot,
+  exportSnapshotPage,
+  retireSnapshot,
+  SNAPSHOT_TABLES,
+} from './backup-workflow';
 
 vi.mock('cloudflare:workers', () => ({ WorkflowEntrypoint: class {} }));
 
@@ -53,6 +58,12 @@ test('atomic snapshot remains consistent through live edits, retries, and restor
   await DB.prepare("DELETE FROM tags WHERE id='t0'").run();
   const retried = await captureSnapshot(DB, '2026-09-16');
   expect(retried).toEqual(capture);
+  await expect(captureSnapshot(DB, '2026-09-17')).rejects.toThrow();
+  expect(
+    await DB.prepare(
+      "SELECT count(*) n FROM sqlite_schema WHERE name GLOB '_backup_20260917_*'",
+    ).first('n'),
+  ).toBe(0);
   const objects = new Map<string, string>(),
     BACKUPS = {
       put: async (key: string, value: string) => {
@@ -72,6 +83,11 @@ test('atomic snapshot remains consistent through live edits, retries, and restor
         cursor,
         page,
       );
+      const digest = await crypto.subtle.digest(
+        'SHA-256',
+        new TextEncoder().encode(objects.get(result.key)!),
+      );
+      expect(result.sha256).toBe(Buffer.from(digest).toString('hex'));
       cursor = result.cursor;
       rows += result.count;
       page++;
@@ -118,4 +134,7 @@ test('atomic snapshot remains consistent through live edits, retries, and restor
   expect(
     await restored.prepare('SELECT count(*) FROM feedback_transfer_failures').first('count(*)'),
   ).toBe(0);
+  await retireSnapshot(DB, capture.date);
+  const tomorrow = await captureSnapshot(DB, '2026-09-17');
+  expect(tomorrow.tables.find((table) => table.table === 'tags')?.rows).toBe(1040);
 }, 60000);
