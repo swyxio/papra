@@ -31,7 +31,10 @@ import { useLastOrganization } from './modules/organizations/composables/use-las
 import { fetchOrganizations } from './modules/organizations/organizations.services';
 import { MembersPage } from './modules/organizations/pages/members.page';
 import { OrganizationPage } from './modules/organizations/pages/organization.page';
-import { OrganizationsSettingsPage } from './modules/organizations/pages/organizations-settings.page';
+import {
+  OrganizationAutomationSettingsPage,
+  OrganizationsSettingsPage,
+} from './modules/organizations/pages/organizations-settings.page';
 import { OrganizationsPage } from './modules/organizations/pages/organizations.page';
 import { AboutPage } from './modules/shared/pages/about.page';
 import { NotFoundPage } from './modules/shared/pages/not-found.page';
@@ -209,6 +212,7 @@ export const routes: RouteDefinition[] = [
                 path: '/',
                 component: OrganizationsSettingsPage,
               },
+              { path: '/automation', component: OrganizationAutomationSettingsPage },
             ],
           },
         ],

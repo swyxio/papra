@@ -331,7 +331,6 @@ export const OrganizationLayout: ParentComponent = (props) => {
 const OrganizationLayoutImportButton: Component = () => {
   const params = useParams();
   const { uploadDocuments, promptImport, promptFolderImport } = useDocumentUpload();
-  const { t } = useI18n();
 
   return (
     <>
@@ -340,15 +339,21 @@ const OrganizationLayoutImportButton: Component = () => {
         organizationId={params.organizationId}
         trigger={(openGoogleImport) => (
           <DropdownMenu>
-            <DropdownMenuTrigger as={Button} class="px-2.5 sm:px-4" aria-label="Import a document">
+            <DropdownMenuTrigger as={Button} class="px-2.5 sm:px-4" aria-label="New / Import">
               <div class="i-tabler-upload size-4" />
-              <span class="hidden sm:inline ml-2">{t('layout.menu.import-document')}</span>
+              <span class="hidden sm:inline ml-2">New / Import</span>
               <div class="i-tabler-chevron-down size-4 ml-2" />
             </DropdownMenuTrigger>
             <DropdownMenuContent>
               <DropdownMenuItem onSelect={promptImport}>Upload files</DropdownMenuItem>
               <DropdownMenuItem onSelect={promptFolderImport}>Upload a folder</DropdownMenuItem>
               <DropdownMenuItem onSelect={openGoogleImport}>Import Google Doc URL</DropdownMenuItem>
+              <DropdownMenuItem
+                as={A}
+                href={`/organizations/${params.organizationId}/documents/new`}
+              >
+                Create from template
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         )}

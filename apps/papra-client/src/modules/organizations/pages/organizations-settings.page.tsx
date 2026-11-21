@@ -9,6 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/modules/ui/components/card';
+import { AutomationAccess } from '@/modules/drive-capabilities/automation-access.component';
 import { fetchOrganization } from '../organizations.services';
 
 export const OrganizationsSettingsPage: Component = () => {
@@ -41,11 +42,38 @@ export const OrganizationsSettingsPage: Component = () => {
                 >
                   View members
                 </A>
+                <div class="space-y-1 border-t pt-4">
+                  <A
+                    class="text-primary underline"
+                    href={`/organizations/${params.organizationId}/settings/automation`}
+                  >
+                    Automation access
+                  </A>
+                  <p class="text-sm text-muted-foreground">
+                    Manage folder access for scripts and integrations.
+                  </p>
+                </div>
               </CardContent>
             </Card>
           )}
         </Show>
       </Suspense>
+    </div>
+  );
+};
+
+export const OrganizationAutomationSettingsPage: Component = () => {
+  const params = useParams();
+  return (
+    <div class="mx-auto w-full max-w-screen-md space-y-5 p-6 pb-20">
+      <A
+        class="text-sm text-muted-foreground hover:underline"
+        href={`/organizations/${params.organizationId}/settings`}
+      >
+        Space settings
+      </A>
+      <h1 class="text-xl font-semibold">Automation access</h1>
+      <AutomationAccess organizationId={params.organizationId} />
     </div>
   );
 };
