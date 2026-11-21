@@ -33,6 +33,7 @@ import { Checkbox, CheckboxControl } from '../ui/components/checkbox';
 import { DocumentMoveDialog } from '../documents/components/document-move-dialog.component';
 import { DriveInbox } from './drive-inbox.component';
 import { FolderUploads } from './folder-uploads.component';
+import { ShareFolder } from './share-folder.component';
 import {
   folderTree,
   listFolderDocuments,
@@ -625,6 +626,18 @@ export const DriveFolders: Component<{
                   <div class="i-tabler-download size-4" />
                 </Button>
               )}
+            </Show>
+            <Show
+              when={
+                folders.data?.canManageAccess &&
+                current() &&
+                !current()?.isHome &&
+                !isPendingFolderId(folderId()) &&
+                folderId()
+              }
+              keyed
+            >
+              {(id) => <ShareFolder organizationId={props.organizationId} folderId={id} />}
             </Show>
             <Show when={current()?.canWrite}>
               <Button size="sm" onClick={() => setShowCreate(!showCreate())}>

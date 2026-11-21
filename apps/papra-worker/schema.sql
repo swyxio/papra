@@ -74,3 +74,4 @@ CREATE INDEX IF NOT EXISTS feedback_runs_by_state ON feedback_runs(state,updated
 CREATE TABLE IF NOT EXISTS feedback_events(bug_id TEXT NOT NULL REFERENCES feedback_bugs(id),generation INTEGER NOT NULL,status TEXT NOT NULL,created_at INTEGER NOT NULL,PRIMARY KEY(bug_id,generation,status));
 CREATE TABLE IF NOT EXISTS feedback_transfer_failures(operation_id TEXT PRIMARY KEY, observation TEXT NOT NULL, observed_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS feedback_transfer_expiry ON feedback_transfer_failures(observed_at);
+CREATE TABLE IF NOT EXISTS folder_share_links(folder_id TEXT PRIMARY KEY NOT NULL REFERENCES folders(id) ON DELETE CASCADE, token TEXT NOT NULL UNIQUE, created_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE);

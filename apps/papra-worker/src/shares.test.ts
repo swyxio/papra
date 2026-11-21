@@ -5,6 +5,7 @@ import { HTTPException } from 'hono/http-exception';
 import { Miniflare } from 'miniflare';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { hashSharePassword, registerShareRoutes, verifySharePassword } from './shares';
+import { registerFolderShareRoutes } from './folder-shares';
 import { pageMetadata, rewritePageMetadata } from './page-metadata';
 import { registerDocumentRoutes } from './documents';
 import { consumeJobs } from './jobs';
@@ -135,6 +136,7 @@ async function fixture() {
     await next();
   });
   registerShareRoutes(app);
+  registerFolderShareRoutes(app);
   registerDocumentRoutes(app);
   const request = async (
     path: string,
@@ -937,4 +939,93 @@ test('members publish their own uploads but lose public delegation with folder w
       )
     ).status,
   ).toBe(204);
+});
+
+test('a folder link grants anonymous, read-only access to the current unrestricted subtree', async () => {
+  const { DB, env, request } = await fixture();
+  await DB.batch([
+    DB.prepare(
+      "INSERT INTO folders(id,organization_id,parent_id,name,created_at,updated_at) VALUES('shared','team','fld_home_team','Shared',1,1)",
+    ),
+    DB.prepare(
+      "INSERT INTO folders(id,organization_id,parent_id,name,created_at,updated_at) VALUES('nested','team','shared','Nested',1,1)",
+    ),
+    DB.prepare("UPDATE folders SET parent_id='shared' WHERE id='restricted'"),
+    DB.prepare("UPDATE documents SET home_folder_id='nested' WHERE id='open'"),
+    DB.prepare(
+      "INSERT INTO document_shortcuts(id,folder_id,document_id,created_by,created_at) VALUES('shortcut','shared','secret','owner',1)",
+    ),
+    DB.prepare(
+      "INSERT INTO versions(id,document_id,storage_key,original_name,size,created_by,created_at) VALUES('historical','open','historical/open','historical.pdf',4,'owner',1)",
+    ),
+  ]);
+  await env.FILES.put('original/open', 'sample file');
+  await env.FILES.put('original/secret', 'private file');
+  const manage = '/api/organizations/team/folders/shared/share-links';
+  expect((await request(manage, 'POST', undefined, 'member')).status).toBe(403);
+  expect((await request(manage, 'GET', undefined, 'outsider')).status).toBe(403);
+  expect((await request(manage.replace('/team/', '/personal/'), 'POST')).status).toBe(404);
+  expect((await request(manage.replace('/shared/', '/fld_home_team/'), 'POST')).status).toBe(404);
+  expect((await request(manage.replace('/shared/', '/restricted/'), 'POST')).status).toBe(409);
+
+  const created = await request(manage, 'POST');
+  expect(created.status).toBe(201);
+  const { link } = await created.json<{ link: { token: string; url: string } }>();
+  expect(link.url).toBe(`https://drive.example/sf/${link.token}`);
+  expect((await request(manage, 'POST')).status).toBe(409);
+  expect(await (await request(manage)).json()).toEqual({ canShare: true, link });
+
+  const folder = `/api/share-links/folder/${link.token}`;
+  const listing = await request(folder);
+  expect(listing.status).toBe(200);
+  expect(listing.headers.get('cache-control')).toBe('private, no-store');
+  expect(await listing.json()).toEqual({
+    folder: { id: 'shared', name: 'Shared', parentId: null },
+    entries: [{ id: 'nested', name: 'Nested', kind: 'folder', versionId: null, size: null }],
+    hasMore: false,
+  });
+  const child = await request(folder + '?folder=nested');
+  expect(await child.json()).toMatchObject({
+    folder: { id: 'nested', name: 'Nested', parentId: 'shared' },
+    entries: [{ id: 'open', name: 'open file', kind: 'file', versionId: 'v-open' }],
+  });
+  for (const target of ['restricted', 'fld_home_team', 'fld_home_personal'])
+    expect((await request(`${folder}?folder=${target}`)).status).toBe(404);
+  for (const [doc, version] of [
+    ['secret', 'v-secret'],
+    ['private', 'v-private'],
+    ['open', 'historical'],
+  ])
+    expect((await request(`${folder}/files/${doc}/versions/${version}/download`)).status).toBe(404);
+
+  const download = `${folder}/files/open/versions/v-open/download`;
+  const range = await request(download, 'GET', undefined, 'outsider', undefined, {
+    Range: 'bytes=7-',
+  });
+  expect(range.status).toBe(206);
+  expect(range.headers.get('content-range')).toBe('bytes 7-10/11');
+  expect(range.headers.get('content-disposition')).toMatch(/^attachment;/);
+  expect(await range.text()).toBe('file');
+
+  await DB.prepare("UPDATE folders SET is_restricted=1 WHERE id='shared'").run();
+  expect((await request(folder)).status).toBe(404);
+  expect((await request(download)).status).toBe(404);
+  await DB.prepare("UPDATE folders SET is_restricted=0 WHERE id='shared'").run();
+
+  await DB.prepare("UPDATE documents SET home_folder_id='fld_home_team' WHERE id='open'").run();
+  expect((await request(download)).status).toBe(404);
+  await DB.prepare(
+    "UPDATE documents SET home_folder_id='nested',is_deleted=1 WHERE id='open'",
+  ).run();
+  expect((await request(download)).status).toBe(404);
+  await DB.prepare("UPDATE documents SET is_deleted=0 WHERE id='open'").run();
+  await DB.prepare("UPDATE users SET disabled_at=1 WHERE id='owner'").run();
+  expect((await request(folder)).status).toBe(404);
+  await DB.prepare("UPDATE users SET disabled_at=NULL WHERE id='owner'").run();
+  expect((await request(manage + '/' + link.token, 'DELETE', undefined, 'member')).status).toBe(
+    403,
+  );
+  expect((await request(manage + '/' + link.token, 'DELETE')).status).toBe(204);
+  expect((await request(folder)).status).toBe(404);
+  expect((await request(download)).status).toBe(404);
 });

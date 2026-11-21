@@ -154,6 +154,20 @@ export async function canReadFolder(env: Env, identity: Identity, folderId: stri
   return (await folderAccess(env, identity, folderId, 'read')).folder;
 }
 
+export async function folderSharingAccess(
+  env: Env,
+  identity: Identity,
+  organizationId: string,
+  folderId: string,
+) {
+  if (identity.serviceScope) fail(403, 'Use your account to manage folder links');
+  const { folder, access, chain } = await folderAccess(env, identity, folderId, 'read');
+  if (folder.organization_id !== organizationId || folder.is_home) fail(404, 'Folder not found');
+  if (!elevated(access.role) && access.personalOwnerId !== identity.userId)
+    fail(403, 'Only space administrators can manage public folder links');
+  return { folder, canShare: chain.every((ancestor) => !ancestor.is_restricted) };
+}
+
 function ancestorCte(alias: string) {
   return `WITH RECURSIVE permission_ancestors AS (
     SELECT f.id,f.organization_id,f.parent_id,f.is_home,f.is_restricted FROM folders f WHERE f.id=${alias}.home_folder_id AND f.organization_id=${alias}.organization_id
