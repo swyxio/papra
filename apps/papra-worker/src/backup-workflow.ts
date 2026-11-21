@@ -19,6 +19,7 @@ export const SNAPSHOT_TABLES = [
   'document_custom_properties',
   'document_views',
   'share_links',
+  'folder_share_links',
   'service_tokens',
   'document_shortcuts',
   'comments',

@@ -21,6 +21,7 @@ import { CustomPropertiesPage } from './modules/custom-properties/pages/custom-p
 import { UpdateCustomPropertyPage } from './modules/custom-properties/pages/update-custom-property.page';
 import { OrganizationShareLinksPage } from './modules/document-share-links/pages/organization-share-links.page';
 import { SharedDocumentPage } from './modules/document-share-links/pages/shared-document.page';
+import { SharedFolderPage } from './modules/document-share-links/pages/shared-folder.page';
 import { DocumentViewPage } from './modules/document-views/pages/document-view.page';
 import { DeletedDocumentsPage } from './modules/documents/pages/deleted-documents.page';
 import { DocumentPdfViewerPage } from './modules/documents/pages/document-pdf-viewer.page';
@@ -291,6 +292,14 @@ export const routes: RouteDefinition[] = [
     // Public document share page — accessible to anyone (logged in or not), no auth guard.
     path: '/s/:token/:title?',
     component: SharedDocumentPage,
+  },
+  {
+    path: '/sf/:token',
+    component: () => (
+      <PublicLayout>
+        <SharedFolderPage />
+      </PublicLayout>
+    ),
   },
   {
     path: '*404',
