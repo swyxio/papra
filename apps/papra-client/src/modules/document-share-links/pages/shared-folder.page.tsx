@@ -17,6 +17,7 @@ import {
 } from '@/modules/documents/components/drive-zip-download';
 import { getHttpErrorMessage, isHttpErrorWithStatusCode } from '@/modules/shared/http/http-errors';
 import { Button } from '@/modules/ui/components/button';
+import { FolderVideoPreview } from '@/modules/documents/components/folder-video-preview.component';
 import { GuestUpload } from './guest-upload.component';
 
 type SharedFile = {
@@ -248,36 +249,22 @@ export function SharedFolderPage(props: { organizationId?: string } = {}) {
             >
               <Show when={playing()} keyed>
                 {(file) => (
-                  <section
-                    class="min-w-0 rounded-lg border bg-card overflow-hidden"
-                    aria-label="Video preview"
-                  >
-                    <video
-                      class="block aspect-video w-full bg-black"
-                      controls
-                      playsinline
-                      autoplay
-                      src={fileUrl(base(), file, 'preview')}
-                      aria-label={file.name}
-                    />
-                    <div class="flex flex-wrap items-center justify-between gap-3 p-3">
-                      <p class="min-w-0 break-words text-sm font-medium">{file.name}</p>
-                      <div class="flex flex-wrap gap-2">
-                        <Button variant="ghost" size="sm" onClick={() => setPreview(undefined)}>
-                          Close preview
-                        </Button>
-                        <Button
-                          as="a"
-                          variant="outline"
-                          size="sm"
-                          href={fileUrl(base(), file, 'download')}
-                          download={file.name}
-                        >
-                          Download original
-                        </Button>
-                      </div>
-                    </div>
-                  </section>
+                  <FolderVideoPreview
+                    name={file.name}
+                    source={{ url: fileUrl(base(), file, 'preview') }}
+                    onClose={() => setPreview(undefined)}
+                    actions={
+                      <Button
+                        as="a"
+                        variant="outline"
+                        size="sm"
+                        href={fileUrl(base(), file, 'download')}
+                        download={file.name}
+                      >
+                        Download original
+                      </Button>
+                    }
+                  />
                 )}
               </Show>
               <section class="min-w-0">

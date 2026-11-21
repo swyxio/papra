@@ -631,6 +631,69 @@ try {
   process.stdout.write(
     'Chrome verified immediate folder link copy during publishing and retry after a stalled clipboard.\n',
   );
+
+  const videos = ['front', 'wide'].map((angle) => ({
+    ...makeDocument(`doc_${angle}`, `${angle}.mp4`, 64),
+    currentVersionId: `ver_${angle}`,
+    mimeType: 'video/mp4',
+  }));
+  documents.unshift(...videos);
+  const previewRequests = [];
+  await uploader.route(`${origin}/api/organizations/org_test/documents/*/media`, async (route) => {
+    const { pathname } = new URL(route.request().url());
+    const doc = videos.find((file) => pathname.endsWith(`/${file.id}/media`));
+    assert.ok(doc);
+    assert.equal(route.request().method(), 'GET');
+    previewRequests.push(doc.id);
+    return route.fulfill({
+      json: { url: `${origin}/fixture-video/${doc.id}.mp4`, versionId: doc.currentVersionId },
+    });
+  });
+  // Keep the media requests open while checking that the player is mounted and replaced.
+  const mediaRequests = [];
+  await uploader.route(
+    `${origin}/fixture-video/*`,
+    async (route) =>
+      new Promise((resolve) => {
+        mediaRequests.push({ route, resolve });
+      }),
+  );
+  await uploader.goto(shareUrl);
+  const front = uploader.getByRole('button', { name: 'Preview front.mp4' });
+  const wide = uploader.getByRole('button', { name: 'Preview wide.mp4' });
+  const previewPanel = uploader.getByRole('region', { name: 'Video preview' });
+  await expect(front).toBeVisible();
+  assert.deepEqual(previewRequests, []);
+  await front.click();
+  await expect(previewPanel.locator('video')).toHaveAttribute('src', /doc_front\.mp4$/);
+  await expect(previewPanel).toBeFocused();
+  await expect(front).toHaveAttribute('aria-pressed', 'true');
+  const playerBounds = await previewPanel.boundingBox();
+  const listBounds = await uploader.getByRole('table').boundingBox();
+  assert.ok(playerBounds.x + playerBounds.width <= listBounds.x);
+  await wide.click();
+  await expect(previewPanel.locator('video')).toHaveAttribute('src', /doc_wide\.mp4$/);
+  await expect(previewPanel.getByRole('link', { name: 'Open details' })).toHaveAttribute(
+    'href',
+    /doc_wide$/,
+  );
+  await expect(previewPanel.getByRole('button', { name: 'Download original' })).toBeVisible();
+  assert.deepEqual(previewRequests, ['doc_front', 'doc_wide']);
+  await uploader.setViewportSize({ width: 390, height: 844 });
+  const mobilePlayerBounds = await previewPanel.boundingBox();
+  const mobileListBounds = await uploader.getByRole('table').boundingBox();
+  assert.ok(mobilePlayerBounds.y + mobilePlayerBounds.height <= mobileListBounds.y);
+  assert.ok(await uploader.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  await previewPanel.getByRole('button', { name: 'Close preview' }).press('Escape');
+  await expect(previewPanel).toHaveCount(0);
+  await expect(wide).toBeFocused();
+  for (const { route, resolve } of mediaRequests) {
+    await route.abort().catch(() => {});
+    resolve();
+  }
+  process.stdout.write(
+    'Chrome verified authenticated video switching and the stacked phone layout.\n',
+  );
 } catch (error) {
   for (const page of [uploader, observer]) {
     if (!page) continue;
