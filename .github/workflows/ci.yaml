@@ -48,6 +48,9 @@ jobs:
       - name: Build the apps
         run: pnpm -r --parallel -F "./apps/*" -F "./packages/search-parser/demo" build
 
+      - name: Check Drive workflows in Chrome
+        run: node apps/papra-client/scripts/drive-recovery.browser.mjs
+
       # Boot the built server bundle to catch runtime-only failures the build step cannot detect
       - name: Smoke test the server
         run: pnpm -F "@papra/app-server" test:smoke
