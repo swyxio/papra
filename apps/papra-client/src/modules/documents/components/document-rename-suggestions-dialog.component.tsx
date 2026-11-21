@@ -69,8 +69,8 @@ function estimateRemaining(files: FileProgress[], now: number) {
     const average = samples.reduce((total, ms) => total + ms, 0) / samples.length;
     estimates.push(average - Math.max(0, now - (file.startedAt ?? now)));
   }
-  if (estimates.some((ms) => ms <= 0)) return 'Taking longer than estimated';
-  return `About ${durationLabel(Math.ceil(Math.max(...estimates) / 5000) * 5)} left`;
+  if (estimates.some((ms) => ms <= 0)) return 0;
+  return Math.ceil(Math.max(...estimates) / 5000) * 5000;
 }
 
 export const DocumentRenameSuggestionsDialog: Component<{
@@ -115,7 +115,11 @@ export const DocumentRenameSuggestionsDialog: Component<{
 
   const receiveProgress = (event: RenameProgressEvent) => {
     if (event.type === 'start') {
-      setFiles(event.files.map((file) => ({ ...file, phase: 'queued' })));
+      const queued = event.files.map((file): FileProgress => ({ ...file, phase: 'queued' }));
+      const byId = new Map(queued.map((file) => [file.documentId, file]));
+      setFiles((current) =>
+        current.length ? current.map((file) => byId.get(file.documentId) ?? file) : queued,
+      );
     } else if (event.type === 'reading') {
       updateFile(event.documentId, { phase: 'reading' });
     } else if (event.type === 'drafting') {
@@ -147,18 +151,24 @@ export const DocumentRenameSuggestionsDialog: Component<{
       organizationId: string;
       documentIds: string[];
       signal: AbortSignal;
+      isRetry?: boolean;
     }) =>
       suggestDocumentNames({
         ...request,
         onProgress: (event) => {
-          if (!request.signal.aborted) receiveProgress(event);
+          if (request.signal.aborted) return;
+          receiveProgress(event);
+          const now = Date.now();
+          setNow(now);
+          return estimateRemaining(files(), now);
         },
       }),
     onError: (_error, request) => {
       if (request.signal.aborted) return;
+      const requested = new Set(request.documentIds);
       setFiles((current) =>
         current.map((file) =>
-          file.phase === 'ready' || file.phase === 'failed'
+          !requested.has(file.documentId) || file.phase === 'ready' || file.phase === 'failed'
             ? file
             : {
                 ...file,
@@ -264,6 +274,47 @@ export const DocumentRenameSuggestionsDialog: Component<{
     files().filter((file) => file.phase === 'ready' || file.phase === 'failed').length;
   const failedCount = () => files().filter((file) => file.phase === 'failed').length;
   const elapsed = () => durationLabel(Math.max(0, Math.floor((now() - startedAt()) / 1000)));
+  const estimateLabel = () => {
+    const remaining = estimateRemaining(files(), now());
+    if (remaining === 0) return 'Taking longer than estimated';
+    if (remaining !== undefined) return `About ${durationLabel(remaining / 1000)} left`;
+    return files().length > 1
+      ? 'Waiting for comparable draft timings'
+      : 'Time estimate unavailable';
+  };
+
+  const retryIds = () =>
+    files().length
+      ? files()
+          .filter((file) => file.phase === 'failed')
+          .map((file) => file.documentId)
+      : suggest.error
+        ? (suggest.variables?.documentIds ?? [])
+        : [];
+
+  const retryFailed = () => {
+    if (!previewController || suggest.isPending || reviseDescription.isPending || apply.isPending)
+      return;
+    const documentIds = retryIds();
+    if (!documentIds.length) return;
+    const requested = new Set(documentIds);
+    const now = Date.now();
+    setStartedAt(now);
+    setNow(now);
+    setFiles((current) =>
+      current.map((file) =>
+        requested.has(file.documentId)
+          ? { documentId: file.documentId, name: file.name, phase: 'queued' }
+          : file,
+      ),
+    );
+    suggest.mutate({
+      organizationId: props.organizationId,
+      documentIds,
+      signal: previewController.signal,
+      isRetry: true,
+    });
+  };
 
   return (
     <Dialog
@@ -301,12 +352,7 @@ export const DocumentRenameSuggestionsDialog: Component<{
                 max={files().length}
               />
               <Show when={suggest.isPending}>
-                <p class="text-xs text-muted-foreground">
-                  {estimateRemaining(files(), now()) ??
-                    (files().length > 1
-                      ? 'Waiting for comparable draft timings'
-                      : 'Time estimate unavailable')}
-                </p>
+                <p class="text-xs text-muted-foreground">{estimateLabel()}</p>
               </Show>
               <ul class="max-h-28 overflow-y-auto space-y-1 text-xs">
                 <For each={files()}>
@@ -516,6 +562,15 @@ export const DocumentRenameSuggestionsDialog: Component<{
           {(err) => <p class="text-sm text-red-500">{getHttpErrorMessage(err())}</p>}
         </Show>
         <DialogFooter>
+          <Show when={!suggest.isPending && retryIds().length}>
+            <Button
+              variant="outline"
+              onClick={retryFailed}
+              disabled={apply.isPending || reviseDescription.isPending}
+            >
+              {files().length ? 'Retry failed files' : 'Retry suggestions'}
+            </Button>
+          </Show>
           <Button
             variant="outline"
             onClick={() => props.onOpenChange(false)}

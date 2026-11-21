@@ -6,6 +6,10 @@ type TrackingServices = {
     event: string;
     properties?: Record<string, string | number | boolean>;
   }) => void;
+  captureTiming: (args: {
+    event: string;
+    properties: Record<string, string | number | boolean>;
+  }) => void;
 
   reset: () => void;
 
@@ -19,24 +23,31 @@ const dummyTrackingServices: TrackingServices = {
       console.log(`[dev] captured event ${event}`, ...(Object.keys(args).length ? [args] : []));
     }
   },
+  captureTiming: () => {},
   reset: () => {},
   identify: () => {},
 };
 
+class TimingPostHog extends PostHog {
+  getCommonEventProperties() {
+    // posthog-js-lite adds the full URL after caller properties. A separate
+    // anonymous instance keeps document routes and account identity out of timings.
+    return { $process_person_profile: false };
+  }
+
+  async fetch(url: string, options: Parameters<PostHog['fetch']>[1]) {
+    return fetch(url, { ...options, referrerPolicy: 'no-referrer' });
+  }
+}
+
 function createTrackingServices(): TrackingServices {
-  const { isEnabled, apiKey, host } = buildTimeConfig.posthog;
-
-  if (!isEnabled) {
-    return dummyTrackingServices;
-  }
-
-  if (!apiKey) {
-    return dummyTrackingServices;
-  }
+  const { isEnabled, renameTimingEnabled, apiKey, host } = buildTimeConfig.posthog;
+  if (!apiKey || (!isEnabled && !renameTimingEnabled)) return dummyTrackingServices;
 
   let posthog: PostHog | undefined;
+  let timings: TimingPostHog | undefined;
   const tracker = () => {
-    if (/^\/(?:feedback(?:\/|$)|s\/|sign\/|review\/)/.test(window.location.pathname))
+    if (!isEnabled || /^\/(?:feedback(?:\/|$)|s\/|sign\/|review\/)/.test(window.location.pathname))
       return undefined;
     return (posthog ??= new PostHog(apiKey, { host }));
   };
@@ -44,6 +55,17 @@ function createTrackingServices(): TrackingServices {
   return {
     capture: ({ event, properties }) => {
       tracker()?.capture(event, properties);
+    },
+    captureTiming: ({ event, properties }) => {
+      if (!renameTimingEnabled) return;
+      timings ??= new TimingPostHog(apiKey, {
+        host,
+        persistence: 'memory',
+        persistence_name: 'swyxdrive_rename_timing',
+        preloadFeatureFlags: false,
+        disableGeoip: true,
+      });
+      timings.capture(event, properties);
     },
     reset: () => {
       posthog?.reset();

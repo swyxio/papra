@@ -32,6 +32,8 @@ Every Workers AI call, including queue transcription, vision and indexing, uses 
 
 AI reservations cap automatic audio at six hours/day, vision at 100 images/day and document chat at 100 requests/day across the instance. These are application limits, not a promise of free processing. Exhaustion is recorded in job status; files and keyword search remain available. Private R2 backups consume additional storage.
 
+See [Suggested names ETA](RENAME-ETA.md) for the timing event contract and calibration queries.
+
 ## Release
 
 Use Node 26 and pnpm. Build/typecheck/test the actual Worker and client, then deploy the merged public fork commit:
