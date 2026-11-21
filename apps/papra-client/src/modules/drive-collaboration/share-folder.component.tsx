@@ -244,7 +244,11 @@ export function ShareFolder(props: {
               Handoff note and file requests
             </summary>
             <Show when={handoffOpen()}>
-              <FolderHandoff path={path()} isPublic={publicActive()} />
+              <FolderHandoff
+                path={path()}
+                organizationId={props.organizationId}
+                isPublic={publicActive()}
+              />
             </Show>
           </details>
         </Show>

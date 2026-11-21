@@ -18,7 +18,7 @@ type Received = {
   createdAt: number;
 };
 
-export function FolderHandoff(props: { path: string; isPublic: boolean }) {
+export function FolderHandoff(props: { path: string; organizationId: string; isPublic: boolean }) {
   const [note, setNote] = createSignal<string>();
   const [enabled, setEnabled] = createSignal<boolean>();
   const [count, setCount] = createSignal<number>();
@@ -70,7 +70,10 @@ export function FolderHandoff(props: { path: string; isPublic: boolean }) {
       await Promise.all([
         client.invalidateQueries({ queryKey: inboxKey() }),
         client.invalidateQueries({ queryKey: ['public-folder'] }),
-        client.invalidateQueries({ predicate: (query) => query.queryKey[0] === 'documents' }),
+        client.invalidateQueries({
+          queryKey: ['organizations', props.organizationId, 'documents'],
+        }),
+        client.invalidateQueries({ queryKey: ['organizations', props.organizationId, 'folders'] }),
       ]);
       createToast({ type: 'success', message: 'File added to the folder' });
     },
