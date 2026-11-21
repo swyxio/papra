@@ -2,6 +2,9 @@ import { formatBytes } from '@corentinth/chisels';
 import { A, useParams, useSearchParams } from '@solidjs/router';
 import { useQuery } from '@tanstack/solid-query';
 import { For, Show } from 'solid-js';
+import { authPagesPaths } from '@/modules/auth/auth.constants';
+import { canonicalOrganizationUrl } from '@/modules/navigation/organization-urls';
+import { buildPathWithRedirect } from '@/modules/navigation/redirect';
 import { buildTimeConfig } from '@/modules/config/config';
 import { httpClient } from '@/modules/shared/http/http-client';
 import { isHttpErrorWithStatusCode } from '@/modules/shared/http/http-errors';
@@ -16,13 +19,20 @@ type SharedFolder = {
   hasMore: boolean;
 };
 
-export function SharedFolderPage() {
+export function SharedFolderPage(props: { organizationId?: string } = {}) {
   const params = useParams<{ token: string }>();
   const [search] = useSearchParams<{ folder?: string; page?: string }>();
   const page = () => Number(search.page ?? 0);
-  const base = () => `/api/share-links/folder/${encodeURIComponent(params.token)}`;
+  const base = () =>
+    props.organizationId
+      ? `/api/share-links/folders/${encodeURIComponent(props.organizationId)}/${encodeURIComponent(search.folder ?? '')}`
+      : `/api/share-links/folder/${encodeURIComponent(params.token)}`;
+  const route = () =>
+    props.organizationId
+      ? canonicalOrganizationUrl(`/organizations/${props.organizationId}/documents`)
+      : `/sf/${encodeURIComponent(params.token)}`;
   const listing = useQuery(() => ({
-    queryKey: ['public-folder', params.token, search.folder, page()],
+    queryKey: ['public-folder', base(), search.folder, page()],
     retry: false,
     queryFn: async () =>
       httpClient<SharedFolder>({
@@ -30,14 +40,14 @@ export function SharedFolderPage() {
         url: base(),
         credentials: 'omit',
         retry: 0,
-        query: { folder: search.folder, page: page() },
+        query: { folder: props.organizationId ? undefined : search.folder, page: page() },
       }),
   }));
   const href = (folder?: string | null, nextPage = 0) => {
     const query = new URLSearchParams();
     if (folder) query.set('folder', folder);
     if (nextPage) query.set('page', String(nextPage));
-    return `/sf/${encodeURIComponent(params.token)}${query.size ? '?' + query.toString() : ''}`;
+    return `${route()}${query.size ? '?' + query.toString() : ''}`;
   };
   return (
     <main class="mx-auto max-w-4xl space-y-5 p-4 sm:p-8">
@@ -57,11 +67,30 @@ export function SharedFolderPage() {
               </Button>
             }
           >
-            <p class="text-sm text-muted-foreground">
-              This link may have been revoked or the folder may have moved. Ask the sender for an
-              updated link.
-            </p>
-            <Show when={search.folder}>
+            <Show
+              when={props.organizationId}
+              fallback={
+                <p class="text-sm text-muted-foreground">
+                  This link may have been revoked or the folder may have moved. Ask the sender for
+                  an updated link.
+                </p>
+              }
+            >
+              <p class="text-sm text-muted-foreground">
+                Sign in with an account that has access, or ask the folder owner to share it.
+              </p>
+              <Button
+                as={A}
+                variant="outline"
+                href={buildPathWithRedirect({
+                  path: authPagesPaths.login,
+                  redirectPath: href(search.folder),
+                })}
+              >
+                Sign in to view folder
+              </Button>
+            </Show>
+            <Show when={!props.organizationId && search.folder}>
               <A class="inline-block underline text-sm" href={href()}>
                 Back to shared folder
               </A>

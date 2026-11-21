@@ -9,7 +9,12 @@ import { createToast } from '../ui/components/sonner';
 import { driveBase } from './drive-collaboration.services';
 
 type FolderLink = { token: string; url: string };
-type FolderSharing = { canShare: boolean; link: FolderLink | null };
+type FolderSharing = {
+  canShare: boolean;
+  isPublic: boolean;
+  inherited: boolean;
+  link: FolderLink | null;
+};
 type Audience = 'public' | 'existing';
 
 export function ShareFolder(props: {
@@ -37,14 +42,22 @@ export function ShareFolder(props: {
     return url.href;
   };
   const publicAllowed = () => props.canManagePublic && sharing.data?.canShare !== false;
-  const selected = () => (publicAllowed() ? (audience() ?? 'public') : 'existing');
   const publicLink = () => sharing.data?.link;
-  const selectedUrl = () => (selected() === 'public' ? publicLink()?.url : internalUrl());
+  const publicActive = () => publicAllowed() && sharing.data?.isPublic === true;
+  const selected = () =>
+    publicAllowed() ? (publicActive() ? 'public' : (audience() ?? 'public')) : 'existing';
+  const selectedUrl = () =>
+    selected() === 'existing' || publicActive() ? internalUrl() : undefined;
 
   const create = useMutation(() => ({
     mutationFn: async () => apiClient<{ link: FolderLink }>({ path: path(), method: 'POST' }),
     onSuccess: ({ link }) => {
-      client.setQueryData<FolderSharing>(queryKey(), { canShare: true, link });
+      client.setQueryData<FolderSharing>(queryKey(), (current) => ({
+        canShare: true,
+        isPublic: true,
+        inherited: current?.inherited ?? false,
+        link,
+      }));
     },
     onError: () => {
       void client.invalidateQueries({ queryKey: queryKey() });
@@ -55,9 +68,17 @@ export function ShareFolder(props: {
       apiClient({ path: `${path()}/${token}`, method: 'DELETE' }),
     onSuccess: (_, token) => {
       client.setQueryData<FolderSharing>(queryKey(), (current) =>
-        current?.link?.token === token ? { ...current, link: null } : current,
+        current?.link?.token === token
+          ? { ...current, isPublic: current.inherited, link: null }
+          : current,
       );
-      createToast({ type: 'success', message: 'Public link revoked' });
+      setAudience('existing');
+      createToast({
+        type: 'success',
+        message: sharing.data?.inherited
+          ? 'The parent folder still grants public access'
+          : 'Public access turned off',
+      });
     },
     onSettled: async () => client.invalidateQueries({ queryKey: queryKey() }),
   }));
@@ -135,18 +156,29 @@ export function ShareFolder(props: {
               <option value="public" disabled={!publicAllowed()}>
                 Anyone with the link
               </option>
-              <option value="existing">People with existing access</option>
+              <option value="existing" disabled={publicActive()}>
+                People with existing access
+              </option>
             </select>
           </label>
         </Show>
         <p class="text-xs text-muted-foreground">
           {selected() === 'public'
-            ? 'Unlisted, view and download, no expiration. Anyone you forward it to can open it without signing in.'
-            : 'Recipients sign in with an account that already has access to this folder.'}
+            ? publicActive()
+              ? 'Anyone can open this folder’s address to view and download. No expiration.'
+              : 'Copying the link turns on public access at this folder’s address. No sign-in or expiration.'
+            : props.canManagePublic
+              ? 'Recipients sign in with an account that already has access to this folder.'
+              : 'The folder’s sharing settings determine who can open this address.'}
         </p>
         <Show when={selected() === 'public'}>
           <p class="text-xs text-muted-foreground">
             Includes new files added later. Restricted folders and shortcuts stay private.
+          </p>
+        </Show>
+        <Show when={sharing.data?.inherited}>
+          <p class="text-xs text-muted-foreground">
+            Public access is inherited from a parent folder.
           </p>
         </Show>
         <Show when={selectedUrl()}>
@@ -187,7 +219,7 @@ export function ShareFolder(props: {
                 disabled={copying() || revoke.isPending}
                 onClick={() => revoke.mutate(link().token)}
               >
-                Revoke public link
+                Turn off public access
               </Button>
             )}
           </Show>

@@ -31,9 +31,10 @@ export type DriveComment = {
 export const driveBase = (organizationId: string) => `/api/organizations/${organizationId}`;
 export const documentDriveBase = (organizationId: string, documentId: string) =>
   `${driveBase(organizationId)}/documents/${documentId}`;
-export const fetchFolders = async (organizationId: string) =>
+export const fetchFolders = async (organizationId: string, redirectOnUnauthorized = true) =>
   apiClient<{ folders: DriveFolder[]; canManageAccess: boolean; isPersonal: boolean }>({
     path: `${driveBase(organizationId)}/folders`,
+    redirectOnUnauthorized,
   });
 export function folderPath(folder: DriveFolder, folders: DriveFolder[]): string {
   const names = [folder.name];

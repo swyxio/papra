@@ -968,41 +968,77 @@ test('a folder link grants anonymous, read-only access to the current unrestrict
   expect((await request(manage.replace('/shared/', '/fld_home_team/'), 'POST')).status).toBe(404);
   expect((await request(manage.replace('/shared/', '/restricted/'), 'POST')).status).toBe(409);
 
-  expect(await (await request(manage)).json()).toEqual({ canShare: true, link: null });
+  const address = '/api/share-links/folders/team/shared';
+  const canonicalPath = '/orgs/team/documents';
+  expect(await (await request(manage)).json()).toEqual({
+    canShare: true,
+    isPublic: false,
+    inherited: false,
+    link: null,
+  });
+  expect((await request(address)).status).toBe(404);
+  for (const identity of [undefined, identities.owner]) {
+    expect(await pageMetadata(env, canonicalPath, identity, 'shared')).toEqual({
+      title: 'Private folder — SwyxDrive',
+      description: 'Sign in with an account that has access to view this folder.',
+      url: 'https://drive.example/orgs/team/documents?folder=shared',
+    });
+  }
   const [firstCopy, secondCopy] = await Promise.all([
     request(manage, 'POST'),
     request(manage, 'POST'),
   ]);
   expect([firstCopy.status, secondCopy.status].sort()).toEqual([200, 201]);
   const { link } = await firstCopy.json<{ link: { token: string; url: string } }>();
-  expect(link.url).toBe(`https://drive.example/sf/${link.token}`);
+  expect(link.url).toBe('https://drive.example/orgs/team/documents?folder=shared');
   expect(await secondCopy.json()).toEqual({ link });
-  expect(await (await request(manage)).json()).toEqual({ canShare: true, link });
+  expect(await (await request(manage)).json()).toEqual({
+    canShare: true,
+    isPublic: true,
+    inherited: false,
+    link,
+  });
+  expect(await (await request(manage.replace('/shared/', '/nested/'))).json()).toEqual({
+    canShare: true,
+    isPublic: true,
+    inherited: true,
+    link: null,
+  });
 
   const sharePage = `/sf/${link.token}`;
   const unavailableTitle = 'Folder link unavailable — SwyxDrive';
-  expect(await pageMetadata(env, sharePage)).toEqual({
+  const sharedPreview = {
     title: 'Shared — SwyxDrive',
     description: 'Browse and download files in this shared folder on SwyxDrive.',
     url: link.url,
     image: 'https://drive.example/og-swyxdrive.png',
     imageAlt: 'SwyxDrive — Documents, sharing & signing',
+  };
+  expect(await pageMetadata(env, canonicalPath, undefined, 'shared')).toEqual(sharedPreview);
+  expect(await pageMetadata(env, sharePage)).toEqual({
+    ...sharedPreview,
+    url: `https://drive.example/sf/${link.token}`,
   });
   await DB.prepare('UPDATE folders SET name=? WHERE id=?').bind('New name & more', 'shared').run();
   expect((await pageMetadata(env, sharePage + '/')).title).toBe('New name & more — SwyxDrive');
+  expect((await pageMetadata(env, canonicalPath, undefined, 'shared')).title).toBe(
+    'New name & more — SwyxDrive',
+  );
   await DB.prepare("UPDATE folders SET name='Shared' WHERE id='shared'").run();
   expect((await pageMetadata(env, '/sf/invalid-folder-link')).title).toBe(unavailableTitle);
-  for (const identity of [undefined, identities.owner]) {
-    expect(await pageMetadata(env, '/orgs/team/documents', identity, 'shared')).toEqual({
-      title: 'Private folder — SwyxDrive',
-      description: 'Sign in with an account that has access to view this folder.',
-      url: 'https://drive.example/orgs/team/documents?folder=shared',
-    });
-  }
+  expect((await pageMetadata(env, '/orgs/personal/documents', undefined, 'shared')).title).toBe(
+    'Private folder — SwyxDrive',
+  );
 
   const folder = `/api/share-links/folder/${link.token}`;
   const listing = await request(folder);
+  const exactListing = await request(address);
+  expect(exactListing.status).toBe(200);
+  expect(exactListing.headers.get('cache-control')).toBe('private, no-store');
+  expect(await exactListing.json()).toEqual(await listing.clone().json());
   expect(listing.status).toBe(200);
+  expect((await request('/api/share-links/folders/personal/shared')).status).toBe(404);
+  expect((await request('/api/share-links/folders/team/restricted')).status).toBe(404);
   expect(listing.headers.get('cache-control')).toBe('private, no-store');
   expect(await listing.json()).toEqual({
     folder: { id: 'shared', name: 'Shared', parentId: null },
@@ -1010,6 +1046,8 @@ test('a folder link grants anonymous, read-only access to the current unrestrict
     hasMore: false,
   });
   const child = await request(folder + '?folder=nested');
+  const exactChild = '/api/share-links/folders/team/nested';
+  expect(await (await request(exactChild)).json()).toEqual(await child.clone().json());
   expect(await child.json()).toMatchObject({
     folder: { id: 'nested', name: 'Nested', parentId: 'shared' },
     entries: [{ id: 'open', name: 'open file', kind: 'file', versionId: 'v-open' }],
@@ -1024,7 +1062,9 @@ test('a folder link grants anonymous, read-only access to the current unrestrict
     expect((await request(`${folder}/files/${doc}/versions/${version}/download`)).status).toBe(404);
 
   const download = `${folder}/files/open/versions/v-open/download`;
-  const range = await request(download, 'GET', undefined, 'outsider', undefined, {
+  const exactDownload = exactChild + '/files/open/versions/v-open/download';
+  expect((await request(address + '/files/open/versions/v-open/download')).status).toBe(404);
+  const range = await request(exactDownload, 'GET', undefined, 'outsider', undefined, {
     Range: 'bytes=7-',
   });
   expect(range.status).toBe(206);
@@ -1034,8 +1074,13 @@ test('a folder link grants anonymous, read-only access to the current unrestrict
 
   await DB.prepare("UPDATE folders SET is_restricted=1 WHERE id='shared'").run();
   expect((await pageMetadata(env, sharePage)).title).toBe(unavailableTitle);
+  expect((await pageMetadata(env, canonicalPath, undefined, 'shared')).title).toBe(
+    'Private folder — SwyxDrive',
+  );
   expect((await request(folder)).status).toBe(404);
   expect((await request(download)).status).toBe(404);
+  expect((await request(address)).status).toBe(404);
+  expect((await request(exactDownload)).status).toBe(404);
   await DB.prepare("UPDATE folders SET is_restricted=0 WHERE id='shared'").run();
 
   await DB.prepare("UPDATE documents SET home_folder_id='fld_home_team' WHERE id='open'").run();
@@ -1053,6 +1098,11 @@ test('a folder link grants anonymous, read-only access to the current unrestrict
   );
   expect((await request(manage + '/' + link.token, 'DELETE')).status).toBe(204);
   expect((await pageMetadata(env, sharePage)).title).toBe(unavailableTitle);
+  expect((await pageMetadata(env, canonicalPath, undefined, 'shared')).title).toBe(
+    'Private folder — SwyxDrive',
+  );
   expect((await request(folder)).status).toBe(404);
   expect((await request(download)).status).toBe(404);
+  expect((await request(address)).status).toBe(404);
+  expect((await request(exactDownload)).status).toBe(404);
 });

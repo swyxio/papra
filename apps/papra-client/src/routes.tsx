@@ -26,7 +26,7 @@ import { DocumentViewPage } from './modules/document-views/pages/document-view.p
 import { DeletedDocumentsPage } from './modules/documents/pages/deleted-documents.page';
 import { DocumentPdfViewerPage } from './modules/documents/pages/document-pdf-viewer.page';
 import { DocumentPage } from './modules/documents/pages/document.page';
-import { DocumentsPage } from './modules/documents/pages/documents.page';
+import { FolderAwareDocumentsPage } from './modules/documents/pages/folder-aware-documents.page';
 import { useLastOrganization } from './modules/organizations/composables/use-last-organization';
 import { fetchOrganizations } from './modules/organizations/organizations.services';
 import { MembersPage } from './modules/organizations/pages/members.page';
@@ -44,6 +44,11 @@ import { CurrentUserProvider } from './modules/users/composables/useCurrentUser'
 import { UserSettingsPage } from './modules/users/pages/user-settings.page';
 
 export const routes: RouteDefinition[] = [
+  {
+    path: '/organizations/:organizationId/documents',
+    matchFilters: { organizationId: /^org_[a-zA-Z0-9]+$/ },
+    component: FolderAwareDocumentsPage,
+  },
   {
     path: '/',
     component: CurrentUserProvider,
@@ -139,10 +144,6 @@ export const routes: RouteDefinition[] = [
                   {
                     path: '/',
                     component: OrganizationPage,
-                  },
-                  {
-                    path: '/documents',
-                    component: DocumentsPage,
                   },
                   {
                     path: '/documents/new',
