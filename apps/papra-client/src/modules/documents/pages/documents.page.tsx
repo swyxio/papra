@@ -808,7 +808,7 @@ export const DocumentsPage: Component = () => {
             >
               <p class="my-4 text-sm text-muted-foreground">
                 {allFiles() ? 'No files in this space yet.' : 'No files in this folder yet.'} Use
-                New / Import to add files here.
+                {t('layout.menu.import-document')} to add files here.
               </p>
             </Show>
             <Show when={documentsData()}>
@@ -848,16 +848,7 @@ export const DocumentsPage: Component = () => {
                 <span class="i-tabler-sparkles size-4 mr-1.5" aria-hidden="true" />
                 Ask this space
               </Button>
-              <Show
-                when={
-                  !documentsQuery.isError &&
-                  documentsData() &&
-                  ((documentsData()?.documentsCount ?? 0) > 0 ||
-                    selectedFolderId() !== homeFolderId(params.organizationId))
-                }
-              >
-                <DriveExport organizationId={params.organizationId} />
-              </Show>
+              <DriveExport organizationId={params.organizationId} />
             </div>
 
             <DocumentMoveDialog
