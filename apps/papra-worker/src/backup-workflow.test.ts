@@ -36,6 +36,18 @@ test('atomic snapshot remains consistent through live edits, retries, and restor
     ),
     DB.prepare("INSERT INTO organizations(id,name,created_at,updated_at) VALUES('o','Org',1,1)"),
     DB.prepare(
+      "INSERT INTO organization_email_grants(organization_id,email,created_at) VALUES('o','invitee@example.test',1)",
+    ),
+    DB.prepare(
+      "INSERT INTO documents(id,organization_id,created_by,name,mime_type,created_at,updated_at) VALUES('doc','o','u','Synthetic recording','video/mp4',1,1)",
+    ),
+    DB.prepare(
+      "INSERT INTO versions(id,document_id,storage_key,original_name,size,created_by,created_at) VALUES('version','doc','test/original','recording.mp4',80,'u',1)",
+    ),
+    DB.prepare(
+      "INSERT INTO video_previews(version_id,quality,storage_key,size,sha256,created_at) VALUES('version','720-teaser-v2','test/preview',40,'sample',1)",
+    ),
+    DB.prepare(
       "INSERT INTO feedback_bugs(id,fingerprint,operation,status,updated_at) VALUES('b','test','web-help','needs-review',1)",
     ),
     DB.prepare(
@@ -53,6 +65,9 @@ test('atomic snapshot remains consistent through live edits, retries, and restor
       ).bind(`t${i}`, 'o', `Tag ${i}`, 1, 1),
     ),
   );
+  const appTablesQuery =
+    "SELECT name FROM sqlite_schema WHERE type='table' AND name NOT GLOB 'sqlite_*' AND name NOT GLOB '_cf_*' AND name NOT GLOB 'documents_fts_*' ORDER BY name";
+  const sourceTables = (await DB.prepare(appTablesQuery).all()).results;
   const capture = await captureSnapshot(DB, '2026-09-16');
   await DB.prepare("UPDATE users SET name='Changed after capture'").run();
   await DB.prepare("DELETE FROM tags WHERE id='t0'").run();
@@ -134,6 +149,13 @@ test('atomic snapshot remains consistent through live edits, retries, and restor
   expect(
     await restored.prepare('SELECT count(*) FROM feedback_transfer_failures').first('count(*)'),
   ).toBe(0);
+  expect((await restored.prepare(appTablesQuery).all()).results).toEqual(sourceTables);
+  expect(await restored.prepare('SELECT email FROM organization_email_grants').first('email')).toBe(
+    'invitee@example.test',
+  );
+  expect(
+    await restored.prepare('SELECT storage_key FROM video_previews').first('storage_key'),
+  ).toBe('test/preview');
   await retireSnapshot(DB, capture.date);
   const tomorrow = await captureSnapshot(DB, '2026-09-17');
   expect(tomorrow.tables.find((table) => table.table === 'tags')?.rows).toBe(1040);
