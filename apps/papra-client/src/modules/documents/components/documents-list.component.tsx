@@ -44,12 +44,10 @@ import { DocumentManagementDropdown } from './document-management-dropdown.compo
 // Last checkbox clicked per table, the start of a shift-click range.
 const selectionAnchors = new WeakMap<object, string>();
 
-// On desktop, row controls stay hidden until the row is hovered or focused, so idle rows stay clean.
+// Keep the row action menu quiet until the row is hovered or focused.
 const revealOnHover = 'sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100';
-const revealUntilSelected = (table: {
-  getIsSomeRowsSelected: () => boolean;
-  getIsAllRowsSelected: () => boolean;
-}) => (table.getIsSomeRowsSelected() || table.getIsAllRowsSelected() ? undefined : revealOnHover);
+const selectionCheckbox =
+  'size-6 sm:size-5 cursor-pointer border-2 border-muted-foreground hover:border-foreground';
 
 const selectionColumn: ColumnDef<Document> = {
   id: 'select',
@@ -64,9 +62,8 @@ const selectionColumn: ColumnDef<Document> = {
         }
         onChange={(value) => props.table.toggleAllPageRowsSelected(value)}
         aria-label={t('documents.list.select.all')}
-        class={revealUntilSelected(props.table)}
       >
-        <CheckboxControl />
+        <CheckboxControl class={selectionCheckbox} />
       </Checkbox>
     );
   },
@@ -94,9 +91,8 @@ const selectionColumn: ColumnDef<Document> = {
         }}
         aria-label={t('documents.list.select.row')}
         title="Shift-click to select a range"
-        class={revealUntilSelected(props.table)}
       >
-        <CheckboxControl />
+        <CheckboxControl class={selectionCheckbox} />
       </Checkbox>
     );
   },
