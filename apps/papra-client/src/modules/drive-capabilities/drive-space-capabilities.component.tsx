@@ -9,7 +9,10 @@ import {
 import { DriveError, DriveEvidence, driveFieldClass } from './drive-evidence.component';
 
 export function DriveSpaceCapabilities(props: { organizationId: string }) {
-  const [folders] = createResource(() => props.organizationId, fetchFolders);
+  const [folders] = createResource(
+    () => props.organizationId,
+    async (organizationId) => fetchFolders(organizationId),
+  );
   const [credentials, { refetch }] = createResource(
     () => props.organizationId,
     fetchServiceCredentials,

@@ -5,6 +5,11 @@ import { publicShare } from './shares';
 import { pendingUploadShare } from './upload-shares';
 import { getDocument } from './db';
 import { publicFolderTitle } from './folder-shares';
+import {
+  organizationAlias,
+  organizationFolderUrl,
+  resolveOrganizationId,
+} from './organization-urls';
 
 export type PageMetadata = {
   title: string;
@@ -38,14 +43,15 @@ function fileDescription(mime: string, size: number, shared = true) {
   return `${kind} · ${sizeLabel}. ${shared ? `${kind === 'Video' ? 'Watch or download' : kind === 'Audio' ? 'Listen or download' : 'View or download'} this shared file on SwyxDrive.` : 'Sign in with an account that has access to view this file.'}`;
 }
 
-// These public route aliases are also used by the client navigation. Always
-// compare the resolved immutable organization ID before disclosing a title.
-const organizationAliases: Record<string, string> = {
-  AIE: 'org_419f9b6ce7fbbb7147a63378',
-  LS: 'org_42b6b2a0d04c28134c4d1e22',
-  Smol: 'org_cb7a9094c1b013a08dafb6d8',
-  swyx: 'org_acdec956f4565812fe82e70a',
-};
+function sharedFolderMetadata(origin: string, url: string, name: string): PageMetadata {
+  return {
+    title: `${name} — SwyxDrive`,
+    description: 'Browse and download files in this shared folder on SwyxDrive.',
+    url,
+    image: `${origin}/og-swyxdrive.png`,
+    imageAlt: APP_TITLE,
+  };
+}
 
 export function isDocumentPage(path: string) {
   return /^\/(?:orgs|organizations)\/[^/]+\/documents\/(?!new(?:\/|$))[^/]+\/?$/.test(path);
@@ -59,22 +65,28 @@ export async function pageMetadata(
 ): Promise<PageMetadata> {
   const origin = new URL(env.APP_URL).origin;
   const metadata = { title: APP_TITLE, description: APP_DESCRIPTION, url: `${origin}/` };
-  if (folderId && /^\/(?:orgs|organizations)\/[^/]+\/documents\/?$/.test(path)) {
-    const url = new URL(path, origin);
-    url.searchParams.set('folder', folderId);
-    return {
-      title: 'Private folder — SwyxDrive',
-      description: 'Sign in with an account that has access to view this folder.',
-      url: url.href,
-    };
+  const folderOrganization = path.match(/^\/(?:orgs|organizations)\/([^/]+)\/documents\/?$/)?.[1];
+  if (folderId && folderOrganization) {
+    const organizationId = resolveOrganizationId(folderOrganization);
+    const url = organizationFolderUrl(origin, organizationId, folderId);
+    try {
+      const name = await publicFolderTitle(env, { organizationId, folderId });
+      return sharedFolderMetadata(origin, url, name);
+    } catch (error) {
+      if (!(error instanceof HTTPException) || error.status !== 404) throw error;
+      return {
+        title: 'Private folder — SwyxDrive',
+        description: 'Sign in with an account that has access to view this folder.',
+        url,
+      };
+    }
   }
   if (isDocumentPage(path)) {
     const [, segment, documentId] = path.match(
       /^\/(?:orgs|organizations)\/([^/]+)\/documents\/([^/]+)\/?$/,
     )!;
-    const orgId = organizationAliases[segment] ?? segment;
-    const alias =
-      Object.entries(organizationAliases).find(([, id]) => id === orgId)?.[0] ?? segment;
+    const orgId = resolveOrganizationId(segment);
+    const alias = organizationAlias(orgId);
     const privateMetadata: PageMetadata = {
       title: `Private document · ${documentId.slice(-6)} — SwyxDrive`,
       description:
@@ -103,14 +115,8 @@ export async function pageMetadata(
   if (folderToken) {
     const url = `${origin}/sf/${encodeURIComponent(folderToken)}`;
     try {
-      const name = await publicFolderTitle(env, folderToken);
-      return {
-        title: `${name} — SwyxDrive`,
-        description: 'Browse and download files in this shared folder on SwyxDrive.',
-        url,
-        image: `${origin}/og-swyxdrive.png`,
-        imageAlt: APP_TITLE,
-      };
+      const name = await publicFolderTitle(env, { token: folderToken });
+      return sharedFolderMetadata(origin, url, name);
     } catch (error) {
       if (!(error instanceof HTTPException) || error.status !== 404) throw error;
       return {
