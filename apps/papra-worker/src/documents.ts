@@ -1,5 +1,6 @@
 import type { App, Env, Identity } from './types';
 import { getContainer } from '@cloudflare/containers';
+import { stream } from 'hono/streaming';
 import {
   all,
   first,
@@ -30,7 +31,7 @@ import { modifiedBySQL, modifiedAtSQL, actorNameSQL } from './document-attributi
 import { fetchTranscript } from './transcripts';
 import { canSummarizeTranscript, readRecordingNotes } from './recording-notes';
 import { reserveDocumentAnswer } from './ai-gateway';
-import type { RenameSource } from './rename-suggestions';
+import type { RenameSource, RenameSuggestion } from './rename-suggestions';
 import {
   MAX_RENAME_BATCH,
   excerptOf,
@@ -656,6 +657,17 @@ export function registerDocumentRoutes(app: App) {
       throw error(400, 'Select files to rename');
     if (ids.length > MAX_RENAME_BATCH)
       throw error(400, `Select at most ${MAX_RENAME_BATCH} files at a time`);
+    const revision = b.descriptionRevision;
+    if (
+      revision !== undefined &&
+      (ids.length !== 1 ||
+        typeof revision?.feedback !== 'string' ||
+        !revision.feedback.trim() ||
+        revision.feedback.length > 600 ||
+        typeof revision.draft !== 'string' ||
+        revision.draft.length > 3000)
+    )
+      throw error(400, 'Provide description feedback for one file, up to 600 characters');
     const folders = await all<{ id: string; parent_id: string | null; name: string }>(
       c.env,
       'SELECT id,parent_id,name FROM folders WHERE organization_id=?',
@@ -671,54 +683,141 @@ export function registerDocumentRoutes(app: App) {
       }
       return names.join(' / ');
     };
-    const documents = [];
+    const documents: Awaited<ReturnType<typeof document>>[] = [];
     for (const id of new Set(ids as string[])) {
       const d = await document(c.env, c.get('identity'), c.req.param('org'), id, 'write');
       if (d.is_deleted) throw error(404, 'Document not found');
       documents.push(d);
     }
-    const sources: RenameSource[] = [];
-    const withNotes = new Set<string>();
-    for (const d of documents) {
-      if ((d.notes as string | null)?.trim()) withNotes.add(d.id);
+    const prepareSource = async (d: (typeof documents)[number]): Promise<RenameSource> => {
       const video = d.mime_type.startsWith('video/');
       const media = video || d.mime_type.startsWith('audio/');
       const content = d.content as string | null;
-      const transcript =
+      const [transcript, frames] = await Promise.all([
         (media || !content?.trim()) && d.current_version_id
-          ? await fetchTranscript(c.env, d.current_version_id)
-          : null;
-      const frames =
-        video && d.current_version_id
-          ? await readRenameFrames(c.env, d.current_version_id)
-          : undefined;
-      sources.push({
+          ? fetchTranscript(c.env, d.current_version_id)
+          : null,
+        video && d.current_version_id ? readRenameFrames(c.env, d.current_version_id) : undefined,
+      ]);
+      const speech = transcript?.text.trim();
+      const excerpt = excerptOf(speech || content, media);
+      return {
         id: d.id,
         name: d.name,
         mimeType: d.mime_type,
         folder: path(d.home_folder_id),
-        excerpt: excerptOf(transcript?.text || content, media),
-        partialTranscript: transcript?.text
-          ? Boolean(transcript.partial || transcript.truncated)
+        excerpt,
+        excerptSource: excerpt ? (speech ? 'audio transcript' : 'file text') : undefined,
+        partialTranscript: speech
+          ? Boolean(transcript?.partial || transcript?.truncated)
           : undefined,
         frames:
           frames?.length && transcript ? withNearbySpeech(frames, transcript.segments) : frames,
+      };
+    };
+    const descriptionRevision = revision
+      ? { feedback: revision.feedback.trim(), draft: revision.draft }
+      : undefined;
+    const withNotes = new Set(
+      documents.filter((d) => (d.notes as string | null)?.trim()).map((d) => d.id),
+    );
+    const formatSuggestion = (suggestion: RenameSuggestion, source: RenameSource) => ({
+      ...suggestion,
+      currentName: source.name,
+      hasContent: Boolean(source.excerpt),
+      hasVisuals: Boolean(source.frames?.length),
+      hasNotes: withNotes.has(source.id),
+    });
+
+    if (c.req.header('Accept') === 'application/x-ndjson') {
+      c.header('Content-Type', 'application/x-ndjson; charset=utf-8');
+      c.header('Cache-Control', 'private, no-store');
+      return stream(c, async (output) => {
+        const cancelled = new AbortController();
+        output.onAbort(() => cancelled.abort());
+        const signal = AbortSignal.any([cancelled.signal, c.req.raw.signal]);
+        const emit = async (event: Record<string, unknown>) => {
+          if (!signal.aborted) await output.writeln(JSON.stringify(event));
+        };
+        await emit({
+          type: 'start',
+          files: documents.map((d) => ({ documentId: d.id, name: d.name })),
+        });
+        let next = 0;
+        const runSlot = async () => {
+          while (!signal.aborted && next < documents.length) {
+            const d = documents[next++]!;
+            const documentId = d.id;
+            await emit({ type: 'reading', documentId });
+            let startedDrafting: number | undefined;
+            try {
+              const source = await prepareSource(d);
+              if (signal.aborted) return;
+              if (hasRenameEvidence(source)) {
+                if (!(await reserveDocumentAnswer(c.env))) {
+                  await emit({ type: 'failed', documentId, message: 'Daily AI limit reached.' });
+                  continue;
+                }
+                if (signal.aborted) return;
+                await emit({
+                  type: 'drafting',
+                  documentId,
+                  frames: source.frames?.length ?? 0,
+                  hasText: Boolean(source.excerpt),
+                });
+                if (signal.aborted) return;
+                startedDrafting = performance.now();
+              } else if (descriptionRevision) {
+                await emit({
+                  type: 'failed',
+                  documentId,
+                  message: 'This file needs text or preview frames to revise its description.',
+                });
+                continue;
+              }
+              const [draft] = await suggestDocumentNames(
+                c.env,
+                [source],
+                descriptionRevision,
+                signal,
+              );
+              if (!draft) throw error(503, 'AI returned no suggestion');
+              await emit({
+                type: 'ready',
+                suggestion: formatSuggestion(draft, source),
+                draftMs:
+                  startedDrafting === undefined
+                    ? undefined
+                    : Math.round(performance.now() - startedDrafting),
+              });
+            } catch {
+              await emit({
+                type: 'failed',
+                documentId,
+                message:
+                  startedDrafting === undefined
+                    ? 'Couldn’t read the file details.'
+                    : 'Couldn’t generate a suggestion.',
+              });
+            }
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(3, documents.length) }, runSlot));
+        await emit({ type: 'done' });
       });
     }
+    const sources: RenameSource[] = [];
+    for (const d of documents) sources.push(await prepareSource(d));
     const modelCalls = sources.filter(hasRenameEvidence).length;
+    if (descriptionRevision && !modelCalls)
+      throw error(409, 'This file needs text or preview frames to revise its description');
     if (modelCalls && !(await reserveDocumentAnswer(c.env, modelCalls)))
       throw error(429, 'Daily AI limit reached');
-    const suggestions = await suggestDocumentNames(c.env, sources);
+    const suggestions = await suggestDocumentNames(c.env, sources, descriptionRevision);
     return c.json({
       suggestions: suggestions.map((s) => {
         const source = sources.find((x) => x.id === s.documentId)!;
-        return {
-          ...s,
-          currentName: source.name,
-          hasContent: Boolean(source.excerpt),
-          hasVisuals: Boolean(source.frames?.length),
-          hasNotes: withNotes.has(s.documentId),
-        };
+        return formatSuggestion(s, source);
       }),
     });
   });
