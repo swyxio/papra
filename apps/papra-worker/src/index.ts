@@ -25,6 +25,7 @@ import { isDocumentPage, pageMetadata, rewritePageMetadata } from './page-metada
 import { registerTemplateRoutes } from './templates';
 import { registerCanonicalOrigin } from './request-origin';
 import { registerEmailTestRoutes } from './email-test';
+import { refreshRenameEta } from './rename-eta';
 
 export { ImageProcessorContainer, ContainerProxy } from '../native/container';
 export { MetadataBackupWorkflow } from './backup-workflow';
@@ -180,7 +181,8 @@ export default {
     }
     if (ordinary.length) await consumeJobs({ ...batch, messages: ordinary }, env);
   },
-  scheduled: async (_event: ScheduledController, env: Env, ctx: ExecutionContext) => {
+  scheduled: async (event: ScheduledController, env: Env, ctx: ExecutionContext) => {
+    ctx.waitUntil(refreshRenameEta(env, event.scheduledTime));
     ctx.waitUntil(processFeedbackWork(env));
     ctx.waitUntil(expireTransferFailures(env));
     ctx.waitUntil(expireGuestUploads(env));

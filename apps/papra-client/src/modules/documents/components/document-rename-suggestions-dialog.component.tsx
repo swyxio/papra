@@ -1,6 +1,7 @@
 import type { Component } from 'solid-js';
+import type { DraftCohorts, FileProgress } from '../rename-preview-estimate';
 import type { RenameProgressEvent, RenameSuggestion } from '../documents-batch.services';
-import { createEffect, createSignal, For, onCleanup, Show, untrack } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack } from 'solid-js';
 import { useMutation, useQueryClient } from '@tanstack/solid-query';
 import { getHttpErrorMessage } from '@/modules/shared/http/http-errors';
 import { Button } from '@/modules/ui/components/button';
@@ -14,6 +15,7 @@ import {
 } from '@/modules/ui/components/dialog';
 import { createToast } from '@/modules/ui/components/sonner';
 import { suggestDocumentNames } from '../documents-batch.services';
+import { estimateRemaining, historicalRemaining } from '../rename-preview-estimate';
 import { updateDocument } from '../documents.services';
 
 export const MAX_RENAME_SUGGESTIONS = 20;
@@ -24,21 +26,10 @@ type Row = RenameSuggestion & {
   descriptionFeedback?: string;
 };
 
-type FileProgress = {
-  documentId: string;
-  name: string;
-  phase: 'queued' | 'reading' | 'drafting' | 'ready' | 'failed';
-  startedAt?: number;
-  frames?: number;
-  hasText?: boolean;
-  draftMs?: number;
-  message?: string;
-};
-
 const durationLabel = (seconds: number) =>
   seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 
-function fileStatus(file: FileProgress, now: number) {
+function fileStatus(file: FileProgress, now: number, cohorts: DraftCohorts) {
   if (file.phase === 'queued') return 'Queued';
   if (file.phase === 'reading') return 'Reading cached file details';
   if (file.phase === 'ready') return 'Draft ready';
@@ -48,29 +39,10 @@ function fileStatus(file: FileProgress, now: number) {
     file.hasText ? 'available text' : '',
   ].filter(Boolean);
   const elapsed = Math.max(0, Math.floor((now - (file.startedAt ?? now)) / 1000));
-  return `Drafting from ${sources.join(' and ')} · ${durationLabel(elapsed)}`;
-}
-
-function estimateRemaining(files: FileProgress[], now: number) {
-  const remaining = files.filter((file) => file.phase !== 'ready' && file.phase !== 'failed');
-  if (!remaining.length) return;
-  const estimates: number[] = [];
-  for (const file of remaining) {
-    if (file.phase !== 'drafting') return;
-    const samples = files.flatMap((sample) =>
-      sample.phase === 'ready' &&
-      sample.frames === file.frames &&
-      sample.hasText === file.hasText &&
-      sample.draftMs
-        ? [sample.draftMs]
-        : [],
-    );
-    if (!samples.length) return;
-    const average = samples.reduce((total, ms) => total + ms, 0) / samples.length;
-    estimates.push(average - Math.max(0, now - (file.startedAt ?? now)));
-  }
-  if (estimates.some((ms) => ms <= 0)) return 0;
-  return Math.ceil(Math.max(...estimates) / 5000) * 5000;
+  const status = `Drafting from ${sources.join(' and ')} · ${durationLabel(elapsed)} elapsed`;
+  const historical = historicalRemaining(file, now, cohorts);
+  if (historical === undefined || historical <= 0) return status;
+  return `${status} · about ${durationLabel(Math.ceil(historical / 5000) * 5)} left`;
 }
 
 export const DocumentRenameSuggestionsDialog: Component<{
@@ -83,6 +55,7 @@ export const DocumentRenameSuggestionsDialog: Component<{
   const client = useQueryClient();
   const [rows, setRows] = createSignal<Row[]>([]);
   const [files, setFiles] = createSignal<FileProgress[]>([]);
+  const [cohorts, setCohorts] = createSignal<DraftCohorts>([]);
   const [startedAt, setStartedAt] = createSignal(0);
   const [now, setNow] = createSignal(Date.now());
   const [revisionPhase, setRevisionPhase] = createSignal('Checking file access');
@@ -115,11 +88,14 @@ export const DocumentRenameSuggestionsDialog: Component<{
 
   const receiveProgress = (event: RenameProgressEvent) => {
     if (event.type === 'start') {
+      setCohorts([]);
       const queued = event.files.map((file): FileProgress => ({ ...file, phase: 'queued' }));
       const byId = new Map(queued.map((file) => [file.documentId, file]));
       setFiles((current) =>
         current.length ? current.map((file) => byId.get(file.documentId) ?? file) : queued,
       );
+    } else if (event.type === 'estimates') {
+      setCohorts(event.cohorts);
     } else if (event.type === 'reading') {
       updateFile(event.documentId, { phase: 'reading' });
     } else if (event.type === 'drafting') {
@@ -160,7 +136,7 @@ export const DocumentRenameSuggestionsDialog: Component<{
           receiveProgress(event);
           const now = Date.now();
           setNow(now);
-          return estimateRemaining(files(), now);
+          return estimateRemaining(files(), now, cohorts());
         },
       }),
     onError: (_error, request) => {
@@ -254,6 +230,7 @@ export const DocumentRenameSuggestionsDialog: Component<{
     onCleanup(() => controller.abort());
     setRows([]);
     setFiles([]);
+    setCohorts([]);
     setStartedAt(Date.now());
     setNow(Date.now());
     setSaveNotes(true);
@@ -274,8 +251,9 @@ export const DocumentRenameSuggestionsDialog: Component<{
     files().filter((file) => file.phase === 'ready' || file.phase === 'failed').length;
   const failedCount = () => files().filter((file) => file.phase === 'failed').length;
   const elapsed = () => durationLabel(Math.max(0, Math.floor((now() - startedAt()) / 1000)));
+  const remainingEstimate = createMemo(() => estimateRemaining(files(), now(), cohorts()));
   const estimateLabel = () => {
-    const remaining = estimateRemaining(files(), now());
+    const remaining = remainingEstimate();
     if (remaining === 0) return 'Taking longer than estimated';
     if (remaining !== undefined) return `About ${durationLabel(remaining / 1000)} left`;
     return files().length > 1
@@ -301,6 +279,7 @@ export const DocumentRenameSuggestionsDialog: Component<{
     const now = Date.now();
     setStartedAt(now);
     setNow(now);
+    setCohorts([]);
     setFiles((current) =>
       current.map((file) =>
         requested.has(file.documentId)
@@ -364,7 +343,11 @@ export const DocumentRenameSuggestionsDialog: Component<{
                       <span
                         class={file.phase === 'failed' ? 'text-red-400' : 'text-muted-foreground'}
                       >
-                        {fileStatus(file, now())}
+                        {fileStatus(
+                          file,
+                          now(),
+                          remainingEstimate() === undefined ? cohorts() : [],
+                        )}
                       </span>
                     </li>
                   )}

@@ -224,7 +224,7 @@ describe('D1 collaboration authorization and actual routes', () => {
     expect((await f.request(startup, 'GET', undefined, 'reader')).status).toBe(403);
   });
 
-  test('streams a ready rename draft while another file is still drafting', async () => {
+  test.each(['available', 'slow'])('streams drafts with an %s ETA cache', async (cache) => {
     const f = await fixture();
     let finishSlowDraft: () => void = () => {};
     const slowDraft = new Promise<void>((resolve) => {
@@ -250,7 +250,21 @@ describe('D1 collaboration authorization and actual routes', () => {
         ],
       };
     });
-    Object.assign(f.env, { AI: { run: model } });
+    let finishCacheRead: () => void = () => {};
+    const cacheRead = new Promise<void>((resolve) => {
+      finishCacheRead = resolve;
+    });
+    Object.assign(f.env, {
+      AI: { run: model },
+      POSTHOG_RENAME_PROJECT_ID: '123',
+      POSTHOG_RENAME_QUERY_KEY: 'server-only',
+      FILES: {
+        get: vi.fn(async () => {
+          if (cache === 'slow') await cacheRead;
+          return { uploaded: new Date(), size: 17, json: async () => [[0, 1, 30, 6000]] };
+        }),
+      },
+    });
     const response = await f.app.request(
       `${f.base}/documents/batch/suggest-names`,
       {
@@ -275,6 +289,12 @@ describe('D1 collaboration authorization and actual routes', () => {
     try {
       await vi.waitFor(() => {
         expect(model).toHaveBeenCalledTimes(2);
+        if (cache === 'available') {
+          expect(events).toContainEqual({
+            type: 'estimates',
+            cohorts: [{ frames: 0, hasText: true, draftMs: 6000 }],
+          });
+        }
         expect(events).toContainEqual({
           type: 'drafting',
           documentId: 'doc_secret',
@@ -298,6 +318,7 @@ describe('D1 collaboration authorization and actual routes', () => {
     } finally {
       finishSlowDraft();
       await read;
+      finishCacheRead();
     }
     expect(events.slice(-2)).toEqual([
       { type: 'failed', documentId: 'doc_secret', message: 'Couldn’t generate a suggestion.' },
