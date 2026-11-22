@@ -1,10 +1,10 @@
 # Suggested names ETA
 
-SwyxDrive estimates the remaining wait from comparable drafts in the open preview. It needs a completed draft with the same frame count and text availability and waits for every unfinished file to reach drafting. Before that, the dialog shows elapsed time. The estimator lives in `document-rename-suggestions-dialog.component.tsx`.
+SwyxDrive prefers comparable drafts completed in the open preview. It can also use cached PostHog timings as soon as an active draft has a matching frame count and text availability. While some files are still queued, it can estimate the wait for active drafts. The batch ETA requires every unfinished file to be drafting with an estimate. The dialog always shows elapsed time.
 
 ## Collect timing samples
 
-The production client inspected on November 22, 2026 had PostHog disabled and no project key. Once an approved SwyxDrive project is available, set `VITE_POSTHOG_RENAME_TIMING_ENABLED=true`, `VITE_POSTHOG_API_KEY` to the project's public ingestion key, and `VITE_POSTHOG_HOST` to its ingestion host in the client build. Leave `VITE_POSTHOG_ENABLED` off when enabling timing alone. Never use a personal API key in a Vite variable.
+For timing-only collection, set `VITE_POSTHOG_RENAME_TIMING_ENABLED=true`, `VITE_POSTHOG_API_KEY` to the project's public ingestion key, and `VITE_POSTHOG_HOST` to its ingestion host in the client build. Leave `VITE_POSTHOG_ENABLED` off. Never use a read credential in a Vite variable.
 
 Run one draft-only preview on synthetic files and check PostHog for one attempt event and one file event per terminal file. Inspect the received payload for the expected counts and timings. The timing client uses an anonymous, in-memory identity with person profiles and geolocation disabled. Its events should contain no account, organization or file IDs, URLs, referrers, filenames, descriptions, prompts, previews, or error messages.
 
@@ -12,9 +12,15 @@ Run one draft-only preview on synthetic files and check PostHog for one attempt 
 - `rename_preview_attempt_finished` records outcome, requested/ready/failed counts, and elapsed time once per initial attempt, retry, or description revision. When available, it records the first positive displayed ETA and, for a complete stream, the actual remaining time at that point. A complete stream can include failed files. Cancelled or interrupted attempts lack actual remaining time.
 - Both events include `timing_version`, `build_sha`, `operation`, and `file_count`. These are browser samples. Blocked telemetry or closing a page before delivery can leave gaps.
 
+## Enable the hourly refresh
+
+`POSTHOG_RENAME_PROJECT_ID` is set to the SwyxDrive US project (758276) in `wrangler.jsonc`. Configure `POSTHOG_RENAME_QUERY_KEY` as a Cloudflare Worker secret with project-scoped `query:read` access. With both bindings present, the existing scheduled handler queries PostHog at minute zero UTC. It saves a single aggregate object in the existing private R2 bucket. The query rolls over the last 30 days of successful initial drafts and requires at least 5 samples per frame count and text-availability pair. The preview stream reads the cached medians asynchronously. It uses the ordinary same-preview estimator and elapsed-time fallback if the cache is missing or older than three hours.
+
+After activation, confirm a successful hourly refresh in the Worker logs and check the snapshot timestamp and cohort counts in the private bucket. An empty snapshot means the query succeeded and no cohort met the sample floor. Verify a matching single-file draft shows an ETA before completing. If the model, frame selection, or timeout changes materially, advance the timing version in the client and query and change the snapshot key so old samples do not calibrate the new pipeline.
+
 ## Review and tune
 
-Review monthly or after a change to the model, thumbnail sampling, or parallelism. Compare a recent representative window with a later holdout window. Start with at least 30 successfully drafted files per cohort as a working minimum. Keep the current elapsed-time fallback where coverage is sparse.
+Review monthly or after a change to the model, thumbnail sampling, or parallelism. Compare a recent representative window with a later holdout window. The floor is 5 successfully drafted files per cohort so an estimate appears early; a few slow outliers can skew it, so raise the floor once cohorts grow past 30. Keep the current elapsed-time fallback where coverage is sparse.
 
 Use this [PostHog SQL insight](https://posthog.com/docs/sql) to check the evidence-read and drafting distributions. Compare revisions and retries separately from first attempts.
 
@@ -70,4 +76,4 @@ GROUP BY build, batch_size
 ORDER BY completed_batches DESC
 ```
 
-Only introduce earlier ranges when the data supports them. Use evidence-read and draft percentiles from similar files, respect the Worker’s three active slots when estimating queued work, and keep elapsed time as the fallback. Test the proposed ranges on the later window for coverage and bias before updating the estimator. Record the date, builds, cohort sizes, and before/after error with the change. This runbook does not schedule collection reviews or deploy automatic estimator changes.
+Check estimate coverage and signed error after enough first-attempt data lands. Use evidence-read and draft percentiles from similar files if testing a queued-work ETA and account for the Worker's three active slots. Test proposed changes on a later window and record the date, builds, cohort sizes, and before/after error.

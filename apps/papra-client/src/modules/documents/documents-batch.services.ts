@@ -63,6 +63,7 @@ export type RenameSuggestion = {
 
 export type RenameProgressEvent =
   | { type: 'start'; files: { documentId: string; name: string }[] }
+  | { type: 'estimates'; cohorts: { frames: number; hasText: boolean; draftMs: number }[] }
   | { type: 'reading'; documentId: string }
   | { type: 'drafting'; documentId: string; frames: number; hasText: boolean }
   | { type: 'ready'; suggestion: RenameSuggestion; draftMs?: number }

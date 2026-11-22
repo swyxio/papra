@@ -21,6 +21,8 @@ export type Env = {
   DEVIN_API_KEY?: string;
   DEVIN_SECURITY_PROFILE_ID?: string;
   FEEDBACK_GITHUB_TOKEN?: string;
+  POSTHOG_RENAME_PROJECT_ID?: string;
+  POSTHOG_RENAME_QUERY_KEY?: string;
   AUTH_LIMITER: RateLimit;
   AUTH_SECRET: string;
   GOOGLE_CLIENT_ID: string;

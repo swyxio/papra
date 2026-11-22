@@ -31,6 +31,7 @@ import { modifiedBySQL, modifiedAtSQL, actorNameSQL } from './document-attributi
 import { fetchTranscript } from './transcripts';
 import { canSummarizeTranscript, readRecordingNotes } from './recording-notes';
 import { reserveDocumentAnswer } from './ai-gateway';
+import { readRenameEta } from './rename-eta';
 import type { RenameSource, RenameSuggestion } from './rename-suggestions';
 import {
   MAX_RENAME_BATCH,
@@ -802,7 +803,20 @@ export function registerDocumentRoutes(app: App) {
             }
           }
         };
-        await Promise.all(Array.from({ length: Math.min(3, documents.length) }, runSlot));
+        let draftsDone = false;
+        const drafts = Promise.all(
+          Array.from({ length: Math.min(3, documents.length) }, runSlot),
+        ).then(() => {
+          draftsDone = true;
+        });
+        if (!descriptionRevision) {
+          // Estimates can arrive while files are drafting. A slow cache read never holds up done.
+          const timing = readRenameEta(c.env).then(async (cohorts) => {
+            if (!draftsDone && cohorts.length) await emit({ type: 'estimates', cohorts });
+          });
+          await Promise.race([timing, drafts]);
+        }
+        await drafts;
         await emit({ type: 'done' });
       });
     }
