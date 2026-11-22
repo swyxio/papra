@@ -58,10 +58,11 @@ export async function refreshRenameEta(env: EtaEnv, scheduledTime: number) {
     body: JSON.stringify({
       name: 'SwyxDrive rename preview ETA',
       query: { kind: 'HogQLQuery', query: draftTimesQuery },
-      refresh: 'force_blocking',
+      refresh: 'blocking',
     }),
     redirect: 'manual',
-    signal: AbortSignal.timeout(15_000),
+    // PostHog can take longer than 15 s to compute 30 days of events. Cron handlers may run for minutes.
+    signal: AbortSignal.timeout(90_000),
   });
   if (!response.ok) throw new Error(`PostHog rename ETA query returned ${response.status}`);
   const { results } = await response.json<{ results?: unknown }>();
