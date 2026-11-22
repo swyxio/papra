@@ -2,7 +2,7 @@ import type { Env } from './types';
 
 const cacheKey = 'internal/rename-eta-v1.json';
 const maxCacheAge = 3 * 60 * 60_000;
-const minimumSamples = 30;
+const minimumSamples = 5;
 type Cohort = [frames: number, hasText: 0 | 1, samples: number, draftMs: number];
 type EtaEnv = Pick<Env, 'FILES' | 'POSTHOG_RENAME_PROJECT_ID' | 'POSTHOG_RENAME_QUERY_KEY'>;
 

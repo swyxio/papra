@@ -14,13 +14,13 @@ Run one draft-only preview on synthetic files and check PostHog for one attempt 
 
 ## Enable the hourly refresh
 
-Set `POSTHOG_RENAME_PROJECT_ID` to the SwyxDrive US project ID and configure `POSTHOG_RENAME_QUERY_KEY` as a Cloudflare Worker secret with project-scoped `query:read` access. With both bindings present, the existing scheduled handler queries PostHog at minute zero UTC. It saves a single aggregate object in the existing private R2 bucket. The query rolls over the last 30 days of successful initial drafts and requires at least 30 samples per frame count and text-availability pair. The preview stream reads the cached medians asynchronously. It uses the ordinary same-preview estimator and elapsed-time fallback if the cache is missing or older than three hours.
+Set `POSTHOG_RENAME_PROJECT_ID` to the SwyxDrive US project ID and configure `POSTHOG_RENAME_QUERY_KEY` as a Cloudflare Worker secret with project-scoped `query:read` access. With both bindings present, the existing scheduled handler queries PostHog at minute zero UTC. It saves a single aggregate object in the existing private R2 bucket. The query rolls over the last 30 days of successful initial drafts and requires at least 5 samples per frame count and text-availability pair. The preview stream reads the cached medians asynchronously. It uses the ordinary same-preview estimator and elapsed-time fallback if the cache is missing or older than three hours.
 
 After activation, confirm a successful hourly refresh in the Worker logs and check the snapshot timestamp and cohort counts in the private bucket. An empty snapshot means the query succeeded and no cohort met the sample floor. Verify a matching single-file draft shows an ETA before completing. If the model, frame selection, or timeout changes materially, advance the timing version in the client and query and change the snapshot key so old samples do not calibrate the new pipeline.
 
 ## Review and tune
 
-Review monthly or after a change to the model, thumbnail sampling, or parallelism. Compare a recent representative window with a later holdout window. Start with at least 30 successfully drafted files per cohort as a working minimum. Keep the current elapsed-time fallback where coverage is sparse.
+Review monthly or after a change to the model, thumbnail sampling, or parallelism. Compare a recent representative window with a later holdout window. The floor is 5 successfully drafted files per cohort so an estimate appears early; a few slow outliers can skew it, so raise the floor once cohorts grow past 30. Keep the current elapsed-time fallback where coverage is sparse.
 
 Use this [PostHog SQL insight](https://posthog.com/docs/sql) to check the evidence-read and drafting distributions. Compare revisions and retries separately from first attempts.
 

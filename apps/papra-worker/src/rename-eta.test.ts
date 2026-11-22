@@ -40,7 +40,7 @@ test('refreshes the aggregate on the hour and serves only draft medians', async 
       method: 'POST',
       headers: { 'Authorization': 'Bearer test-query-key', 'Content-Type': 'application/json' },
       redirect: 'manual',
-      body: expect.stringContaining('HAVING count() >= 30'),
+      body: expect.stringContaining('HAVING count() >= 5'),
     }),
   );
   expect(put).toHaveBeenCalledExactlyOnceWith('internal/rename-eta-v1.json', JSON.stringify(rows));
@@ -67,7 +67,7 @@ test('rejects invalid or under-sampled cohorts and accepts an empty result', asy
   const { env, put } = fixture();
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () => Response.json({ results: [[3, 1, 29, 6000]] })),
+    vi.fn(async () => Response.json({ results: [[3, 1, 4, 6000]] })),
   );
   await expect(refreshRenameEta(env, hour)).rejects.toThrow('invalid rename ETA cohorts');
   expect(put).not.toHaveBeenCalled();
