@@ -88,5 +88,6 @@
     "R2_BUCKET": "papra-drive",
     "VERSION": "26.6.2-swyx.1",
     "SOURCE_SHA": "pending",
+    "POSTHOG_RENAME_PROJECT_ID": "758276",
   },
 }
