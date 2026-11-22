@@ -643,20 +643,22 @@ try {
     },
   ];
   const sharePath = `${origin}/api/organizations/org_test/folders/fld_parent/share-links`;
-  await uploader.route(`${origin}/api/organizations/org_test/folders/*/received-files`, (route) =>
-    route.fulfill({
-      json: {
-        folders: receivedFiles.length ? [{ id: 'fld_parent', count: receivedFiles.length }] : [],
-      },
-    }),
+  await uploader.route(
+    `${origin}/api/organizations/org_test/folders/*/received-files`,
+    async (route) =>
+      route.fulfill({
+        json: {
+          folders: receivedFiles.length ? [{ id: 'fld_parent', count: receivedFiles.length }] : [],
+        },
+      }),
   );
-  await uploader.route(`${sharePath}/handoff`, (route) =>
+  await uploader.route(`${sharePath}/handoff`, async (route) =>
     route.fulfill({ json: { note: '', fileLimit: 5, maxBytes: 2 * 1024 ** 3 } }),
   );
-  await uploader.route(`${sharePath}/inbox`, (route) =>
+  await uploader.route(`${sharePath}/inbox`, async (route) =>
     route.fulfill({ json: { uploads: receivedFiles } }),
   );
-  await uploader.route(`${sharePath}/inbox/gu_fixture/accept`, (route) => {
+  await uploader.route(`${sharePath}/inbox/gu_fixture/accept`, async (route) => {
     receivedFiles = [];
     return route.fulfill({ status: 204, body: '' });
   });
