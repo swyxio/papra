@@ -64,28 +64,74 @@ export function FolderHandoff(props: { path: string; organizationId: string; isP
       }),
     onSuccess: (result) => setNote(result.note),
   }));
+  // Waits only for the review list; badges and folder views refresh in the background so a slow
+  // folder listing cannot hold the review buttons disabled.
+  const refreshReceived = async () => {
+    void client.invalidateQueries({ queryKey: receivedFilesQueryKey(props.organizationId) });
+    void client.invalidateQueries({ queryKey: ['public-folder'] });
+    void client.invalidateQueries({
+      queryKey: ['organizations', props.organizationId, 'documents'],
+    });
+    void client.invalidateQueries({ queryKey: ['organizations', props.organizationId, 'folders'] });
+    await client.invalidateQueries({ queryKey: inboxKey() });
+  };
   const accept = useMutation(() => ({
     mutationFn: async (id: string) =>
       apiClient({ path: `${props.path}/inbox/${id}/accept`, method: 'POST' }),
     onSuccess: async () => {
-      await Promise.all([
-        client.invalidateQueries({ queryKey: inboxKey() }),
-        client.invalidateQueries({ queryKey: receivedFilesQueryKey(props.organizationId) }),
-        client.invalidateQueries({ queryKey: ['public-folder'] }),
-        client.invalidateQueries({
-          queryKey: ['organizations', props.organizationId, 'documents'],
-        }),
-        client.invalidateQueries({ queryKey: ['organizations', props.organizationId, 'folders'] }),
-      ]);
+      await refreshReceived();
       createToast({ type: 'success', message: 'File added to the folder' });
     },
   }));
+  // Adds the files currently listed one at a time, so a failure part way keeps the ones already added.
+  const acceptAll = useMutation(() => ({
+    mutationFn: async (ids: string[]) => {
+      let added = 0;
+      try {
+        for (const id of ids) {
+          await apiClient({ path: `${props.path}/inbox/${id}/accept`, method: 'POST' });
+          added++;
+        }
+      } finally {
+        await refreshReceived();
+      }
+      return added;
+    },
+    onSuccess: (added) =>
+      createToast({
+        type: 'success',
+        message: `${added} ${added === 1 ? 'file' : 'files'} added to the folder`,
+      }),
+  }));
+  const [declining, setDeclining] = createSignal<string>();
+  const decline = useMutation(() => ({
+    mutationFn: async (id: string) =>
+      apiClient({ path: `${props.path}/inbox/${id}/decline`, method: 'POST' }),
+    onSuccess: async () => {
+      setDeclining(undefined);
+      await refreshReceived();
+      createToast({ type: 'success', message: 'File declined and deleted' });
+    },
+  }));
+  const reviewing = () => accept.isPending || acceptAll.isPending || decline.isPending;
   return (
     <div class="space-y-4 border-t pt-3">
       {/* Files awaiting review come first so owners arriving from a review badge see them. */}
       <Show when={requestFiles() || inbox.data?.uploads.length || inbox.error}>
         <section class="space-y-2" aria-label="Received files">
-          <h3 class="text-sm font-semibold">Received files</h3>
+          <div class="flex items-center justify-between gap-2">
+            <h3 class="text-sm font-semibold">Received files</h3>
+            <Show when={(inbox.data?.uploads.length ?? 0) > 1}>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={reviewing()}
+                onClick={() => acceptAll.mutate(inbox.data!.uploads.map((file) => file.id))}
+              >
+                {acceptAll.isPending ? 'Adding…' : `Add all ${inbox.data!.uploads.length}`}
+              </Button>
+            </Show>
+          </div>
           <Show
             when={inbox.data?.uploads.length}
             fallback={
@@ -116,14 +162,46 @@ export function FolderHandoff(props: { path: string; organizationId: string; isP
                     >
                       Download
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={accept.isPending}
-                      onClick={() => accept.mutate(file.id)}
+                    <Show
+                      when={declining() === file.id}
+                      fallback={
+                        <>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={reviewing()}
+                            onClick={() => accept.mutate(file.id)}
+                          >
+                            Add to folder
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={reviewing()}
+                            onClick={() => setDeclining(file.id)}
+                          >
+                            Decline
+                          </Button>
+                        </>
+                      }
                     >
-                      Add to folder
-                    </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        disabled={reviewing()}
+                        onClick={() => decline.mutate(file.id)}
+                      >
+                        Delete file
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={decline.isPending}
+                        onClick={() => setDeclining(undefined)}
+                      >
+                        Keep
+                      </Button>
+                    </Show>
                   </div>
                 </div>
               )}
@@ -222,7 +300,7 @@ export function FolderHandoff(props: { path: string; organizationId: string; isP
           Save handoff
         </Button>
       </Show>
-      <Show when={save.error || draft.error || accept.error}>
+      <Show when={save.error || draft.error || accept.error || acceptAll.error || decline.error}>
         {(error) => (
           <p role="alert" class="text-sm text-destructive">
             {getHttpErrorMessage(error())}

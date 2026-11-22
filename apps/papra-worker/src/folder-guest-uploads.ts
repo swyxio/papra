@@ -355,6 +355,28 @@ export function registerGuestInbox(app: App, base: string) {
     await dispatchVersionJobs(env, [versionId]);
     return c.body(null, 204);
   });
+  // Declining forgets the upload and its bytes. The row is removed only while it is still
+  // waiting, so a concurrent accept either wins (and keeps the bytes) or finds nothing to add.
+  app.post(`${base}/:upload/decline`, async (c) => {
+    const upload = await received(c);
+    if (upload.status === 'accepted') throw error(409, 'This file is already in the folder');
+    const removed = await run(
+      c.env,
+      "DELETE FROM folder_guest_uploads WHERE id=? AND status='received'",
+      upload.id,
+    );
+    if (!removed.meta.changes) {
+      const accepted = await first(
+        c.env,
+        "SELECT 1 FROM folder_guest_uploads WHERE id=? AND status='accepted'",
+        upload.id,
+      );
+      if (accepted) throw error(409, 'This file is already in the folder');
+      return c.body(null, 204);
+    }
+    await c.env.FILES.delete(upload.storage_key);
+    return c.body(null, 204);
+  });
 }
 
 export async function expireGuestUploads(env: Env) {

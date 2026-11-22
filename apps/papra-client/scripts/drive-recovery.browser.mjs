@@ -641,6 +641,22 @@ try {
       verified: true,
       createdAt: 1,
     },
+    {
+      id: 'gu_spam',
+      name: 'unexpected.zip',
+      size: 4096,
+      uploader: 'stranger@example.test',
+      verified: false,
+      createdAt: 2,
+    },
+    {
+      id: 'gu_notes',
+      name: 'guest-notes.txt',
+      size: 512,
+      uploader: 'guest@example.test',
+      verified: true,
+      createdAt: 3,
+    },
   ];
   const sharePath = `${origin}/api/organizations/org_test/folders/fld_parent/share-links`;
   await uploader.route(
@@ -658,22 +674,35 @@ try {
   await uploader.route(`${sharePath}/inbox`, async (route) =>
     route.fulfill({ json: { uploads: receivedFiles } }),
   );
-  await uploader.route(`${sharePath}/inbox/gu_fixture/accept`, async (route) => {
-    receivedFiles = [];
+  const reviewed = [];
+  await uploader.route(`${sharePath}/inbox/*/*`, async (route) => {
+    const [id, action] = new URL(route.request().url()).pathname.split('/').slice(-2);
+    if (!['accept', 'decline'].includes(action)) return route.fallback();
+    assert.equal(route.request().method(), 'POST');
+    reviewed.push(`${action} ${id}`);
+    receivedFiles = receivedFiles.filter((file) => file.id !== id);
     return route.fulfill({ status: 204, body: '' });
   });
   await uploader.goto(`${origin}/orgs/org_test/documents?folder=${homeId}`);
-  await uploader.getByRole('button', { name: '1 to review', exact: true }).click();
+  await uploader.getByRole('button', { name: '3 to review', exact: true }).click();
   const receivedList = uploader.getByRole('region', { name: 'Received files' });
   await expect(receivedList.getByText('guest-clip.mp4', { exact: true })).toBeVisible();
   await expect(
-    receivedList.getByRole('button', { name: 'Add to folder', exact: true }),
+    receivedList.getByRole('button', { name: 'Add to folder', exact: true }).first(),
   ).toBeInViewport();
-  await receivedList.getByRole('button', { name: 'Add to folder', exact: true }).click();
+  const spam = receivedList.locator('div.border', { hasText: 'unexpected.zip' });
+  await spam.getByRole('button', { name: 'Decline', exact: true }).click();
+  await spam.getByRole('button', { name: 'Keep', exact: true }).click();
+  assert.deepEqual(reviewed, []);
+  await spam.getByRole('button', { name: 'Decline', exact: true }).click();
+  await spam.getByRole('button', { name: 'Delete file', exact: true }).click();
+  await expect(receivedList.getByText('unexpected.zip', { exact: true })).toBeHidden();
+  await receivedList.getByRole('button', { name: 'Add all 2', exact: true }).click();
   await expect(receivedList.getByText('No files awaiting review.', { exact: true })).toBeVisible();
+  assert.deepEqual(reviewed, ['decline gu_spam', 'accept gu_fixture', 'accept gu_notes']);
   await expect(uploader.getByRole('button', { name: 'Share folder', exact: true })).toBeVisible();
   process.stdout.write(
-    'Chrome verified the received-files badge opens the review list and clears after approval.\n',
+    'Chrome verified the received-files badge opens the review list, declines a file and adds the rest.\n',
   );
 
   const videos = ['front', 'wide'].map((angle) => ({
