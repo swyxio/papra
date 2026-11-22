@@ -2,6 +2,7 @@ import { formatBytes } from '@corentinth/chisels';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/solid-query';
 import { createSignal, For, Show } from 'solid-js';
 import { buildTimeConfig } from '../config/config';
+import { receivedFilesQueryKey } from './drive-collaboration.services';
 import { apiClient } from '../shared/http/api-client';
 import { getHttpErrorMessage } from '../shared/http/http-errors';
 import { Button } from '../ui/components/button';
@@ -69,6 +70,7 @@ export function FolderHandoff(props: { path: string; organizationId: string; isP
     onSuccess: async () => {
       await Promise.all([
         client.invalidateQueries({ queryKey: inboxKey() }),
+        client.invalidateQueries({ queryKey: receivedFilesQueryKey(props.organizationId) }),
         client.invalidateQueries({ queryKey: ['public-folder'] }),
         client.invalidateQueries({
           queryKey: ['organizations', props.organizationId, 'documents'],

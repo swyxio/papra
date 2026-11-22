@@ -1435,3 +1435,50 @@ test('Tag and custom property changes record the modifying person', async () => 
   doc = ((await (await f.request(`${f.base}/documents/doc_public`)).json()) as any).document;
   expect(doc.modifiedBy.id).toBe('writer');
 });
+
+test('received-file counts cover the folder and its direct children for reviewers only', async () => {
+  const f = await fixture();
+  const { registerReceivedCounts } = await import('./folder-guest-uploads');
+  registerReceivedCounts(f.app);
+  for (const [id, folder, status] of [
+    ['gu_1', f.open, 'received'],
+    ['gu_2', f.open, 'received'],
+    ['gu_3', f.open, 'accepted'],
+    ['gu_4', f.secret, 'received'],
+    ['gu_5', f.deep, 'received'],
+    ['gu_6', f.home, 'uploading'],
+  ])
+    await f.DB.prepare(
+      `INSERT INTO folder_guest_uploads
+      (id,folder_id,organization_id,user_id,uploader,file_name,mime_type,size,storage_key,status,created_at,updated_at)
+      VALUES (?,?,?,NULL,'guest@example.com','clip.mp4','video/mp4',1,?,?,1,1)`,
+    )
+      .bind(id!, folder!, f.team, `private/${id}`, status!)
+      .run();
+  const counts = async (folder: string, user: string) => {
+    const response = await f.request(
+      `${f.base}/folders/${folder}/received-files`,
+      'GET',
+      undefined,
+      user,
+    );
+    return { status: response.status, body: (await response.json()) as { folders?: unknown[] } };
+  };
+  const home = await counts(f.home, 'admin');
+  expect(home.status).toBe(200);
+  expect(home.body.folders).toEqual(
+    expect.arrayContaining([
+      { id: f.open, count: 2 },
+      { id: f.secret, count: 1 },
+    ]),
+  );
+  expect(home.body.folders).toHaveLength(2);
+  expect((await counts(f.secret, 'owner')).body.folders).toEqual(
+    expect.arrayContaining([
+      { id: f.secret, count: 1 },
+      { id: f.deep, count: 1 },
+    ]),
+  );
+  expect((await counts(f.home, 'reader')).body).toEqual({ folders: [] });
+  expect((await counts(f.open, 'outsider')).status).toBeGreaterThanOrEqual(403);
+});

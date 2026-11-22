@@ -2,7 +2,11 @@ import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import type { App, AppEnv, Env } from './types';
 import { AI_GATEWAY, reserveDocumentAnswer } from './ai-gateway';
-import { registerGuestInbox, registerGuestUploadRoutes } from './folder-guest-uploads';
+import {
+  registerGuestInbox,
+  registerGuestUploadRoutes,
+  registerReceivedCounts,
+} from './folder-guest-uploads';
 import { enrichmentKey } from './transcripts';
 import { approvedIdentityEmail } from './auth';
 import { folderSharingAccess } from './collaboration';
@@ -125,6 +129,7 @@ export async function publicFolderTitle(env: Env, ref: PublicFolderRef) {
 export function registerFolderShareRoutes(app: App) {
   const managed = '/api/organizations/:org/folders/:folderId/share-links';
   registerGuestInbox(app, `${managed}/inbox`);
+  registerReceivedCounts(app);
   registerGuestUploadRoutes(app, `${legacyBase}/:token`, async (c) =>
     readPublicFolder(c.env, { token: c.req.param('token')! }, c.req.query('folder')),
   );
