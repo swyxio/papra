@@ -666,6 +666,9 @@ try {
   await uploader.getByRole('button', { name: '1 to review', exact: true }).click();
   const receivedList = uploader.getByRole('region', { name: 'Received files' });
   await expect(receivedList.getByText('guest-clip.mp4', { exact: true })).toBeVisible();
+  await expect(
+    receivedList.getByRole('button', { name: 'Add to folder', exact: true }),
+  ).toBeInViewport();
   await receivedList.getByRole('button', { name: 'Add to folder', exact: true }).click();
   await expect(receivedList.getByText('No files awaiting review.', { exact: true })).toBeVisible();
   await expect(uploader.getByRole('button', { name: 'Share folder', exact: true })).toBeVisible();

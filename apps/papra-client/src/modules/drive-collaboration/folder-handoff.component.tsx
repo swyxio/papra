@@ -82,6 +82,55 @@ export function FolderHandoff(props: { path: string; organizationId: string; isP
   }));
   return (
     <div class="space-y-4 border-t pt-3">
+      {/* Files awaiting review come first so owners arriving from a review badge see them. */}
+      <Show when={requestFiles() || inbox.data?.uploads.length || inbox.error}>
+        <section class="space-y-2" aria-label="Received files">
+          <h3 class="text-sm font-semibold">Received files</h3>
+          <Show
+            when={inbox.data?.uploads.length}
+            fallback={
+              <p class="text-xs text-muted-foreground">
+                {inbox.isPending
+                  ? 'Checking for files…'
+                  : inbox.isError
+                    ? 'Could not load received files.'
+                    : 'No files awaiting review.'}
+              </p>
+            }
+          >
+            <For each={inbox.data?.uploads}>
+              {(file) => (
+                <div class="space-y-1 rounded-md border p-2 text-xs">
+                  <p class="break-words font-medium">{file.name}</p>
+                  <p class="break-words text-muted-foreground">
+                    {file.uploader}
+                    {file.verified ? '' : ' · unverified'} · {formatBytes({ bytes: file.size })}
+                  </p>
+                  <div class="flex flex-wrap gap-1">
+                    <Button
+                      as="a"
+                      size="sm"
+                      variant="ghost"
+                      download={file.name}
+                      href={`${buildTimeConfig.baseApiUrl}${props.path}/inbox/${file.id}/download`}
+                    >
+                      Download
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={accept.isPending}
+                      onClick={() => accept.mutate(file.id)}
+                    >
+                      Add to folder
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </For>
+          </Show>
+        </section>
+      </Show>
       <Show
         when={handoff.data}
         fallback={
@@ -172,54 +221,6 @@ export function FolderHandoff(props: { path: string; organizationId: string; isP
         >
           Save handoff
         </Button>
-      </Show>
-      <Show when={requestFiles() || inbox.data?.uploads.length || inbox.error}>
-        <section class="space-y-2" aria-label="Received files">
-          <h3 class="text-sm font-semibold">Received files</h3>
-          <Show
-            when={inbox.data?.uploads.length}
-            fallback={
-              <p class="text-xs text-muted-foreground">
-                {inbox.isPending
-                  ? 'Checking for files…'
-                  : inbox.isError
-                    ? 'Could not load received files.'
-                    : 'No files awaiting review.'}
-              </p>
-            }
-          >
-            <For each={inbox.data?.uploads}>
-              {(file) => (
-                <div class="space-y-1 rounded-md border p-2 text-xs">
-                  <p class="break-words font-medium">{file.name}</p>
-                  <p class="break-words text-muted-foreground">
-                    {file.uploader}
-                    {file.verified ? '' : ' · unverified'} · {formatBytes({ bytes: file.size })}
-                  </p>
-                  <div class="flex flex-wrap gap-1">
-                    <Button
-                      as="a"
-                      size="sm"
-                      variant="ghost"
-                      download={file.name}
-                      href={`${buildTimeConfig.baseApiUrl}${props.path}/inbox/${file.id}/download`}
-                    >
-                      Download
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={accept.isPending}
-                      onClick={() => accept.mutate(file.id)}
-                    >
-                      Add to folder
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </For>
-          </Show>
-        </section>
       </Show>
       <Show when={save.error || draft.error || accept.error}>
         {(error) => (
