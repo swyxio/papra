@@ -632,6 +632,45 @@ try {
     'Chrome verified immediate folder link copy during publishing and retry after a stalled clipboard.\n',
   );
 
+  let receivedFiles = [
+    {
+      id: 'gu_fixture',
+      name: 'guest-clip.mp4',
+      size: 2048,
+      uploader: 'guest@example.test',
+      verified: true,
+      createdAt: 1,
+    },
+  ];
+  const sharePath = `${origin}/api/organizations/org_test/folders/fld_parent/share-links`;
+  await uploader.route(`${origin}/api/organizations/org_test/folders/*/received-files`, (route) =>
+    route.fulfill({
+      json: {
+        folders: receivedFiles.length ? [{ id: 'fld_parent', count: receivedFiles.length }] : [],
+      },
+    }),
+  );
+  await uploader.route(`${sharePath}/handoff`, (route) =>
+    route.fulfill({ json: { note: '', fileLimit: 5, maxBytes: 2 * 1024 ** 3 } }),
+  );
+  await uploader.route(`${sharePath}/inbox`, (route) =>
+    route.fulfill({ json: { uploads: receivedFiles } }),
+  );
+  await uploader.route(`${sharePath}/inbox/gu_fixture/accept`, (route) => {
+    receivedFiles = [];
+    return route.fulfill({ status: 204, body: '' });
+  });
+  await uploader.goto(`${origin}/orgs/org_test/documents?folder=${homeId}`);
+  await uploader.getByRole('button', { name: '1 to review', exact: true }).click();
+  const receivedList = uploader.getByRole('region', { name: 'Received files' });
+  await expect(receivedList.getByText('guest-clip.mp4', { exact: true })).toBeVisible();
+  await receivedList.getByRole('button', { name: 'Add to folder', exact: true }).click();
+  await expect(receivedList.getByText('No files awaiting review.', { exact: true })).toBeVisible();
+  await expect(uploader.getByRole('button', { name: 'Share folder', exact: true })).toBeVisible();
+  process.stdout.write(
+    'Chrome verified the received-files badge opens the review list and clears after approval.\n',
+  );
+
   const videos = ['front', 'wide'].map((angle) => ({
     ...makeDocument(`doc_${angle}`, `${angle}.mp4`, 64),
     currentVersionId: `ver_${angle}`,

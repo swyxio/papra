@@ -31,6 +31,7 @@ import {
   folderViewQuery,
   homeFolderId,
   folderIsDescendant,
+  receivedFilesQuery,
   folderPath,
 } from './drive-collaboration.services';
 import { isPendingFolderId, pendingFolderPrefix, selectRange } from './drive-folders.models';
@@ -348,6 +349,14 @@ export const DriveFolders: Component<{
     !viewData() || folderStats.isPending || folderAccessLost(folderStats.error)
       ? undefined
       : folderStats.data?.folders.find((folder) => folder.id === id);
+  const received = useQuery(() => ({
+    ...receivedFilesQuery(props.organizationId, folderId()),
+    enabled: !isPendingFolderId(folderId()) && Boolean(viewData()?.canManageAccess),
+  }));
+  const receivedCount = (id: string) =>
+    received.data?.folders.find((folder) => folder.id === id)?.count ?? 0;
+  // Opening a folder from a row's review badge also opens its Share folder review list.
+  const [reviewFolderId, setReviewFolderId] = createSignal<string>();
   const treeOptions = () => folderTreeQuery(props.organizationId);
   const tree = useQuery(() => ({
     ...treeOptions(),
@@ -676,6 +685,9 @@ export const DriveFolders: Component<{
                   organizationId={props.organizationId}
                   folderId={id}
                   canManagePublic={Boolean(viewData()?.canManageAccess)}
+                  receivedCount={receivedCount(id)}
+                  openReview={reviewFolderId() === id}
+                  onReviewOpened={() => setReviewFolderId(undefined)}
                 />
               )}
             </Show>
@@ -863,6 +875,20 @@ export const DriveFolders: Component<{
                       </Show>
                       <span class="i-tabler-chevron-right size-4 shrink-0 text-muted-foreground" />
                     </button>
+                    <Show when={receivedCount(folder.id) > 0}>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        class="mr-1 h-7 shrink-0 rounded-full bg-amber-500/15 px-2.5 text-xs font-medium text-amber-700 hover:bg-amber-500/25 dark:text-amber-300"
+                        title="Review files guests sent to this folder"
+                        onClick={() => {
+                          setReviewFolderId(folder.id);
+                          openFolder(folder.id);
+                        }}
+                      >
+                        {receivedCount(folder.id)} to review
+                      </Button>
+                    </Show>
                     <Button
                       variant="ghost"
                       size="icon"

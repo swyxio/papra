@@ -53,7 +53,7 @@ function fail(status: 400 | 403 | 404 | 409, message: string): never {
 }
 const id = (prefix: string) => `${prefix}_${crypto.randomUUID().replaceAll('-', '').slice(0, 24)}`;
 const now = () => Date.now();
-const elevated = (role: string) => role === 'owner' || role === 'admin';
+export const elevated = (role: string) => role === 'owner' || role === 'admin';
 const iso = (value: number | null) => (value === null ? null : new Date(value).toISOString());
 export const organizationHomeFolderId = (organizationId: string) => `fld_home_${organizationId}`;
 

@@ -1,7 +1,7 @@
 import type { Context } from 'hono';
 import type { App, AppEnv, Env } from './types';
 import { getIdentity } from './auth';
-import { folderSharingAccess } from './collaboration';
+import { elevated, folderAccess, folderSharingAccess } from './collaboration';
 import { all, error, first, id, run } from './db';
 import { downloadBytes } from './download';
 import { storedFileMime } from './file-type';
@@ -383,4 +383,31 @@ export async function expireGuestUploads(env: Env) {
       }
     }),
   );
+}
+
+// Pending guest files for a folder and its direct children, for the people who can review them.
+export function registerReceivedCounts(app: App) {
+  app.get('/api/organizations/:org/folders/:folderId/received-files', async (c) => {
+    const identity = c.get('identity');
+    if (identity.serviceScope) throw error(403, 'Use your account to review received files');
+    const { folder, access } = await folderAccess(
+      c.env,
+      identity,
+      c.req.param('folderId')!,
+      'read',
+    );
+    if (folder.organization_id !== c.req.param('org')) throw error(404, 'Folder not found');
+    if (!elevated(access.role) && access.personalOwnerId !== identity.userId)
+      return c.json({ folders: [] });
+    const folders = await all<{ id: string; count: number }>(
+      c.env,
+      `SELECT u.folder_id AS id,COUNT(*) AS count FROM folder_guest_uploads u JOIN folders f ON f.id=u.folder_id
+      WHERE u.organization_id=? AND u.status='received' AND (f.id=? OR f.parent_id=?)
+      GROUP BY u.folder_id`,
+      folder.organization_id,
+      folder.id,
+      folder.id,
+    );
+    return c.json({ folders });
+  });
 }

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/solid-query';
-import { createSignal, onCleanup, Show } from 'solid-js';
+import { createEffect, createSignal, onCleanup, Show } from 'solid-js';
 import { canonicalOrganizationUrl } from '../navigation/organization-urls';
 import { apiClient } from '../shared/http/api-client';
 import { getHttpErrorMessage } from '../shared/http/http-errors';
@@ -23,8 +23,12 @@ export function ShareFolder(props: {
   organizationId: string;
   folderId: string;
   canManagePublic: boolean;
+  receivedCount?: number;
+  openReview?: boolean;
+  onReviewOpened?: () => void;
 }) {
   const [audience, setAudience] = createSignal<Audience>();
+  const [open, setOpen] = createSignal(false);
   const [handoffOpen, setHandoffOpen] = createSignal(false);
   const [copyFailed, setCopyFailed] = createSignal(false);
   let copyAttempt = 0;
@@ -93,6 +97,25 @@ export function ShareFolder(props: {
     onSettled: async () => client.invalidateQueries({ queryKey: queryKey() }),
   }));
 
+  const received = () => props.receivedCount ?? 0;
+  const changeOpen = (next: boolean) => {
+    setOpen(next);
+    if (!next) {
+      setHandoffOpen(false);
+      return;
+    }
+    setCopyFailed(false);
+    // Go straight to the review list when guests have sent files.
+    if (received() > 0) setHandoffOpen(true);
+    if (props.canManagePublic && !create.isPending) void client.prefetchQuery(query());
+  };
+  createEffect(() => {
+    if (!props.openReview) return;
+    changeOpen(true);
+    setHandoffOpen(true);
+    props.onReviewOpened?.();
+  });
+
   const copyAddress = async () => {
     const attempt = ++copyAttempt;
     clearTimeout(copyTimer);
@@ -121,22 +144,20 @@ export function ShareFolder(props: {
   };
 
   return (
-    <Popover
-      placement="bottom-end"
-      gutter={8}
-      flip
-      onOpenChange={(open) => {
-        if (!open) {
-          setHandoffOpen(false);
-          return;
-        }
-        setCopyFailed(false);
-        if (props.canManagePublic && !create.isPending) void client.prefetchQuery(query());
-      }}
-    >
-      <PopoverTrigger as={Button} variant="outline" size="sm">
+    <Popover placement="bottom-end" gutter={8} flip open={open()} onOpenChange={changeOpen}>
+      <PopoverTrigger
+        as={Button}
+        variant="outline"
+        size="sm"
+        title={received() > 0 ? `${received()} received files to review` : undefined}
+      >
         <div class="i-tabler-share size-4 mr-1.5" />
         Share folder
+        <Show when={received() > 0}>
+          <span class="ml-1.5 rounded-full bg-amber-500/15 px-1.5 text-xs font-medium text-amber-700 dark:text-amber-300">
+            {received()}
+          </span>
+        </Show>
       </PopoverTrigger>
       <PopoverContent class="w-80 max-w-[calc(100vw-1.5rem)] max-h-[min(38rem,70dvh)] overflow-auto space-y-3">
         <PopoverTitle class="font-semibold">Share folder</PopoverTitle>
@@ -224,9 +245,16 @@ export function ShareFolder(props: {
           </Button>
         </div>
         <Show when={publicAllowed()}>
-          <details class="text-sm" onToggle={(event) => setHandoffOpen(event.currentTarget.open)}>
+          <details
+            class="text-sm"
+            open={handoffOpen()}
+            onToggle={(event) => setHandoffOpen(event.currentTarget.open)}
+          >
             <summary class="cursor-pointer text-muted-foreground hover:text-foreground">
               Handoff note and file requests
+              <Show when={received() > 0}>
+                <span class="text-amber-700 dark:text-amber-300"> · {received()} to review</span>
+              </Show>
             </summary>
             <Show when={handoffOpen()}>
               <FolderHandoff

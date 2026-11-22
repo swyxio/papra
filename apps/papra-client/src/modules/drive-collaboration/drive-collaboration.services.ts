@@ -108,3 +108,20 @@ export function folderIsDescendant(
   }
   return false;
 }
+
+export const receivedFilesQueryKey = (organizationId: string) => [
+  'organizations',
+  organizationId,
+  'received-files',
+];
+// Guest files awaiting review in a folder and its direct children. Empty for non-reviewers.
+export const receivedFilesQuery = (organizationId: string, folderId: string) => ({
+  queryKey: [...receivedFilesQueryKey(organizationId), folderId],
+  queryFn: async () =>
+    apiClient<{ folders: { id: string; count: number }[] }>({
+      path: `${driveBase(organizationId)}/folders/${folderId}/received-files`,
+      retry: 0,
+    }),
+  staleTime: 30_000,
+  refetchOnWindowFocus: 'always' as const,
+});
