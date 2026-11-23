@@ -1121,6 +1121,75 @@ test('a folder link grants anonymous, read-only access to the current unrestrict
   expect((await request(exactDownload)).status).toBe(404);
 });
 
+test('owners can decline a received guest file, which removes its bytes', async () => {
+  const { DB, env, request } = await fixture();
+  env.TRANSFER_JOBS =
+    env.VIDEO_JOBS =
+    env.TEXT_JOBS =
+    env.SEARCH_JOBS =
+    env.JOBS =
+      {
+        sendBatch: async () => {},
+      } as unknown as Queue;
+  const guestRow = (id: string, status: string) =>
+    DB.prepare(
+      `INSERT INTO folder_guest_uploads(id,folder_id,organization_id,user_id,uploader,file_name,mime_type,size,storage_key,status,created_at,updated_at)
+      VALUES(?,'handoff','team',NULL,'Guest',?,'text/plain',5,?,?,1,1)`,
+    ).bind(id, `${id}.txt`, `guest/${id}`, status);
+  await DB.batch([
+    DB.prepare(
+      "INSERT INTO folders(id,organization_id,parent_id,name,created_at,updated_at) VALUES('handoff','team','fld_home_team','Handoff',1,1)",
+    ),
+    guestRow('gu_spam', 'received'),
+    guestRow('gu_keep', 'received'),
+    guestRow('gu_race', 'received'),
+  ]);
+  await Promise.all(
+    ['gu_spam', 'gu_keep', 'gu_race'].map(async (id) => env.FILES.put(`guest/${id}`, 'hello')),
+  );
+  const inbox = '/api/organizations/team/folders/handoff/share-links/inbox';
+  const counts = '/api/organizations/team/folders/fld_home_team/received-files';
+  expect(await (await request(counts)).json()).toEqual({ folders: [{ id: 'handoff', count: 3 }] });
+
+  expect((await request(`${inbox}/gu_spam/decline`, 'POST', undefined, 'member')).status).toBe(403);
+  expect((await request(`${inbox}/gu_spam/decline`, 'POST', undefined, 'outsider')).status).toBe(
+    403,
+  );
+  expect(await env.FILES.head('guest/gu_spam')).not.toBeNull();
+
+  expect((await request(`${inbox}/gu_spam/decline`, 'POST')).status).toBe(204);
+  expect(await env.FILES.head('guest/gu_spam')).toBeNull();
+  expect(
+    await DB.prepare("SELECT 1 FROM folder_guest_uploads WHERE id='gu_spam'").first(),
+  ).toBeNull();
+  expect((await request(`${inbox}/gu_spam/decline`, 'POST')).status).toBe(404);
+  expect((await request(`${inbox}/gu_spam/accept`, 'POST')).status).toBe(404);
+  expect((await request(`${inbox}/gu_spam/download`)).status).toBe(404);
+
+  // An added file can no longer be declined, and its bytes stay put.
+  expect((await request(`${inbox}/gu_keep/accept`, 'POST')).status).toBe(204);
+  expect((await request(`${inbox}/gu_keep/decline`, 'POST')).status).toBe(409);
+  expect(await env.FILES.head('guest/gu_keep')).not.toBeNull();
+
+  // Racing accept and decline leaves exactly one outcome: a document with bytes, or neither.
+  const [accepted, declined] = await Promise.all([
+    request(`${inbox}/gu_race/accept`, 'POST'),
+    request(`${inbox}/gu_race/decline`, 'POST'),
+  ]);
+  const doc = await DB.prepare("SELECT 1 FROM documents WHERE id='doc_gu_race'").first();
+  const bytes = await env.FILES.head('guest/gu_race');
+  if (doc) {
+    expect([accepted.status, declined.status]).toEqual([204, 409]);
+    expect(bytes).not.toBeNull();
+  } else {
+    expect([accepted.status, declined.status]).toEqual([409, 204]);
+    expect(bytes).toBeNull();
+  }
+
+  expect(await (await request(inbox)).json()).toEqual({ uploads: [] });
+  expect(await (await request(counts)).json()).toEqual({ folders: [] });
+});
+
 test('handoff metadata, stored previews, and received files follow folder access', async () => {
   const { DB, env, request } = await fixture();
   await DB.batch([
