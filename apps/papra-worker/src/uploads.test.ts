@@ -43,6 +43,7 @@ vi.mock('./jobs', async (importOriginal) => ({
 }));
 const instances: Miniflare[] = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
   vi.clearAllMocks();
   for (const instance of instances.splice(0)) await instance.dispose();
 });
@@ -121,6 +122,39 @@ async function fixture() {
       app.request(`/api/share-links/${token}/document/file`, {}, env),
   };
 }
+test('upload owners can log validated browser transfer failures without logging extra payload fields', async () => {
+  const f = await fixture();
+  const response = await f.call('', 'POST', {
+    fileName: 'private.mp4',
+    folderId: 'private',
+    fingerprint: 'a'.repeat(64),
+    size: 100,
+  });
+  expect(response.status).toBe(201);
+  const { session } = await response.json<{ session: { id: string } }>();
+  const route = `/${session.id}/transfer-events`;
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const event = {
+    outcome: 'failed',
+    reason: 'http',
+    partNumber: 1,
+    attempt: 4,
+    bytesUploaded: 60,
+    bytesConfirmed: 0,
+    partBytesUploaded: 60,
+    msSinceLastProgress: 243,
+    httpStatus: 502,
+  };
+  f.user.userId = 'other';
+  expect((await f.call(route, 'POST', event)).status).toBe(404);
+  f.user.userId = 'writer';
+  expect((await f.call(route, 'POST', { ...event, bytesUploaded: 101 })).status).toBe(400);
+  expect((await f.call(route, 'POST', { ...event, attempt: 2 })).status).toBe(400);
+  expect((await f.call(route, 'POST', { ...event, fileName: 'private.mp4' })).status).toBe(204);
+  expect(warn.mock.calls).toEqual([
+    [{ event: 'upload_transfer', uploadSessionId: session.id, mode: 'single', ...event }],
+  ]);
+});
 test('folder members can see unfinished upload reports only in folders they can read', async () => {
   const f = await fixture();
   const begin = async (fileName: string, folderId: string, share: boolean) => {

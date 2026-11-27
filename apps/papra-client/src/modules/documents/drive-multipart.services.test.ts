@@ -25,6 +25,7 @@ test('reload/reselection resumes authoritative completed parts without resending
   const sent: number[] = [];
   let interrupted = true;
   api.mockImplementation(async ({ method, path, body }) => {
+    if (path.endsWith('/transfer-events')) return;
     if (method === 'POST' && path.endsWith('/uploads'))
       return { session: { id: '1', partSize, documentId: 'doc' } };
     if (method === 'GET')
@@ -80,6 +81,21 @@ test('reload/reselection resumes authoritative completed parts without resending
   expect(error).toBeInstanceOf(Error);
   expect(completed.has(1)).toBe(true);
   expect(completed.has(3)).toBe(true);
+  expect(
+    api.mock.calls
+      .filter(([request]) => request.path.endsWith('/transfer-events'))
+      .map(([request]) => request.body),
+  ).toEqual(
+    ['retry', 'retry', 'retry', 'failed'].map((outcome, index) =>
+      expect.objectContaining({
+        attempt: index + 1,
+        outcome,
+        reason: 'network',
+        partNumber: 2,
+        partBytesUploaded: 0,
+      }),
+    ),
+  );
   interrupted = false;
   sent.length = 0;
   vi.useRealTimers();
@@ -394,6 +410,7 @@ test('a PUT with no upload progress for the stall window is aborted and resent',
   api.mockImplementation(async ({ method, path }) => {
     if (method === 'POST' && path.endsWith('/uploads')) return { session };
     if (method === 'GET') return { session, parts: [] };
+    if (path.endsWith('/transfer-events')) throw new Error('Diagnostics unavailable');
     if (path.endsWith('/complete'))
       return { document: { id: 'doc', organizationId: 'org', createdAt: 0, updatedAt: 0 } };
     throw new Error('Unexpected request');
@@ -412,8 +429,10 @@ test('a PUT with no upload progress for the stall window is aborted and resent',
       this.onabort?.();
     }
     send(blob: Blob) {
-      // The first connection is dead: it never reports progress or completes.
-      if (++sends === 1) return;
+      if (++sends === 1) {
+        this.upload.onprogress?.({ loaded: 2 });
+        return;
+      }
       queueMicrotask(() => {
         this.upload.onprogress?.({ loaded: blob.size });
         this.onload?.();
@@ -430,4 +449,27 @@ test('a PUT with no upload progress for the stall window is aborted and resent',
   const { document } = await upload;
   expect(document.id).toBe('doc');
   expect(sends).toBe(2);
+  const events = api.mock.calls
+    .map(([request]) => request)
+    .filter((request) => request.path.endsWith('/transfer-events'));
+  expect(events).toEqual([
+    expect.objectContaining({
+      method: 'POST',
+      path: '/api/organizations/org/uploads/stall/transfer-events',
+      redirectOnUnauthorized: false,
+      keepalive: true,
+      retry: 0,
+      body: {
+        outcome: 'retry',
+        reason: 'stall',
+        partNumber: 1,
+        attempt: 1,
+        bytesUploaded: 2,
+        bytesConfirmed: 0,
+        partBytesUploaded: 2,
+        msSinceLastProgress: 65_000,
+        httpStatus: undefined,
+      },
+    }),
+  ]);
 });

@@ -13,6 +13,7 @@ import { shareUrl, reserveUploadShare } from './share-urls';
 import { s3, parts } from './storage';
 import { initialVersionJobs, dispatchVersionJobs } from './jobs';
 import { HTTPException } from 'hono/http-exception';
+import { bodyLimit } from 'hono/body-limit';
 
 const base = '/api/organizations/:org/uploads';
 const SINGLE_UPLOAD_BYTES = 32 * 1024 ** 2;
@@ -435,6 +436,63 @@ export function registerUploadRoutes(app: App) {
       )
         .bind(b.bytes, Date.now(), b.interrupted ? 1 : 0, u.id)
         .run();
+    return c.body(null, 204);
+  });
+  app.post(`${base}/:upload/transfer-events`, bodyLimit({ maxSize: 1024 }), async (c) => {
+    const u = await owned(c.env, c.get('identity'), c.req.param('org'), c.req.param('upload'));
+    const {
+      outcome,
+      reason,
+      partNumber,
+      attempt,
+      bytesUploaded,
+      bytesConfirmed,
+      partBytesUploaded,
+      msSinceLastProgress,
+      httpStatus,
+    } = (await c.req.json().catch(() => null)) ?? {};
+    const partCount = single(u) ? 1 : Math.ceil(u.size / u.part_size);
+    if (
+      !Number.isInteger(partNumber) ||
+      partNumber < 1 ||
+      partNumber > partCount ||
+      !Number.isInteger(attempt) ||
+      attempt < 1 ||
+      attempt > 4 ||
+      outcome !== (attempt < 4 ? 'retry' : 'failed') ||
+      !['stall', 'http', 'network', 'timeout', 'aborted'].includes(reason) ||
+      !Number.isSafeInteger(bytesUploaded) ||
+      bytesUploaded < 0 ||
+      bytesUploaded > u.size ||
+      !Number.isSafeInteger(bytesConfirmed) ||
+      bytesConfirmed < 0 ||
+      !Number.isSafeInteger(partBytesUploaded) ||
+      partBytesUploaded < 0 ||
+      partBytesUploaded > Math.min(u.part_size, u.size - (partNumber - 1) * u.part_size) ||
+      bytesConfirmed + partBytesUploaded > bytesUploaded ||
+      !Number.isSafeInteger(msSinceLastProgress) ||
+      msSinceLastProgress < 0 ||
+      (reason === 'http'
+        ? !Number.isInteger(httpStatus) || httpStatus < 100 || httpStatus > 599
+        : httpStatus !== undefined)
+    ) {
+      throw error(400, 'Invalid upload transfer event');
+    }
+    // eslint-disable-next-line no-console -- Structured upload telemetry for Workers Logs.
+    console.warn({
+      event: 'upload_transfer',
+      uploadSessionId: u.id,
+      mode: single(u) ? 'single' : 'multipart',
+      outcome,
+      reason,
+      partNumber,
+      attempt,
+      bytesUploaded,
+      bytesConfirmed,
+      partBytesUploaded,
+      msSinceLastProgress,
+      ...(httpStatus !== undefined ? { httpStatus } : {}),
+    });
     return c.body(null, 204);
   });
   app.post(`${base}/:upload/parts`, async (c) => {

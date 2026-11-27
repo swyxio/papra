@@ -32,6 +32,19 @@ type Session = {
 };
 export type CompleteUpload = (uploadId: string) => Promise<{ document: AsDto<Document> }>;
 type Saved = { session: Session; hashes: Record<string, string> };
+class UploadPutError extends Error {
+  constructor(
+    readonly reason: 'stall' | 'http' | 'network' | 'timeout' | 'aborted',
+    readonly msSinceLastProgress: number,
+    readonly httpStatus?: number,
+  ) {
+    super(
+      reason === 'http'
+        ? `Upload failed (${httpStatus})`
+        : 'Transfer interrupted. Reload and reselect this file to resume.',
+    );
+  }
+}
 const hex = (buffer: ArrayBuffer) =>
   Array.from(new Uint8Array(buffer), (v) => v.toString(16).padStart(2, '0')).join('');
 const hash = async (blob: Blob) =>
@@ -225,6 +238,27 @@ async function transfer(
   let next = 1;
   let stopped = false;
   const controllers = new Set<XMLHttpRequest>();
+  const logPutFailure = (error: unknown, partNumber: number, attempt: number) => {
+    if (stopped || !(error instanceof UploadPutError)) return;
+    void apiClient({
+      method: 'POST',
+      path: `${path}/transfer-events`,
+      body: {
+        outcome: attempt < 3 ? 'retry' : 'failed',
+        reason: error.reason,
+        partNumber,
+        attempt: attempt + 1,
+        bytesUploaded: reportedBytes,
+        bytesConfirmed: finished,
+        partBytesUploaded: active.get(partNumber) ?? 0,
+        msSinceLastProgress: error.msSinceLastProgress,
+        httpStatus: error.httpStatus,
+      },
+      redirectOnUnauthorized: false,
+      keepalive: true,
+      retry: 0,
+    }).catch(() => {});
+  };
   const send = async (url: string, blob: Blob, n: number, headers: Record<string, string> = {}) =>
     limitUploadTransfer(async () =>
       withUploadSlot(
@@ -241,30 +275,42 @@ async function transfer(
             xhr.timeout = 15 * 60 * 1000;
             // A dead connection never fires progress; abort it so the part is retried on a fresh one.
             let lastProgress = Date.now();
+            let stalled = false;
             const watchdog = setInterval(() => {
-              if (Date.now() - lastProgress > UPLOAD_STALL_MS) xhr.abort();
+              if (Date.now() - lastProgress > UPLOAD_STALL_MS) {
+                stalled = true;
+                xhr.abort();
+              }
             }, 5000);
+            const cleanUp = () => {
+              controllers.delete(xhr);
+              clearInterval(watchdog);
+            };
+            const fail = (reason: UploadPutError['reason'], httpStatus?: number) => {
+              cleanUp();
+              reject(
+                new UploadPutError(reason, Math.max(0, Date.now() - lastProgress), httpStatus),
+              );
+            };
             xhr.upload.onprogress = (e) => {
+              if (e.loaded <= (active.get(n) ?? 0)) return;
               lastProgress = Date.now();
               active.set(n, e.loaded);
               report();
             };
             xhr.onload = () => {
-              controllers.delete(xhr);
-              clearInterval(watchdog);
-              if (xhr.status >= 200 && xhr.status < 300) resolve();
-              else reject(new Error(`Upload failed (${xhr.status})`));
+              if (xhr.status >= 200 && xhr.status < 300) {
+                cleanUp();
+                resolve();
+              } else if (xhr.status) {
+                fail('http', xhr.status);
+              } else {
+                fail('network');
+              }
             };
-            xhr.onerror =
-              xhr.ontimeout =
-              xhr.onabort =
-                () => {
-                  controllers.delete(xhr);
-                  clearInterval(watchdog);
-                  reject(
-                    new Error('Transfer interrupted. Reload and reselect this file to resume.'),
-                  );
-                };
+            xhr.onerror = () => fail('network');
+            xhr.ontimeout = () => fail('timeout');
+            xhr.onabort = () => fail(stalled ? 'stall' : 'aborted');
             xhr.send(blob);
           }),
       ),
@@ -316,6 +362,7 @@ async function transfer(
         await send(state.session.uploadUrl, file, 1, state.session.uploadHeaders);
         break;
       } catch (error) {
+        logPutFailure(error, 1, attempt);
         active.delete(1);
         report();
         if (attempt >= 3) {
@@ -350,6 +397,7 @@ async function transfer(
           success = true;
           break;
         } catch (error) {
+          logPutFailure(error, n, attempt);
           active.delete(n);
           report();
           if (attempt === 3) throw error;
