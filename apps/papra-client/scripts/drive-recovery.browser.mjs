@@ -77,6 +77,7 @@ try {
   let uploadsListed = 0;
   const completionStatuses = [];
   const statusResponses = [];
+  const transferEvents = [];
   uploader.on('requestfailed', (request) => {
     if (new URL(request.url()).pathname === '/test-storage/stalled') {
       firstPutAborted = true;
@@ -227,6 +228,11 @@ try {
         },
       });
     }
+    if (path === '/api/organizations/org_test/uploads/upload_fixture/transfer-events') {
+      assert.equal(method, 'POST');
+      transferEvents.push(request.postDataJSON());
+      return route.fulfill({ status: 204 });
+    }
     if (path.endsWith('/uploads/upload_fixture')) {
       const status =
         completionStatuses.length === 4 && statusResponses.filter((item) => item === 502).length < 2
@@ -370,6 +376,18 @@ try {
   await uploader.clock.fastForward(10_000);
   await expect.poll(() => firstPutAborted).toBe(true);
   await expect.poll(() => putCalls).toBe(2);
+  await expect.poll(() => transferEvents.length).toBe(1);
+  expect(transferEvents[0]).toEqual({
+    outcome: 'retry',
+    reason: 'stall',
+    partNumber: 1,
+    attempt: 1,
+    bytesUploaded: 0,
+    bytesConfirmed: 0,
+    partBytesUploaded: 0,
+    msSinceLastProgress: expect.any(Number),
+  });
+  assert.ok(transferEvents[0].msSinceLastProgress > 60_000);
   process.stdout.write(
     'Chrome aborted a stalled PUT after the 60-second threshold and resent the original bytes.\n',
   );
